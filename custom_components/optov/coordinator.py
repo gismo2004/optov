@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import logging
+import re
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -24,7 +25,9 @@ from .const import (
     CONF_ENABLE_DIAGNOSTICS,
     CONF_ENABLE_EXPERT,
     CONF_HOST,
+    CONF_INSTANCE,
     CONF_LANGUAGE,
+    CONF_PROXY_NAME,
     CONF_SYNC_CLOCK,
     DEFAULT_ENABLE_CODING2,
     DEFAULT_ENABLE_COMMISSIONING,
@@ -179,6 +182,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # This controller's catalog. Held here rather than as a module global so two hubs can
         # use two different catalogs; every catalog query is given it explicitly.
         self.db_path: str | None = None
+        # See stable_id(). Settled once the node has answered, before any entity is built.
+        self._stable_id: str | None = None
         self._language = config_entry.options.get(
             CONF_LANGUAGE,
             config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
@@ -336,12 +341,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Build clean DeviceInfo
         host = self.config_entry.data.get(CONF_HOST, "")
+        self._stable_id = self._compute_stable_id()
+
         # Just the product name. Home Assistant composes what a card shows from the device
         # chain -- parent device, then device, then entity -- so anything added here is
         # repeated on every label below it. A second controller is told apart by renaming it,
         # which is what the device rename in the interface is for.
         self.device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.config_entry.entry_id)},
+            identifiers={(DOMAIN, self.stable_id)},
             name=self.profile.device_name,
             manufacturer="Viessmann",
             model=self.profile.model,
@@ -415,7 +422,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         via_device_id = parent_dev.id if parent_dev else None
 
         info: DeviceInfo = DeviceInfo(
-            identifiers={(DOMAIN, f"{self.config_entry.entry_id}_{circuit}")},
+            identifiers={(DOMAIN, f"{self.stable_id}_{circuit}")},
             # The circuit alone. `via_device` puts this under the controller, and Home
             # Assistant prepends the parent's name itself; repeating it here is what made a
             # card read "<product> <product> Warmwasser WW Temperatur Oben".
@@ -442,7 +449,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # it comes from translations/<language>.json and follows the Home Assistant language,
         # not the catalog language chosen for datapoint names.
         return DeviceInfo(
-            identifiers={(DOMAIN, f"{self.config_entry.entry_id}_gateway")},
+            identifiers={(DOMAIN, f"{self.stable_id}_gateway")},
             translation_key="gateway",
             manufacturer="ESPHome",
             model=f"Optolink P300 Bridge ({model_name})",
@@ -450,6 +457,38 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             connections=connections,
             configuration_url=f"http://{host}" if host else None,
         )
+
+    @property
+    def stable_id(self) -> str:
+        """The prefix of every entity's unique id, and the reason they survive a reinstall.
+
+        Home Assistant keeps a removed entity as a tombstone for thirty days and restores it --
+        its enabled state, area, custom name, hidden flag, labels -- when an entity with the
+        same unique id reappears. Matching is on the unique id alone, so anything in it that
+        changes between installations throws all of that away. The config entry id used to be
+        the prefix, and a new entry gets a new one, so removing and re-adding the integration
+        silently lost every manual change.
+
+        What goes in instead is the name of the ESPHome node and of its serial proxy. Both are
+        written by hand in the node's own configuration, so they survive the ESP being replaced
+        -- flash the same configuration and the entities come back -- which the hardware's MAC
+        address would not. An unnamed proxy falls back to its port index, which is stable unless
+        the ports are reordered; naming it removes even that.
+
+        The config entry id remains the last resort, for a node that never answered. Those
+        entities behave as they did before: they work, but they do not survive a reinstall.
+        """
+        return self._stable_id or self.config_entry.entry_id
+
+    def _compute_stable_id(self) -> str:
+        """Build the prefix described in stable_id()."""
+        node = getattr(self.client.esphome_info, "name", None)
+        if not node:
+            return self.config_entry.entry_id
+        proxy = (self.config_entry.data.get(CONF_PROXY_NAME) or "").strip()
+        instance = self.config_entry.data.get(CONF_INSTANCE, 0)
+        port = _slug(proxy) if proxy else f"port{instance}"
+        return f"{_slug(node)}_{port}"
 
     async def _probe_equipment(
         self, targets: list[dict[str, Any]], probed_values: dict[int, int]
@@ -615,7 +654,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if item.get("enabled_by_default", True):
             return True
         registry = er.async_get(self.hass)
-        unique_id = f"{self.config_entry.entry_id}_{item['id']}"
+        unique_id = f"{self.stable_id}_{item['id']}"
         entity_id = registry.async_get_entity_id(domain, DOMAIN, unique_id)
         if entity_id is None:
             return False
@@ -1455,7 +1494,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         def _disable(domain: str, item_id: str) -> bool:
             entity_id = registry.async_get_entity_id(
-                domain, DOMAIN, f"{self.config_entry.entry_id}_{item_id}"
+                domain, DOMAIN, f"{self.stable_id}_{item_id}"
             )
             if not entity_id:
                 return False
@@ -1946,6 +1985,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             current.append(new_window)
         return await self.async_set_day_schedule(key, day_idx, current)
+
+
+def _slug(text: str) -> str:
+    """Lower-case, safe for an identifier: letters, digits and single underscores."""
+    return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", text.strip().lower())).strip(
+        "_"
+    )
 
 
 @dataclass

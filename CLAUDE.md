@@ -93,6 +93,22 @@ upload and on every setup, in both directions, so an old catalog under a new int
 new catalog under an old one each get a message naming the side that is behind. Raise it only
 together with the compiler's constant, and only when an older catalog would actually be wrong.
 
+## Identity
+
+Every entity's unique id and every device identifier is prefixed with
+`OptolinkCoordinator.stable_id`, which is the ESPHome node name and the serial proxy name, both
+written by hand in the node's configuration. **Nothing derived from the config entry may go into
+an identity.** Home Assistant keeps a removed entity for thirty days and restores its enabled
+state, area, custom name, hidden flag and labels when the same unique id reappears; a config
+entry id is regenerated on every re-add, so using it discarded all of that silently. The MAC
+address was rejected for the same class of reason: it does not survive replacing the hardware,
+whereas a name in a configuration file does.
+
+`_async_migrate_identity` moves an installation off the old prefix, once. Leave it in place.
+
+Two entries must not produce the same stable id. The config flow already refuses a proxy that
+another entry uses, and two nodes cannot share a name on one network.
+
 ## Ground rules
 
 **Comments explain behaviour and rationale, never history.** Say what the protocol or the

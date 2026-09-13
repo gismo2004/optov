@@ -133,6 +133,24 @@ serial_proxy:
     uart_id: optolink_uart_2
 ```
 
+### Why the names in this file matter
+
+The `esphome: name:` of the node, and the `name:` of each serial proxy, are what OptoV builds
+its entity identities from. That has one consequence worth knowing before you start.
+
+**Your customisations survive a reinstall.** Enable a few extra entities by hand, put a device
+in an area, rename something: remove OptoV and add it again, and Home Assistant restores all of
+it, because the identities do not change. They are yours, written in the file above, rather than
+anything Home Assistant generated. If the ESP32 itself dies, flash the replacement with the same
+configuration and the new hardware picks up exactly where the old one left off.
+
+**The other side of the same coin:** renaming the node, or renaming a proxy, changes those
+identities. Home Assistant then treats the entities as new ones, and manual enabling, areas and
+custom names are lost. Pick names you are happy with before you build a dashboard on them.
+
+An unnamed proxy falls back to its position in the list, which is stable until you reorder the
+list. Giving every proxy a `name:` removes that last bit of fragility, and costs one line.
+
 OptoV reads the proxy name and uses it to distinguish the devices, sub-devices, and integration
 titles in Home Assistant.
 

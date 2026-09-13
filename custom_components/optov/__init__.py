@@ -142,6 +142,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
     )
 
     _async_update_title(hass, entry, coordinator)
+    _async_migrate_identity(hass, entry, coordinator)
     _async_reconcile_registry(hass, entry, coordinator)
     await _async_register_frontend(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -229,6 +230,60 @@ def _async_update_title(
 
 
 @callback
+def _async_migrate_identity(
+    hass: HomeAssistant, entry: OptolinkConfigEntry, coordinator: OptolinkCoordinator
+) -> None:
+    """Move entities and devices off the config entry id and onto the stable id.
+
+    Identity used to be prefixed with the config entry id, which is regenerated whenever the
+    integration is removed and added again. Home Assistant matches a returning entity to what
+    it remembers -- enabled state, area, custom name, hidden flag, labels -- by unique id
+    alone, so that prefix quietly discarded all of it on every reinstall. See
+    OptolinkCoordinator.stable_id for what replaced it.
+
+    This renames what is already in the registries, once. Without it the fix would itself
+    orphan every entity it is meant to protect. Doing nothing is correct and cheap on every
+    later start, and for an installation that has no stable id to move to.
+    """
+    stable = coordinator.stable_id
+    if stable == entry.entry_id:
+        return
+
+    old_prefix = f"{entry.entry_id}_"
+    device_reg = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(device_reg, entry.entry_id):
+        renamed = {
+            (
+                domain,
+                stable + identifier[len(entry.entry_id) :]
+                if domain == DOMAIN
+                and (identifier == entry.entry_id or identifier.startswith(old_prefix))
+                else identifier,
+            )
+            for domain, identifier in device.identifiers
+        }
+        if renamed != device.identifiers:
+            device_reg.async_update_device(device.id, new_identifiers=renamed)
+
+    entity_reg = er.async_get(hass)
+    moved = 0
+    for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
+        if not reg_entry.unique_id.startswith(old_prefix):
+            continue
+        new_unique_id = f"{stable}_{reg_entry.unique_id[len(old_prefix) :]}"
+        if entity_reg.async_get_entity_id(reg_entry.domain, DOMAIN, new_unique_id):
+            # Something already holds the new id; leave the old one rather than collide.
+            continue
+        entity_reg.async_update_entity(reg_entry.entity_id, new_unique_id=new_unique_id)
+        moved += 1
+    if moved:
+        _LOGGER.info(
+            "Moved %d entities onto the stable identity %s; they now survive a reinstall",
+            moved,
+            stable,
+        )
+
+
 def _async_reconcile_registry(
     hass: HomeAssistant, entry: OptolinkConfigEntry, coordinator: OptolinkCoordinator
 ) -> None:
@@ -275,16 +330,17 @@ def _async_reconcile_registry(
     live_circuits = set(profile.circuits) | {"gateway"}
     for dev in dr.async_entries_for_config_entry(device_reg, entry.entry_id):
         for domain, identifier in dev.identifiers:
-            prefix = f"{entry.entry_id}_"
+            device_prefix = f"{coordinator.stable_id}_"
             if (
                 domain == DOMAIN
-                and identifier.startswith(prefix)
-                and identifier[len(prefix) :] not in live_circuits
+                and identifier.startswith(device_prefix)
+                and identifier[len(device_prefix) :] not in live_circuits
             ):
                 _LOGGER.info("Removing circuit device %s", dev.name)
                 device_reg.async_remove_device(dev.id)
 
     # Every entity the profile produces, keyed the way the registry keys them.
+    prefix = f"{coordinator.stable_id}_"
     expected: dict[tuple, dict[str, Any] | None] = {}
     for platform, domain in (
         ("sensors", "sensor"),
@@ -294,11 +350,11 @@ def _async_reconcile_registry(
         ("switches", "switch"),
     ):
         for item in getattr(profile, platform, []):
-            expected[(domain, f"{entry.entry_id}_{item['id']}")] = item
+            expected[(domain, f"{prefix}{item['id']}")] = item
     for key in profile.schedules:
-        expected[("sensor", f"{entry.entry_id}_schaltzeiten_{key}")] = None
+        expected[("sensor", f"{prefix}schaltzeiten_{key}")] = None
     for suffix in (*GATEWAY_SENSORS, FAULT_HISTORY_SENSOR):
-        expected[("sensor", f"{entry.entry_id}_{suffix}")] = None
+        expected[("sensor", f"{prefix}{suffix}")] = None
 
     # Which entities the integration itself last had switched on. Home Assistant records
     # nothing to say who enabled an entity -- one the user switched on by hand looks exactly

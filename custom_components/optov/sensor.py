@@ -174,7 +174,7 @@ class OptolinkScheduleSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntit
         self._key = key
         self._cfg = sched_cfg
         self._attr_name = sched_cfg.get("name") or key
-        self._attr_unique_id = f"{entry.entry_id}_schaltzeiten_{key}"
+        self._attr_unique_id = f"{coordinator.stable_id}_schaltzeiten_{key}"
         self._attr_device_info = coordinator.get_device_info(sched_cfg.get("circuit"))
         self._base_address = parse_address(sched_cfg["address"])
 
@@ -236,7 +236,7 @@ class OptolinkBusLoadSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
 
     def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_bus_load"
+        self._attr_unique_id = f"{coordinator.stable_id}_bus_load"
         self._attr_device_info = coordinator.get_gateway_device_info()
 
     @property
@@ -279,7 +279,7 @@ class OptolinkPollDurationSensor(CoordinatorEntity[OptolinkCoordinator], SensorE
 
     def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_poll_duration"
+        self._attr_unique_id = f"{coordinator.stable_id}_poll_duration"
         self._attr_device_info = coordinator.get_gateway_device_info()
 
     @property
@@ -312,7 +312,7 @@ class OptolinkActiveChannelsSensor(
 
     def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_active_channels"
+        self._attr_unique_id = f"{coordinator.stable_id}_active_channels"
         self._attr_device_info = coordinator.get_gateway_device_info()
 
     @property
@@ -338,7 +338,7 @@ class OptolinkLatencySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
 
     def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_avg_response_time"
+        self._attr_unique_id = f"{coordinator.stable_id}_avg_response_time"
         self._attr_device_info = coordinator.get_gateway_device_info()
 
     @property
@@ -371,7 +371,7 @@ class OptolinkDatapointRateSensor(CoordinatorEntity[OptolinkCoordinator], Sensor
 
     def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_datapoint_rate"
+        self._attr_unique_id = f"{coordinator.stable_id}_datapoint_rate"
         self._attr_device_info = coordinator.get_gateway_device_info()
 
     @property
@@ -402,7 +402,7 @@ class OptolinkErrorHistorySensor(CoordinatorEntity[OptolinkCoordinator], SensorE
         self, coordinator: OptolinkCoordinator, entry: ConfigEntry, empty_text: str
     ) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_fehlerhistorie"
+        self._attr_unique_id = f"{coordinator.stable_id}_fehlerhistorie"
         self._attr_device_info = coordinator.get_device_info(None)
         # The one state this integration words itself; every other state is catalog text.
         # Taken from the integration's translations in the user's Home Assistant language.
