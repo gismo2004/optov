@@ -1,4 +1,7 @@
-<p align="center"><img src="brand/logo.svg" alt="OptoV" width="420"></p>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/gismo2004/optov/main/brand/logo.png"
+       alt="OptoV" width="420">
+</p>
 
 # OptoV
 
