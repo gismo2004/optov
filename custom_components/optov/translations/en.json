@@ -86,6 +86,9 @@
     }
   },
   "device": {
+    "controller": {
+      "name": "Controller"
+    },
     "gateway": {
       "name": "Optical interface"
     }

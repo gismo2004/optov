@@ -93,6 +93,18 @@ upload and on every setup, in both directions, so an old catalog under a new int
 new catalog under an old one each get a message naming the side that is behind. Raise it only
 together with the compiler's constant, and only when an older catalog would actually be wrong.
 
+## Device names
+
+Every device is named after **what it is**, not after the product: `Controller`, `Warmwasser`,
+`Heizkreis 1`, `Optical interface`. The controller and the bridge take theirs from
+`translations/<lang>.json` under `device`, the circuits from the catalog's own circuit labels.
+
+The product name is the device `model`, and the variant code is `model_id`, which is what those
+two fields are for. It is also the config entry's title, above all of them. It must not become
+a device name again: Home Assistant builds a card's label from the device chain, so the name of
+the device an entity hangs off is repeated on every one of its entities. Putting the product
+name back on the controller would prefix the several hundred entities that sit directly on it.
+
 ## Identity
 
 Every entity's unique id and every device identifier is prefixed with

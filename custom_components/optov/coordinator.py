@@ -343,15 +343,21 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         host = self.config_entry.data.get(CONF_HOST, "")
         self._stable_id = self._compute_stable_id()
 
-        # Just the product name. Home Assistant composes what a card shows from the device
-        # chain -- parent device, then device, then entity -- so anything added here is
-        # repeated on every label below it. A second controller is told apart by renaming it,
-        # which is what the device rename in the interface is for.
+        # "Controller", like its circuits are "Warmwasser" and its bridge is "Optical
+        # interface": every device here is named after what it is. The product name is not
+        # lost, it is the model and the title of the entry above these devices, and putting
+        # it here instead would prefix all three hundred and sixty-nine entities that hang
+        # directly off this device on every dashboard card.
+        #
+        # The product description is the model, and the code that identifies the variant is
+        # the model id, which is what those two fields are for. Neither affects entity ids;
+        # those come from the profile's model code. See profiles.stable_object_id.
         self.device_info = DeviceInfo(
             identifiers={(DOMAIN, self.stable_id)},
-            name=self.profile.device_name,
+            translation_key="controller",
             manufacturer="Viessmann",
-            model=self.profile.model,
+            model=self.profile.device_name,
+            model_id=self.profile.model,
             sw_version=self.profile.sw_version,
             configuration_url=f"http://{host}" if host else None,
         )
@@ -416,7 +422,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         dev_reg = dr.async_get(self.hass)
         parent_dev = dev_reg.async_get_device_by_identifier(
-            (DOMAIN, self.config_entry.entry_id),
+            (DOMAIN, self.stable_id),
             self.config_entry.entry_id,
         )
         via_device_id = parent_dev.id if parent_dev else None
@@ -428,7 +434,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # card read "<product> <product> Warmwasser WW Temperatur Oben".
             name=circuit_label,
             manufacturer="Viessmann",
-            model=f"{base_model} ({circuit_label})",
+            # The same product and variant as the controller these hang off; the circuit is
+            # the name, so repeating it in the model said nothing.
+            model=self.profile.device_name if self.profile else None,
+            model_id=base_model,
             sw_version=self.profile.sw_version if self.profile else None,
             configuration_url=f"http://{host}" if host else None,
         )

@@ -86,6 +86,9 @@
     }
   },
   "device": {
+    "controller": {
+      "name": "Regelung"
+    },
     "gateway": {
       "name": "Optische Schnittstelle"
     }
