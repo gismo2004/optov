@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/gismo2004/optov/main/brand/logo.png"
+  <img src="https://raw.githubusercontent.com/gismo2004/optov/main/custom_components/optov/brand/logo.png"
        alt="OptoV" width="420">
 </p>
 

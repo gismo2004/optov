@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 256" width="860" height="256">
+  <!--
+    OptoV logo, dark-theme variant: the dark mark with the wordmark in a light ink, so it
+    reads against a dark background. Generated from dark_icon.svg; keep the two in step.
+  -->
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6E86B4"/>
+      <stop offset="1" stop-color="#2E4066"/>
+    </linearGradient>
+    <radialGradient id="glass" cx="50%" cy="38%" r="65%">
+      <stop offset="0" stop-color="#1B2A47"/>
+      <stop offset="0.75" stop-color="#0E1830"/>
+      <stop offset="1" stop-color="#0A1226"/>
+    </radialGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F59E0B"/>
+      <stop offset="0.7" stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#FFE38A"/>
+    </linearGradient>
+    <radialGradient id="focus" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.35" stop-color="#FFE9A8"/>
+      <stop offset="1" stop-color="#FBBF24" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <filter id="softglow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+    <clipPath id="lensclip"><circle cx="128" cy="128" r="98"/></clipPath>
+  </defs>
+
+  <!-- housing ring and the glass -->
+  <circle cx="128" cy="128" r="116" fill="url(#ring)"/>
+  <circle cx="128" cy="128" r="102" fill="#16213A"/>
+  <circle cx="128" cy="128" r="98" fill="url(#glass)"/>
+
+  <!-- the beam, clipped to the glass: a wide glow, the rays, a bright core -->
+  <g clip-path="url(#lensclip)">
+    <polyline points="80,58 128,178 176,58" fill="none" stroke="#FBBF24" stroke-opacity="0.55"
+              stroke-width="46" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+    <polyline points="80,58 128,178 176,58" fill="none" stroke="url(#beam)"
+              stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline points="80,58 128,178 176,58" fill="none" stroke="#FFF3C4" stroke-opacity="0.9"
+              stroke-width="7" stroke-linecap="round" stroke-linejoin="round" filter="url(#softglow)"/>
+    <!-- focal point -->
+    <circle cx="128" cy="178" r="34" fill="url(#focus)"/>
+    <circle cx="128" cy="178" r="7" fill="#FFFFFF"/>
+  </g>
+
+  <!-- glass reflection across the upper half -->
+  <path d="M 44 112 A 84 84 0 0 1 212 112 A 120 60 0 0 0 44 112 Z" fill="url(#gloss)"/>
+
+  <!-- rim highlight -->
+  <circle cx="128" cy="128" r="116" fill="none" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="2"/>
+
+  <!-- wordmark -->
+  <text x="282" y="172" font-family="Montserrat, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="138" font-weight="700" letter-spacing="-4" fill="#E7ECF5">Opto<tspan fill="#F59E0B">V</tspan></text>
+</svg>

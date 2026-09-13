@@ -37,18 +37,29 @@ custom_components/optov/
   entity.py        what every catalog-driven entity shares
   frontend/        the two dashboard cards (one file)
   translations/    the integration's own text, one file per language
+  brand/           the mark and wordmark, SVG sources and PNG renders
 hacs.json          HACS metadata
-brand/             the OptoV mark and wordmark: SVG sources, PNG renders at the sizes the
-                   Home Assistant brands repository takes (icon 256, icon@2x 512, logo)
 work/              git-ignored playground: deployment scripts, scratch data, throwaway probes
 ```
 
+`brand/` sits **inside** the integration on purpose. Since 2026.9 Home Assistant serves an
+integration's own brand images from `<integration>/brand/` before falling back to the brands
+CDN, so the icon in the integrations list, the config flow and the device page all work without
+anything being accepted upstream. It is the presence of the directory that switches this on
+(`Integration.has_branding`), and only these exact names are served: `icon.png`, `logo.png`,
+`icon@2x.png`, `logo@2x.png` and the four `dark_` variants. Sizes follow the brands convention,
+icons square at 256 and 512, logos bounded by 512 and 1024 on the long side, which also makes
+the set ready to submit upstream unchanged.
+
 The mark is ours: the round optical window on the front of a controller, dark glass in a metal
-ring, with a beam of light converging inside it; the two rays make the V. Navy `#16213A` for
-the housing, amber `#F59E0B` for the light, Montserrat Bold for the word. It borrows nothing
-from any manufacturer's identity and must not start to. To change it, edit the SVGs and
-re-render the PNGs (`rsvg-convert`, with the Montserrat font installed); never edit the PNGs.
-`logo.svg` embeds the mark from `icon.svg`; change the icon first and rebuild the logo from it.
+ring, with a beam of light converging inside it; the two rays make the V. Navy `#16213A` for the
+housing, amber `#F59E0B` for the light, Montserrat Bold for the word. It borrows nothing from any
+manufacturer's identity and must not start to.
+
+Four SVG sources, eight PNGs. `logo.svg` embeds the mark from `icon.svg`, and the `dark_`
+variants lighten the housing so the disc still reads on a dark theme. Edit the SVGs and
+re-render with `rsvg-convert` (Montserrat installed); never edit a PNG. Change `icon.svg` first,
+then rebuild the logo from it, and keep the dark pair in step.
 
 Nothing in the repository outside `work/` may reference anything inside it.
 
