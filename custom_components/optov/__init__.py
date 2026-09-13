@@ -356,20 +356,21 @@ def _async_reconcile_registry(
     for suffix in (*GATEWAY_SENSORS, FAULT_HISTORY_SENSOR):
         expected[("sensor", f"{prefix}{suffix}")] = None
 
-    # Which entities the integration itself last had switched on. Home Assistant records
-    # nothing to say who enabled an entity -- one the user switched on by hand looks exactly
-    # like one the integration enabled -- so it is remembered here. Without it, enabling a
-    # single extra datapoint for a dashboard was undone at the next restart.
+    # Home Assistant records nothing about who enabled an entity: one the user switched on by
+    # hand looks exactly like one a tier brought in. Two lists stand in for that.
+    #
+    # `auto_enabled` is what the profile switched on last time, and is the only thing this
+    # integration will ever switch off again. `user_enabled` is what someone switched on by
+    # hand, and is never switched off -- switching a tier on and then off again used to take
+    # those with it, because a tier can make a hand-picked datapoint default-on for a while,
+    # which quietly moved it into the first list.
     previously_auto = set(entry.data.get("auto_enabled") or [])
+    user_enabled = set(entry.data.get("user_enabled") or [])
     auto_enabled = sorted(
         uid
         for (_domain, uid), item in expected.items()
         if item is not None and item.get("enabled_by_default")
     )
-    if auto_enabled != sorted(previously_auto):
-        hass.config_entries.async_update_entry(
-            entry, data={**entry.data, "auto_enabled": auto_enabled}
-        )
     retired = set(entry.data.get("retired_items") or [])
 
     for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
@@ -385,17 +386,28 @@ def _async_reconcile_registry(
         if item is None:
             continue
         updates: dict[str, Any] = {}
-        # Switch on what the profile now enables, unless the controller itself said the
-        # datapoint is absent; switch off only what this integration enabled and a tier has
-        # since taken away.
-        wants_on = bool(item.get("enabled_by_default")) and item["id"] not in retired
+        uid = key[1]
+        default_on = bool(item.get("enabled_by_default"))
+
+        # On, not on by default, and not something this integration switched on: someone did
+        # it by hand. Remembered from here on, so no later tier change takes it away.
+        if (
+            reg_entry.disabled_by is None
+            and not default_on
+            and uid not in previously_auto
+        ):
+            user_enabled.add(uid)
+        # Switched off by hand again: forget it, or it would be switched back on below.
+        if reg_entry.disabled_by == er.RegistryEntryDisabler.USER:
+            user_enabled.discard(uid)
+
+        # Switch on what the profile enables and what the user asked for, unless the
+        # controller itself said the datapoint is absent. Switch off only what this
+        # integration switched on and a tier has since taken away.
+        wants_on = (default_on or uid in user_enabled) and item["id"] not in retired
         if reg_entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION and wants_on:
             updates["disabled_by"] = None
-        elif (
-            reg_entry.disabled_by is None
-            and not item.get("enabled_by_default")
-            and key[1] in previously_auto
-        ):
+        elif reg_entry.disabled_by is None and not wants_on and uid in previously_auto:
             updates["disabled_by"] = er.RegistryEntryDisabler.INTEGRATION
         # Controls versus Configuration is decided at creation only; a reclassified datapoint
         # would otherwise move only for fresh installations.
@@ -413,6 +425,19 @@ def _async_reconcile_registry(
                 updates["device_id"] = device.id
         if updates:
             entity_reg.async_update_entity(reg_entry.entity_id, **updates)
+
+    # Written once, after the loop, because the hand-picked entities are only discovered
+    # while walking it. Only what an entity still in the profile says counts: an entity that
+    # has gone is dropped from both lists rather than remembered forever.
+    known = {uid for _domain, uid in expected}
+    changes: dict[str, Any] = {}
+    if auto_enabled != sorted(previously_auto):
+        changes["auto_enabled"] = auto_enabled
+    kept_user = sorted(user_enabled & known)
+    if kept_user != sorted(entry.data.get("user_enabled") or []):
+        changes["user_enabled"] = kept_user
+    if changes:
+        hass.config_entries.async_update_entry(entry, data={**entry.data, **changes})
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:

@@ -216,6 +216,10 @@ from a dashboard card or service, the updated programme is read back immediately
 | Keep the clock in sync | on | Correct the controller clock from Home Assistant when it drifts |
 | Verbose logging | off | Raise this integration's log level to debug without touching your `logger:` configuration |
 
+Switching a tier on enables its entities; switching it off disables them again. **Entities you
+enabled yourself are left alone.** Enable a single datapoint for a dashboard and it stays,
+through tier changes, restarts and reinstalls, until you disable it yourself.
+
 The integration's own text, this options page, entity names it invents and the dashboard cards,
 follows the Home Assistant language. Catalog text follows the catalog language above. The two
 are independent.
