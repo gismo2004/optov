@@ -24,9 +24,7 @@ from .const import (
     CONF_ENABLE_DIAGNOSTICS,
     CONF_ENABLE_EXPERT,
     CONF_HOST,
-    CONF_INSTANCE,
     CONF_LANGUAGE,
-    CONF_PROXY_NAME,
     CONF_SYNC_CLOCK,
     DEFAULT_ENABLE_CODING2,
     DEFAULT_ENABLE_COMMISSIONING,
@@ -338,16 +336,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Build clean DeviceInfo
         host = self.config_entry.data.get(CONF_HOST, "")
-        proxy_name = self.config_entry.data.get(CONF_PROXY_NAME)
-        instance = self.config_entry.data.get(CONF_INSTANCE, 0)
-        name_suffix = (
-            f" ({proxy_name})"
-            if proxy_name
-            else (f" #{instance}" if instance > 0 else "")
-        )
+        # Just the product name. Home Assistant composes what a card shows from the device
+        # chain -- parent device, then device, then entity -- so anything added here is
+        # repeated on every label below it. A second controller is told apart by renaming it,
+        # which is what the device rename in the interface is for.
         self.device_info = DeviceInfo(
             identifiers={(DOMAIN, self.config_entry.entry_id)},
-            name=f"{self.profile.device_name}{name_suffix}",
+            name=self.profile.device_name,
             manufacturer="Viessmann",
             model=self.profile.model,
             sw_version=self.profile.sw_version,
@@ -410,18 +405,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         circuit_label = circuits.get(circuit, circuit)
 
         host = self.config_entry.data.get(CONF_HOST, "")
-        proxy_name = self.config_entry.data.get(CONF_PROXY_NAME)
-        instance = self.config_entry.data.get(CONF_INSTANCE, 0)
-        name_suffix = (
-            f" ({proxy_name})"
-            if proxy_name
-            else (f" #{instance}" if instance > 0 else "")
-        )
-        base_name = (
-            f"{self.profile.device_name}{name_suffix}"
-            if self.profile
-            else f"Controller{name_suffix}"
-        )
         base_model = self.profile.model if self.profile else "Optolink"
 
         dev_reg = dr.async_get(self.hass)
@@ -433,7 +416,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         info: DeviceInfo = DeviceInfo(
             identifiers={(DOMAIN, f"{self.config_entry.entry_id}_{circuit}")},
-            name=f"{base_name} {circuit_label}",
+            # The circuit alone. `via_device` puts this under the controller, and Home
+            # Assistant prepends the parent's name itself; repeating it here is what made a
+            # card read "<product> <product> Warmwasser WW Temperatur Oben".
+            name=circuit_label,
             manufacturer="Viessmann",
             model=f"{base_model} ({circuit_label})",
             sw_version=self.profile.sw_version if self.profile else None,
@@ -452,14 +438,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         mac = getattr(esp_info, "mac_address", None) if esp_info else None
         connections = {(dr.CONNECTION_NETWORK_MAC, mac)} if mac else None
 
-        proxy_name = self.config_entry.data.get(CONF_PROXY_NAME)
-        instance = self.config_entry.data.get(CONF_INSTANCE, 0)
-        name_suffix = (
-            f" ({proxy_name})"
-            if proxy_name
-            else (f" #{instance}" if instance > 0 else "")
-        )
-
         # The name is the one this integration invents rather than reads from the catalog, so
         # it comes from translations/<language>.json and follows the Home Assistant language,
         # not the catalog language chosen for datapoint names.
@@ -467,7 +445,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             identifiers={(DOMAIN, f"{self.config_entry.entry_id}_gateway")},
             translation_key="gateway",
             manufacturer="ESPHome",
-            model=f"Optolink P300 Bridge ({model_name}){name_suffix}",
+            model=f"Optolink P300 Bridge ({model_name})",
             sw_version=sw_ver,
             connections=connections,
             configuration_url=f"http://{host}" if host else None,
