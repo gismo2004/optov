@@ -1,0 +1,173 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "OptoV",
+        "description": "Pick the ESPHome node that is wired to the controller's Optolink port, or enter the connection by hand.",
+        "data": {
+          "device": "Serial port",
+          "language": "Catalog language (names of datapoints and values)",
+          "scan_interval": "Poll interval (seconds)"
+        }
+      },
+      "manual": {
+        "title": "Connection details",
+        "description": "The ESPHome node's address and its API encryption key.",
+        "data": {
+          "host": "Host or IP address",
+          "port": "Port",
+          "encryption_key": "API encryption key",
+          "language": "Catalog language (names of datapoints and values)",
+          "scan_interval": "Poll interval (seconds)",
+          "instance": "Serial port on the node (0 unless it has several)",
+          "proxy_name": "Serial proxy name (optional, distinguishes identical devices)"
+        }
+      },
+      "catalog": {
+        "title": "Controller catalog",
+        "description": "OptoV needs a controller catalog. It is not shipped with the integration: you build it from your own copy of the controller service software, as described in the README under \"Building the catalog\". Choose one that is already here, or upload a new one.",
+        "data": {
+          "catalog": "Use this catalog",
+          "catalog_file": "Upload a catalog"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the ESPHome node.",
+      "unknown": "Unexpected error.",
+      "catalog_invalid": "That file is not a controller catalog.",
+      "catalog_failed": "The catalog could not be installed. Check the Home Assistant log.",
+      "catalog_missing": "Choose a catalog or upload one.",
+      "catalog_outdated": "That catalog was built by an older version of the compiler than this integration needs. Rebuild it and upload it again.",
+      "catalog_too_new": "That catalog was built by a newer version of the compiler than this integration understands. Update the integration."
+    },
+    "abort": {
+      "already_configured": "This controller is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "OptoV",
+        "description": "Which datapoints become entities, and how the controller is polled.",
+        "data": {
+          "language": "Catalog language (names of datapoints and values)",
+          "enable_diagnostics": "Diagnostics (trending, statistics, diagnosis pages)",
+          "enable_commissioning": "Commissioning (installer settings)",
+          "enable_coding2": "Coding 2 (expert settings)",
+          "enable_expert": "Expert layer",
+          "scan_interval": "Poll interval (seconds)",
+          "sync_clock": "Keep the controller clock in sync with Home Assistant",
+          "debug_logging": "Verbose logging (for troubleshooting)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "bus_load": {
+        "name": "Bus duty cycle"
+      },
+      "poll_duration": {
+        "name": "Poll cycle duration"
+      },
+      "active_channels": {
+        "name": "Polled datapoints"
+      },
+      "avg_response_time": {
+        "name": "Telegram round trip"
+      },
+      "datapoint_rate": {
+        "name": "Datapoint rate"
+      },
+      "error_history": {
+        "name": "Fault history"
+      }
+    }
+  },
+  "device": {
+    "gateway": {
+      "name": "Optical interface"
+    }
+  },
+  "selector": {
+    "day": {
+      "options": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      }
+    },
+    "device": {
+      "options": {
+        "manual": "Enter the connection details by hand"
+      }
+    }
+  },
+  "exceptions": {
+    "catalog_missing": {
+      "message": "No controller catalog was found in {path}. The catalog is built from your own copy of the controller service software and is not shipped with the integration. See the README section \"Building the catalog\", then restart Home Assistant."
+    },
+    "catalog_gone": {
+      "message": "The controller catalog \"{name}\" is no longer in {path}. Put it back under that name, or remove this entry and add it again to choose another catalog."
+    },
+    "catalog_ambiguous": {
+      "message": "There is more than one controller catalog in {path} and this entry does not say which one to use. Remove the entry and add it again; setup will ask which catalog this controller needs."
+    },
+    "catalog_outdated": {
+      "message": "The catalog \"{name}\" has structure version {found}; this integration needs {needed}. Rebuild it with the current compiler and upload it again. See the README section \"Building the catalog\"."
+    },
+    "catalog_too_new": {
+      "message": "The catalog \"{name}\" has structure version {found}, which is newer than the {needed} this integration understands. Update the integration."
+    },
+    "catalog_unreadable": {
+      "message": "The catalog \"{name}\" could not be read as a controller catalog. Rebuild it and upload it again."
+    }
+  },
+  "card": {
+    "title": "Schedule",
+    "no_entity": "No schedule found.",
+    "no_entity_hint": "The OptoV integration publishes one schedule sensor per programme once it has been read from the controller.",
+    "loading": "Reading programme from the controller…",
+    "days_programmed": "{n} of 7 days programmed",
+    "actual": "Actual",
+    "target": "Target",
+    "no_windows": "No switching windows on {day}.",
+    "add_window": "Add switching window ({n}/{max})",
+    "to": "to",
+    "remove": "Remove window",
+    "save": "Save to controller",
+    "saving": "Saving…",
+    "saved": "Saved {day}.",
+    "save_failed": "Saving failed: {err}",
+    "discard": "Discard changes",
+    "unsaved": "Unsaved changes",
+    "invalid_window": "Window {n} ends before it starts.",
+    "editor_actual_entity": "Reading shown in the header (optional)",
+    "editor_demand_entity": "Setpoint shown in the header (optional)",
+    "editor_title": "Title (optional)",
+    "apply_to": "Apply to",
+    "scope_week": "Whole week",
+    "same_as": "Same as {days}",
+    "editor_entities": "Programmes (none selected shows all)",
+    "editor_tab_name": "Tab name",
+    "faults_title": "Fault history",
+    "faults_none": "No entries",
+    "faults_no_entity": "No fault history found. The OptoV integration publishes one per controller.",
+    "faults_count": "{n} entries",
+    "faults_hidden": "{n} hidden",
+    "editor_hide_codes": "Hide these codes",
+    "editor_max": "Entries to show",
+    "editor_entity": "Fault history",
+    "editor_height": "List height (px)"
+  },
+  "text": {
+    "no_faults": "No entries",
+    "dst_mismatch_title": "Controller: daylight-saving settings",
+    "dst_mismatch": "The controller changes over at {configured}, but {zone} changes at {expected}. Each entry reads month/week/weekday, where week 5 means the last one of the month and weekday 7 is Sunday.\n\nThe clock itself is corrected on every poll, so the effect is limited to one poll interval twice a year. To fix it at the source, set the changeover values on the controller, or switch its own changeover off and let Home Assistant keep the time."
+  }
+}

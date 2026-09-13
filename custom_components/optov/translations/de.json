@@ -1,0 +1,173 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "OptoV",
+        "description": "Den ESPHome-Knoten wählen, der an der Optolink-Schnittstelle der Regelung hängt, oder die Verbindung von Hand eingeben.",
+        "data": {
+          "device": "Serieller Port",
+          "language": "Katalogsprache (Namen der Datenpunkte und Werte)",
+          "scan_interval": "Abfrageintervall (Sekunden)"
+        }
+      },
+      "manual": {
+        "title": "Verbindungsdaten",
+        "description": "Adresse des ESPHome-Knotens und sein API-Verschlüsselungsschlüssel.",
+        "data": {
+          "host": "Host oder IP-Adresse",
+          "port": "Port",
+          "encryption_key": "API-Verschlüsselungsschlüssel",
+          "language": "Katalogsprache (Namen der Datenpunkte und Werte)",
+          "scan_interval": "Abfrageintervall (Sekunden)",
+          "instance": "Serieller Port am Knoten (0, sofern es nur einen gibt)",
+          "proxy_name": "Name des seriellen Proxys (optional, unterscheidet baugleiche Geräte)"
+        }
+      },
+      "catalog": {
+        "title": "Regelungs-Katalog",
+        "description": "OptoV benötigt einen Katalog der Regelungen. Er wird nicht mitgeliefert, sondern aus der eigenen Kopie der Regelungs-Servicesoftware erzeugt; siehe README, Abschnitt \"Building the catalog\". Einen vorhandenen auswählen oder einen neuen hochladen.",
+        "data": {
+          "catalog": "Diesen Katalog verwenden",
+          "catalog_file": "Katalog hochladen"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum ESPHome-Knoten fehlgeschlagen.",
+      "unknown": "Unerwarteter Fehler.",
+      "catalog_invalid": "Diese Datei ist kein Regelungs-Katalog.",
+      "catalog_failed": "Der Katalog konnte nicht installiert werden. Siehe Home-Assistant-Protokoll.",
+      "catalog_missing": "Einen Katalog auswählen oder hochladen.",
+      "catalog_outdated": "Dieser Katalog stammt aus einer älteren Version des Erzeugungswerkzeugs als diese Integration benötigt. Neu erzeugen und erneut hochladen.",
+      "catalog_too_new": "Dieser Katalog stammt aus einer neueren Version des Erzeugungswerkzeugs, als diese Integration versteht. Integration aktualisieren."
+    },
+    "abort": {
+      "already_configured": "Diese Regelung ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "OptoV",
+        "description": "Welche Datenpunkte zu Entitäten werden und wie die Regelung abgefragt wird.",
+        "data": {
+          "language": "Katalogsprache (Namen der Datenpunkte und Werte)",
+          "enable_diagnostics": "Diagnose (Trend, Statistik, Diagnoseseiten)",
+          "enable_commissioning": "Inbetriebnahme (Installateur-Einstellungen)",
+          "enable_coding2": "Codierung 2 (Experteneinstellungen)",
+          "enable_expert": "Expertenebene",
+          "scan_interval": "Abfrageintervall (Sekunden)",
+          "sync_clock": "Uhrzeit der Regelung mit Home Assistant synchron halten",
+          "debug_logging": "Ausführliches Protokoll (zur Fehlersuche)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "bus_load": {
+        "name": "Bus-Zeitanteil"
+      },
+      "poll_duration": {
+        "name": "Abfrage-Zykluszeit"
+      },
+      "active_channels": {
+        "name": "Abgefragte Datenpunkte"
+      },
+      "avg_response_time": {
+        "name": "Telegramm-Antwortzeit"
+      },
+      "datapoint_rate": {
+        "name": "Datenpunktrate"
+      },
+      "error_history": {
+        "name": "Fehlerhistorie"
+      }
+    }
+  },
+  "device": {
+    "gateway": {
+      "name": "Optische Schnittstelle"
+    }
+  },
+  "selector": {
+    "day": {
+      "options": {
+        "mon": "Montag",
+        "tue": "Dienstag",
+        "wed": "Mittwoch",
+        "thu": "Donnerstag",
+        "fri": "Freitag",
+        "sat": "Samstag",
+        "sun": "Sonntag"
+      }
+    },
+    "device": {
+      "options": {
+        "manual": "Verbindungsdaten von Hand eingeben"
+      }
+    }
+  },
+  "exceptions": {
+    "catalog_missing": {
+      "message": "In {path} wurde kein Katalog gefunden. Der Katalog wird aus der eigenen Kopie der Regelungs-Servicesoftware erzeugt und nicht mit der Integration ausgeliefert. Siehe README, Abschnitt \"Building the catalog\", danach Home Assistant neu starten."
+    },
+    "catalog_gone": {
+      "message": "Der Regelungs-Katalog \"{name}\" liegt nicht mehr in {path}. Datei unter diesem Namen wieder ablegen, oder diesen Eintrag entfernen und neu anlegen, um einen anderen Katalog zu wählen."
+    },
+    "catalog_ambiguous": {
+      "message": "In {path} liegen mehrere Regelungs-Kataloge, und dieser Eintrag legt nicht fest, welcher gilt. Eintrag entfernen und neu anlegen; die Einrichtung fragt dann nach dem passenden Katalog."
+    },
+    "catalog_outdated": {
+      "message": "Der Katalog \"{name}\" hat Strukturversion {found}, diese Integration benötigt {needed}. Mit dem aktuellen Werkzeug neu erzeugen und hochladen; siehe README, Abschnitt \"Building the catalog\"."
+    },
+    "catalog_too_new": {
+      "message": "Der Katalog \"{name}\" hat Strukturversion {found} und ist damit neuer als die Version {needed}, die diese Integration versteht. Integration aktualisieren."
+    },
+    "catalog_unreadable": {
+      "message": "Der Katalog \"{name}\" konnte nicht als Regelungs-Katalog gelesen werden. Neu erzeugen und erneut hochladen."
+    }
+  },
+  "card": {
+    "title": "Schaltzeiten",
+    "no_entity": "Keine Schaltzeiten gefunden.",
+    "no_entity_hint": "OptoV legt pro Programm einen Schaltzeiten-Sensor an, sobald es von der Regelung gelesen wurde.",
+    "loading": "Programm wird von der Regelung gelesen…",
+    "days_programmed": "{n} von 7 Tagen programmiert",
+    "actual": "Ist",
+    "target": "Soll",
+    "no_windows": "Keine Schaltzeiten am {day}.",
+    "add_window": "Zeitfenster hinzufügen ({n}/{max})",
+    "to": "bis",
+    "remove": "Zeitfenster entfernen",
+    "save": "Auf Regelung speichern",
+    "saving": "Speichert…",
+    "saved": "{day} gespeichert.",
+    "save_failed": "Speichern fehlgeschlagen: {err}",
+    "discard": "Änderungen verwerfen",
+    "unsaved": "Ungespeicherte Änderungen",
+    "invalid_window": "Zeitfenster {n} endet vor seinem Beginn.",
+    "editor_actual_entity": "Istwert in der Kopfzeile (optional)",
+    "editor_demand_entity": "Sollwert in der Kopfzeile (optional)",
+    "editor_title": "Titel (optional)",
+    "apply_to": "Übernehmen für",
+    "scope_week": "Ganze Woche",
+    "same_as": "Gleich wie {days}",
+    "editor_entities": "Programme (nichts gewählt zeigt alle)",
+    "editor_tab_name": "Tab-Beschriftung",
+    "faults_title": "Fehlerhistorie",
+    "faults_none": "Keine Einträge",
+    "faults_no_entity": "Keine Fehlerhistorie gefunden. OptoV legt pro Regelung eine an.",
+    "faults_count": "{n} Einträge",
+    "faults_hidden": "{n} ausgeblendet",
+    "editor_hide_codes": "Diese Codes ausblenden",
+    "editor_max": "Anzahl Einträge",
+    "editor_entity": "Fehlerhistorie",
+    "editor_height": "Listenhöhe (px)"
+  },
+  "text": {
+    "no_faults": "Keine Einträge",
+    "dst_mismatch_title": "Regelung: Zeitumstellung",
+    "dst_mismatch": "Die Regelung stellt um auf {configured}, {zone} stellt jedoch um auf {expected}. Die Angaben lauten Monat/Woche/Wochentag, wobei Woche 5 die letzte des Monats bedeutet und Wochentag 7 der Sonntag ist.\n\nDie Uhrzeit selbst wird bei jeder Abfrage korrigiert, die Auswirkung beschränkt sich also auf ein Abfrageintervall zweimal im Jahr. Dauerhaft behebbar, indem die Umstellwerte an der Regelung gesetzt werden oder ihre eigene Zeitumstellung abgeschaltet und die Uhrzeit Home Assistant überlassen wird."
+  }
+}

@@ -1,0 +1,226 @@
+refresh_all:
+  name: Refresh all values
+  description: >-
+    Read every enabled datapoint on the next poll instead of waiting for its turn in the
+    rotation. Useful straight after changing a setting on the controller itself, since the
+    protocol offers no change notification and a rotating value is otherwise only re-read
+    once per full turn.
+  fields:
+    config_entry_id:
+      name: Controller
+      description: Which controller, when more than one is set up. Optional otherwise.
+      required: false
+      selector:
+        config_entry:
+          integration: optov
+
+sync_clock:
+  name: Set the controller clock
+  description: >-
+    Write this machine's current date and time to the controller. The controller has no time
+    source of its own and every weekly programme is read against its clock, so drift shifts
+    the heating times. Normally this happens by itself; calling the service does it now and
+    regardless of how small the drift is.
+  fields:
+    config_entry_id:
+      name: Controller
+      description: Which controller, when more than one is set up. Optional otherwise.
+      required: false
+      selector:
+        config_entry:
+          integration: optov
+
+read_datapoint:
+  name: Read datapoint
+  description: Read any address from the controller once, outside the regular poll.
+  fields:
+    config_entry_id:
+      name: Controller
+      description: Which controller, when more than one is set up. Optional otherwise.
+      required: false
+      selector:
+        config_entry:
+          integration: optov
+    address:
+      name: Address
+      description: Hex address (e.g. 0x0108) or decimal address.
+      required: true
+      example: "0x0108"
+      selector:
+        text:
+    bytes:
+      name: Byte count
+      description: Number of bytes to read. Leave empty to use the catalog's block length.
+      required: false
+      example: 2
+      selector:
+        number:
+          min: 1
+          max: 64
+
+write_datapoint:
+  name: Write datapoint
+  description: Write raw bytes to an address on the controller.
+  fields:
+    config_entry_id:
+      name: Controller
+      description: Which controller, when more than one is set up. Optional otherwise.
+      required: false
+      selector:
+        config_entry:
+          integration: optov
+    address:
+      name: Address
+      description: Hex address (e.g. 0x2000) or decimal address.
+      required: true
+      example: "0x2000"
+      selector:
+        text:
+    data:
+      name: Data (hex)
+      description: Bytes to write, as hex (e.g. 01 0A).
+      required: true
+      example: "01 0A"
+      selector:
+        text:
+
+read_schedule:
+  name: Read schedule
+  description: >-
+    Re-read a weekly programme from the controller. The programme key is the `schedule`
+    attribute of its sensor; which programmes exist depends on the controller.
+  fields:
+    config_entry_id:
+      name: Controller
+      description: Which controller, when more than one is set up. Optional otherwise.
+      required: false
+      selector:
+        config_entry:
+          integration: optov
+    schedule:
+      name: Programme
+      description: Programme key as shown in the schedule sensor's `schedule` attribute.
+      required: true
+      example: "nku_tagesprogramm_hk1"
+      selector:
+        text:
+
+set_schedule_day:
+  name: Set schedule for one day
+  description: >-
+    Replace all switching windows of one day. The number of windows a day can hold, the
+    time grid and the selectable levels are given by the schedule sensor's
+    `windows_per_day`, `minutes_per_step` and `modes` attributes.
+  fields:
+    config_entry_id:
+      name: Controller
+      description: Which controller, when more than one is set up. Optional otherwise.
+      required: false
+      selector:
+        config_entry:
+          integration: optov
+    schedule:
+      name: Programme
+      description: Programme key as shown in the schedule sensor's `schedule` attribute.
+      required: true
+      example: "nku_tagesprogramm_hk1"
+      selector:
+        text:
+    day:
+      name: Days
+      description: >-
+        One day or several. The controller stores each day separately, so writing the same
+        windows to a group of days is what "Mon-Fri" means; days that already hold exactly
+        these windows are skipped.
+      required: true
+      default: ["mon"]
+      selector:
+        select:
+          multiple: true
+          translation_key: day
+          options:
+            - "mon"
+            - "tue"
+            - "wed"
+            - "thu"
+            - "fri"
+            - "sat"
+            - "sun"
+    windows:
+      name: Switching windows
+      description: >-
+        List of windows with start, end (HH:MM on the programme's time grid, 24:00 allowed
+        as end) and mode, the level number from the sensor's `modes` attribute.
+      required: true
+      example: '[{"start": "05:00", "end": "22:00", "mode": 2}]'
+      selector:
+        object:
+
+set_schedule_window:
+  name: Set one switching window
+  description: Update or add a single switching window of one day.
+  fields:
+    config_entry_id:
+      name: Controller
+      description: Which controller, when more than one is set up. Optional otherwise.
+      required: false
+      selector:
+        config_entry:
+          integration: optov
+    schedule:
+      name: Programme
+      description: Programme key as shown in the schedule sensor's `schedule` attribute.
+      required: true
+      example: "nku_tagesprogramm_hk1"
+      selector:
+        text:
+    day:
+      name: Day
+      description: Day of the week.
+      required: true
+      default: "mon"
+      selector:
+        select:
+          translation_key: day
+          options:
+            - "mon"
+            - "tue"
+            - "wed"
+            - "thu"
+            - "fri"
+            - "sat"
+            - "sun"
+    window:
+      name: Window number
+      description: Position of the window within the day, starting at 1.
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 8
+    start:
+      name: Start
+      description: Start time, HH:MM on a 10-minute grid.
+      required: true
+      default: "06:00"
+      selector:
+        text:
+    end:
+      name: End
+      description: End time, HH:MM on a 10-minute grid, or 24:00.
+      required: true
+      default: "22:00"
+      selector:
+        text:
+    mode:
+      name: Level
+      description: >-
+        Level during the window, as the number from the sensor's `modes` attribute. Ignored
+        by programmes without levels.
+      required: false
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 4

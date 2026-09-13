@@ -1,0 +1,21 @@
+# Python and its tooling
+__pycache__/
+*.pyc
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# No catalog belongs in this repository, under any name. It is built from the vendor's own
+# parameter definitions and every user builds their own; see the README.
+*.db
+*.db-shm
+*.db-wal
+*.db.xz
+
+# Local playground: deployment scripts, scratch data, nothing shippable.
+work/
+
+# Editors
+.vscode/*
+!.vscode/settings.json
+.idea/
