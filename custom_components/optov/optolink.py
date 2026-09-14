@@ -79,6 +79,11 @@ ERR_BAD_RANGE = 0x04
 # support for a controller family that has not been tried.
 MAX_TELEGRAM_PAYLOAD = 56
 
+# How long a failed reconnect holds off the next attempt. A node that is rebooting or off the
+# network refuses every try, and a poll cycle asks for hundreds of telegrams: trying again for
+# each of them would stretch the cycle by one connection timeout per datapoint.
+RECONNECT_INTERVAL = 30.0
+
 
 def calc_checksum(data: bytes) -> int:
     """Modulo-256 sum over the length byte and the payload.
@@ -125,6 +130,15 @@ class OptolinkProtocolError(Exception):
     """
 
 
+class OptolinkNotConnected(ConnectionError):
+    """There is no connection to the node, and none is attempted right now.
+
+    Either the client was closed on purpose, or the node is away and the next reconnect is not
+    due yet. Raised at once, without touching the network, so a cycle that runs while the node
+    is gone fails each read immediately instead of waiting out a timeout for each.
+    """
+
+
 class OptolinkClient:
     """Handles communication with OptoV controller over ESPHome serial_proxy."""
 
@@ -145,35 +159,43 @@ class OptolinkClient:
         # Block datapoints whose records the controller insists on receiving one telegram at a
         # time. Learned from its own ERR_BAD_RANGE rather than assumed -- see write_day_schedule().
         self._no_chunked_write: set[int] = set()
+        # When the next reconnect may be tried (event-loop time), and whether the client was
+        # closed on purpose, after which it must never connect again by itself.
+        self._reconnect_at = 0.0
+        self._closed = False
 
     async def connect(self):
         """Connect to ESPHome Native API and subscribe to serial proxy."""
         async with self._lock:
+            self._closed = False
             await self._connect_locked()
 
     async def _connect_locked(self):
         if self._connected:
             return
+        if self.client is not None:
+            # Left over from a connection that has since ended. Close it before opening another,
+            # or its socket stays open for as long as this process runs.
+            await self._disconnect_locked(force=True)
 
         _LOGGER.info("Connecting to ESPHome at %s:%s...", self.host, self.port)
-        self.client = aioesphomeapi.APIClient(
+        client = aioesphomeapi.APIClient(
             address=self.host,
             port=self.port,
             password="",
             noise_psk=self.encryption_key,
         )
-        await self.client.connect(login=True)
-        try:
-            self.esphome_info = await self.client.device_info()
-            _LOGGER.info(
-                "Connected to ESPHome node '%s' (model: %s, version: %s)",
-                getattr(self.esphome_info, "name", "unknown"),
-                getattr(self.esphome_info, "model", "unknown"),
-                getattr(self.esphome_info, "esphome_version", "unknown"),
-            )
-        except Exception as e:
-            _LOGGER.debug("Could not fetch ESPHome device_info: %s", e)
-            self.esphome_info = None
+        self.client = client
+
+        async def on_stop(expected_disconnect: bool) -> None:
+            # The node ended the connection: a reboot, a dropped network, a restart of its API.
+            # Without this the link would still count as up, and every later telegram would
+            # fail against a client that has no connection. Only the client in use may mark the
+            # link down; one that was replaced and ends later must not.
+            if self.client is client and not expected_disconnect:
+                _LOGGER.warning("ESPHome at %s ended the connection", self.host)
+                self._connected = False
+                self._synced = False
 
         def on_data(msg):
             # A node with several proxies reports all of them on one subscription, so anything
@@ -183,26 +205,72 @@ class OptolinkClient:
             for b in msg.data:
                 self.rx_queue.put_nowait(b)
 
-        self.client.subscribe_serial_proxy_data(on_data)
-        await asyncio.wait_for(
-            self.client.serial_proxy_subscribe_await_response(self.instance),
-            timeout=5.0,
-        )
+        try:
+            await client.connect(on_stop=on_stop, login=True)
+            try:
+                self.esphome_info = await client.device_info()
+                _LOGGER.info(
+                    "Connected to ESPHome node '%s' (model: %s, version: %s)",
+                    getattr(self.esphome_info, "name", "unknown"),
+                    getattr(self.esphome_info, "model", "unknown"),
+                    getattr(self.esphome_info, "esphome_version", "unknown"),
+                )
+            except Exception as e:
+                _LOGGER.debug("Could not fetch ESPHome device_info: %s", e)
+                self.esphome_info = None
+
+            client.subscribe_serial_proxy_data(on_data)
+            await asyncio.wait_for(
+                client.serial_proxy_subscribe_await_response(self.instance),
+                timeout=5.0,
+            )
+        except Exception:
+            # A connection that got halfway would keep its socket, and keep feeding bytes into
+            # a queue nobody reads.
+            await self._disconnect_locked(force=True)
+            raise
         self._connected = True
         self._synced = False
         _LOGGER.info("Connected to ESPHome serial proxy.")
 
+    async def _reconnect_locked(self) -> None:
+        """Connect again after the connection was lost, at most once per RECONNECT_INTERVAL."""
+        if self._closed:
+            raise OptolinkNotConnected(f"connection to ESPHome at {self.host} was closed")
+        loop = asyncio.get_running_loop()
+        if loop.time() < self._reconnect_at:
+            raise OptolinkNotConnected(f"ESPHome at {self.host} is not connected")
+        try:
+            await self._connect_locked()
+        except Exception as err:
+            self._reconnect_at = loop.time() + RECONNECT_INTERVAL
+            # A timeout carries no message of its own; its type is the useful part then.
+            reason = str(err) or type(err).__name__
+            _LOGGER.warning(
+                "Could not reconnect to ESPHome at %s: %s; next attempt in %.0f s",
+                self.host,
+                reason,
+                RECONNECT_INTERVAL,
+            )
+            raise OptolinkNotConnected(
+                f"could not reconnect to ESPHome at {self.host}: {reason}"
+            ) from err
+        _LOGGER.info("Reconnected to ESPHome at %s", self.host)
+
     async def disconnect(self):
-        """Cleanly disconnect."""
+        """Cleanly disconnect. The client does not reconnect by itself afterwards."""
         async with self._lock:
+            self._closed = True
             await self._disconnect_locked()
 
-    async def _disconnect_locked(self):
+    async def _disconnect_locked(self, force: bool = False):
+        """Close the client. `force` drops the socket at once instead of asking the node to
+        close it, which is what a connection already known to be dead needs."""
         if self.client:
             try:
                 if self._connected:
                     self.client.serial_proxy_write(self.instance, bytes([EOT]))
-                await self.client.disconnect()
+                await self.client.disconnect(force=force)
             except Exception as e:
                 _LOGGER.debug("Error during disconnect: %s", e)
         self.client = None
@@ -366,13 +434,18 @@ class OptolinkClient:
     async def _transact_retry(
         self, function_code: int, address: int, data_length: int, data: bytes = b""
     ) -> bytes:
-        """_transact() plus connect/sync management and one resync-and-retry."""
-        async with self._lock:
-            if not self._connected:
-                await self._connect_locked()
+        """_transact() plus connect/sync management and one resync-and-retry.
 
+        A lost API connection shows up either through the node's stop callback or as the client
+        refusing to send, which raises APIConnectionError -- not a ConnectionError, so it needs
+        its own clause. Both end the same way: the dead client is closed and the next attempt
+        connects afresh, subject to RECONNECT_INTERVAL.
+        """
+        async with self._lock:
             for attempt in range(2):
                 try:
+                    if not self._connected:
+                        await self._reconnect_locked()
                     if not self._synced:
                         await self._sync_p300()
                     return await self._transact(
@@ -383,6 +456,19 @@ class OptolinkClient:
                     # link is healthy, so do NOT drop P300 sync and do NOT retry -- a resync
                     # costs several seconds and cannot change a definitive negative answer.
                     raise
+                except OptolinkNotConnected:
+                    # Closed on purpose, or the node is away and not due another attempt:
+                    # asking again straight away cannot give a different answer.
+                    raise
+                except aioesphomeapi.APIConnectionError as err:
+                    if self._connected:
+                        _LOGGER.warning(
+                            "Lost the connection to ESPHome at %s: %s", self.host, err
+                        )
+                    self._connected = False
+                    await self._disconnect_locked(force=True)
+                    if attempt == 1:
+                        raise
                 except (TimeoutError, ConnectionError, OptolinkProtocolError) as err:
                     _LOGGER.warning(
                         "fc=0x%02X 0x%04X attempt %s failed: %s",
