@@ -81,6 +81,27 @@ def is_signed(parameter_type: str | None) -> bool:
     return bool(spec and spec[1])
 
 
+def decodes_to_number(conversion: str | None) -> bool:
+    """Whether decode_value() turns this conversion into a number rather than text or a date.
+
+    The integer path -- no conversion, a divisor, a multiplier, MultOffset -- and the four-byte
+    float are numbers. The BCD timestamps, dates, byte dumps, addresses and strings are not, and
+    neither is a conversion this module does not implement, which never yields a value at all.
+    """
+    conv = (conversion or "").strip().lower()
+    return (
+        conv in ("", "noconversion", "multoffset", "convert4bytestofloat")
+        or conv in DIVISORS
+        or conv in _MULTIPLIERS
+    )
+
+
+def decodes_to_integer(conversion: str | None) -> bool:
+    """Whether the number decode_value() produces for this conversion is always whole."""
+    conv = (conversion or "").strip().lower()
+    return conv in ("", "noconversion") or conv in _MULTIPLIERS
+
+
 def decode_int(raw: bytes, parameter_type: str | None) -> int:
     """Turn raw field bytes into an integer.
 

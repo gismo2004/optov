@@ -14,6 +14,7 @@ from contextlib import closing
 from typing import Any
 
 from .conversions import schedule_type
+from .decode import decodes_to_integer, decodes_to_number
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1333,6 +1334,18 @@ def generate_profile(
                     else:
                         entry["div_ratio"] = _div_ratio(dp.get("conversion"))
                         entry.update(_unit_meta(unit_str))
+                        # A reading that decodes to a number is a measurement to Home Assistant
+                        # whether or not the catalog gives it a unit. Without a state class a
+                        # unitless one -- a switching-cycle counter, a performance factor -- is
+                        # treated as text: drawn as a timeline, never graphed, no statistics.
+                        # Nothing in the catalog tells a counter from a gauge, so both get
+                        # `measurement`, which graphs either correctly. Whole numbers are shown
+                        # without the ".0" the scaling path leaves on them.
+                        conversion = dp.get("conversion")
+                        if not is_datetime_or_str and decodes_to_number(conversion):
+                            entry.setdefault("state_class", "measurement")
+                            if decodes_to_integer(conversion):
+                                entry["display_precision"] = 0
                         if sensor_category:
                             entry["entity_category"] = sensor_category
                         profile["sensors"].append(entry)

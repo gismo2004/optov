@@ -71,6 +71,7 @@ class OptolinkSensor(OptolinkEntity, SensorEntity):
         self._attr_native_unit_of_measurement = definition.get("unit")
         self._attr_device_class = definition.get("device_class")
         self._attr_state_class = definition.get("state_class")
+        self._attr_suggested_display_precision = definition.get("display_precision")
         if "options" in definition:
             self._attr_device_class = SensorDeviceClass.ENUM
             self._attr_options = list(definition["options"].values())
