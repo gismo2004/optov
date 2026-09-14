@@ -95,6 +95,11 @@ SYNC_WINDOW = 0.1
 INIT_TIMEOUT = 0.5
 
 
+def _reason(err: BaseException) -> str:
+    """What to log for a failure. A timeout carries no message of its own; its type does."""
+    return str(err) or type(err).__name__
+
+
 def calc_checksum(data: bytes) -> int:
     """Modulo-256 sum over the length byte and the payload.
 
@@ -269,8 +274,7 @@ class OptolinkClient:
             await self._connect_locked()
         except Exception as err:
             self._reconnect_at = loop.time() + RECONNECT_INTERVAL
-            # A timeout carries no message of its own; its type is the useful part then.
-            reason = str(err) or type(err).__name__
+            reason = _reason(err)
             _LOGGER.warning(
                 "Could not reconnect to ESPHome at %s: %s; next attempt in %.0f s",
                 self.host,
@@ -543,7 +547,7 @@ class OptolinkClient:
                         function_code,
                         address,
                         attempt + 1,
-                        err,
+                        _reason(err),
                     )
                     self._synced = False
                     if attempt == 1:
