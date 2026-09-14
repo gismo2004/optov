@@ -46,7 +46,13 @@ from .conversions import (
     encode_day_schedule,
     parse_level,
 )
-from .decode import decode_value, extract_bitfield, insert_bitfield, is_signed
+from .decode import (
+    decode_int,
+    decode_value,
+    extract_bitfield,
+    insert_bitfield,
+    is_signed,
+)
 from .errors import decode_boiler_error_history, decode_wp_error_history
 from .optolink import OptolinkClient
 from .profiles import DeviceProfile, parse_address, stable_object_id
@@ -951,9 +957,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         str(int_val), options.get(int_val, str(int_val))
                     )
                 else:
-                    int_val = int.from_bytes(raw, "little", signed=True)
+                    # Signed only when the declared parameter type is: a one-byte state code
+                    # of 200 is 200, and a 32-bit counter never wraps negative.
+                    int_val = decode_int(raw, s.get("parameter_type"))
                     div = s.get("div_ratio") or 1.0
-                    data[s["id"]] = round(int_val / div, 2)
+                    data[s["id"]] = round(int_val / div, 3)
             except Exception as err:
                 self._current_failed += 1
                 _LOGGER.debug(
@@ -1577,7 +1585,18 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return int.from_bytes(self._slice_field(item, raw), "little", signed=signed)
 
     def _decode_number(self, item: dict[str, Any], raw: bytes) -> float:
-        return round(self._raw_int(item, raw, True) / (item.get("div_ratio") or 1.0), 1)
+        """A setting's value, read with the same signedness async_write_item encodes it with.
+
+        The declared parameter type decides, so a one-byte setting ranging up to 255 reads back
+        as the number that was written. Rounded to three places, which keeps the finest divisor
+        the catalog uses intact.
+        """
+        bit_length = item.get("bit_length") or 0
+        if bit_length:
+            value = extract_bitfield(raw, item.get("bit_start", 0), bit_length)
+        else:
+            value = decode_int(self._slice_field(item, raw), item.get("parameter_type"))
+        return round(value / (item.get("div_ratio") or 1.0), 3)
 
     def _decode_select(self, item: dict[str, Any], raw: bytes) -> str:
         raw_int = self._raw_int(item, raw, False)
