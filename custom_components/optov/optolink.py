@@ -89,6 +89,11 @@ RECONNECT_INTERVAL = 30.0
 # that is not being polled announces itself about twice a second, indefinitely.
 RX_QUEUE_LIMIT = 1024
 
+# The handshake looks at incoming bytes in windows of this length; see _sync_p300().
+SYNC_WINDOW = 0.1
+# How long an init may go unanswered before the handshake starts over with EOT.
+INIT_TIMEOUT = 0.5
+
 
 def calc_checksum(data: bytes) -> int:
     """Modulo-256 sum over the length byte and the payload.
@@ -312,41 +317,76 @@ class OptolinkClient:
         controller is already listening, and a NACK after EOT means the same. Controllers take
         a few seconds to come round, so the patience is in the deadline rather than in a number
         of tries.
+
+        The controller acknowledges every init it receives, even a second one while it is
+        already in P300. So the init must go out once per attempt, never once per byte that
+        looks like an invitation: a burst of stale announcements -- what the node buffered while
+        nobody was subscribed, typically right after it restarts -- would otherwise draw one
+        init each, and the surplus acknowledgements arrive after the handshake has finished.
+        The next telegram then takes one for its own ACK and the next for its header, and every
+        resync is answered by another stale ACK in milliseconds, so the stream stays one step
+        behind until the backlog drains.
+
+        Hence three rules. Bytes are judged in windows of SYNC_WINDOW, and only a window holding
+        exactly one byte counts; anything more is a leftover and is dropped as a whole. After
+        the init, only its ACK counts, and if none comes within INIT_TIMEOUT the handshake
+        starts over with EOT. And it finishes only once the line has gone quiet, so nothing
+        that was still in flight lands in the first telegram.
         """
         _LOGGER.debug("Initiating Optolink P300 handshake...")
         self._flush_rx()
         self.client.serial_proxy_write(self.instance, bytes([EOT]))
-        sent_init = False
+        init_sent_at: float | None = None
         loop = asyncio.get_running_loop()
         ends_at = loop.time() + deadline
 
         while loop.time() < ends_at:
-            try:
-                byte = (await self._read_exact(1, timeout=0.4))[0]
-            except (TimeoutError, ConnectionError):
-                # Silence: the controller may not have reached its next announcement yet. Only
-                # nudge it again if our init went unanswered.
-                if sent_init:
-                    self.client.serial_proxy_write(self.instance, bytes([EOT]))
-                    sent_init = False
-                continue
-
-            if byte == ACK and sent_init:
+            window = await self._collect(SYNC_WINDOW)
+            if len(window) == 1 and window[0] == ACK and init_sent_at is not None:
+                await self._settle(ends_at)
                 self._synced = True
                 _LOGGER.debug("Optolink P300 protocol synchronized.")
                 return
-            if byte in (ENQ, ACK, NACK):
+            if len(window) == 1 and window[0] in (ENQ, ACK, NACK) and init_sent_at is None:
                 # ENQ is the controller offering; ACK or NACK straight after our EOT means it is
-                # listening already. Either way the init goes out now.
+                # listening already. Either way the init goes out now, and only now.
                 self.client.serial_proxy_write(self.instance, bytes([0x16, 0x00, 0x00]))
-                sent_init = True
+                init_sent_at = loop.time()
                 continue
-            # Anything else is a leftover from a conversation that was interrupted.
-            _LOGGER.debug("Ignoring 0x%02X while synchronizing", byte)
+            if window:
+                _LOGGER.debug("Ignoring %s while synchronizing", window.hex(" "))
+            if init_sent_at is not None and loop.time() - init_sent_at >= INIT_TIMEOUT:
+                # The init went unanswered. Start over rather than repeat it, since a late
+                # answer to the first would be taken for the answer to the second.
+                self.client.serial_proxy_write(self.instance, bytes([EOT]))
+                init_sent_at = None
 
         raise ConnectionError(
             f"Failed to synchronize Optolink P300 protocol within {deadline:.0f}s"
         )
+
+    async def _collect(self, window: float) -> bytes:
+        """Everything that arrives within `window` seconds."""
+        loop = asyncio.get_running_loop()
+        ends_at = loop.time() + window
+        received = bytearray()
+        while (remaining := ends_at - loop.time()) > 0:
+            try:
+                received.append(
+                    await asyncio.wait_for(self.rx_queue.get(), timeout=remaining)
+                )
+            except TimeoutError:
+                break
+        return bytes(received)
+
+    async def _settle(self, ends_at: float) -> None:
+        """Discard what still arrives until one SYNC_WINDOW passes in silence, or `ends_at`."""
+        loop = asyncio.get_running_loop()
+        while loop.time() < ends_at:
+            stray = await self._collect(SYNC_WINDOW)
+            if not stray:
+                return
+            _LOGGER.debug("Discarding %s after synchronizing", stray.hex(" "))
 
     async def _transact(
         self, function_code: int, address: int, data_length: int, data: bytes = b""
