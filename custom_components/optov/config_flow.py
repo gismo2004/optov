@@ -13,7 +13,9 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.components.file_upload import process_uploaded_file
 from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
     ConfigEntry,
+    ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
@@ -57,6 +59,7 @@ from .const import (
     DEFAULT_SYNC_CLOCK,
     DOMAIN,
 )
+from .translate import async_ui_text
 
 MANUAL = "manual"
 CONF_CATALOG_FILE = "catalog_file"
@@ -91,8 +94,10 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
-        # Which catalog this controller will use, settled before anything else happens.
+        # Which catalog this controller will use, settled before anything else happens, and
+        # whether it arrived as an upload, which may have replaced a file of the same name.
         self._catalog: str | None = None
+        self._uploaded = False
 
     @staticmethod
     @callback
@@ -258,6 +263,23 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         up with several, and then the choice belongs to them: the entry records the name, so
         each hub keeps its own.
         """
+        return await self._async_catalog_step("catalog", user_input)
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Point an existing entry at another catalog, or upload a newer build of its own.
+
+        The same choice as when adding a controller, offered from the entry's menu. It works
+        for an entry whose setup failed as well, which is exactly the state an outdated,
+        missing or unreadable catalog leaves it in.
+        """
+        return await self._async_catalog_step("reconfigure", user_input)
+
+    async def _async_catalog_step(
+        self, step_id: str, user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
+        """Choose a catalog that is already here or upload one, checked either way."""
         errors: dict[str, str] = {}
         catalogs = await self.hass.async_add_executor_job(
             catalog_db.list_catalogs, self.hass.config.path(DOMAIN)
@@ -281,7 +303,9 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
                 except Exception:
                     errors["base"] = "catalog_failed"
                 else:
-                    return await self.async_step_user()
+                    self._uploaded = True
+                    self._async_reload_entries_using(self._catalog)
+                    return await self._async_catalog_settled()
             elif user_input.get(CONF_CATALOG):
                 # Chosen from the list rather than uploaded, so it has not been through the
                 # checks the upload does.
@@ -299,18 +323,28 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 else:
                     self._catalog = chosen["name"]
-                    return await self.async_step_user()
+                    return await self._async_catalog_settled()
             else:
                 errors["base"] = "catalog_missing"
 
+        # When reconfiguring, the catalog the entry already uses is the one preselected.
+        current = (
+            self._get_reconfigure_entry().data.get(CONF_CATALOG)
+            if self.source == SOURCE_RECONFIGURE
+            else None
+        )
         schema: dict[Any, Any] = {}
         if catalogs:
+            names = [c["name"] for c in catalogs]
+            default = current if current in names else names[0]
             # Choosing an existing one, with what is in each so they can be told apart.
-            schema[vol.Optional(CONF_CATALOG, default=catalogs[0]["name"])] = (
+            schema[vol.Optional(CONF_CATALOG, default=default)] = (
                 SelectSelector(
                     SelectSelectorConfig(
                         options=[
-                            SelectOptionDict(value=c["name"], label=c["label"])
+                            SelectOptionDict(
+                                value=c["name"], label=await self._async_catalog_label(c)
+                            )
                             for c in catalogs
                         ],
                         mode=SelectSelectorMode.LIST,
@@ -323,8 +357,99 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             FileSelectorConfig(accept=".db,.xz")
         )
         return self.async_show_form(
-            step_id="catalog", data_schema=vol.Schema(schema), errors=errors
+            step_id=step_id, data_schema=vol.Schema(schema), errors=errors
         )
+
+    async def _async_catalog_label(self, catalog: dict[str, Any]) -> str:
+        """How a catalog is offered: its file, structure version, controllers and languages.
+
+        A catalog this integration cannot read is still offered, so it can be seen and
+        replaced, and it says which side is behind: rebuilding a catalog that is ahead of the
+        integration would not help.
+        """
+        version = catalog["schema_version"]
+        label = await async_ui_text(
+            self.hass,
+            "catalog_option_one" if catalog["devices"] == 1 else "catalog_option",
+            name=catalog["name"],
+            version=version if version is not None else "–",
+            controllers=catalog["devices"],
+            languages="/".join(catalog["languages"]),
+        )
+        if catalog["usable"]:
+            return label
+        behind = (
+            "catalog_option_too_new"
+            if version is not None and version > catalog_db.CATALOG_SCHEMA_VERSION
+            else "catalog_option_outdated"
+        )
+        return f"{label} – {await async_ui_text(self.hass, behind)}"
+
+    async def _async_catalog_settled(self) -> ConfigFlowResult:
+        """Go on once the catalog is settled.
+
+        Adding a controller continues with the serial port. Reconfiguring ends here: the entry
+        is updated and reloaded with the catalog. A loaded entry reloads from its own update
+        listener, which compares the catalog it started with; one whose setup failed has no
+        listener, and a re-upload under the same name changes nothing the listener can see, so
+        those two are reloaded explicitly. Home Assistant's combined update-and-reload helper
+        is not used, since it warns about, and is set to refuse, entries with an update listener.
+        """
+        if self.source != SOURCE_RECONFIGURE:
+            return await self.async_step_user()
+
+        entry = self._get_reconfigure_entry()
+        options = dict(entry.options)
+        languages = await self._async_languages()
+        language = options.get(
+            CONF_LANGUAGE, entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
+        )
+        if language not in languages:
+            # The new catalog does not carry the language in use. Take one it does, so the
+            # options page offers a valid choice rather than failing to save.
+            options[CONF_LANGUAGE] = (
+                DEFAULT_LANGUAGE if DEFAULT_LANGUAGE in languages else languages[0]
+            )
+        changed = self._catalog != entry.data.get(CONF_CATALOG) or options != dict(
+            entry.options
+        )
+        self.hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_CATALOG: self._catalog}, options=options
+        )
+        if entry.state is not ConfigEntryState.LOADED or (self._uploaded and not changed):
+            self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        return self.async_abort(reason="reconfigure_successful")
+
+    @callback
+    def _async_reload_entries_using(self, name: str) -> None:
+        """Reload the other entries that read a catalog file an upload just replaced.
+
+        An upload keeps the name it arrived with, so a newer build of a catalog in use replaces
+        that file in place. An entry reading it would otherwise go on with an entity set built
+        from the file that is gone. That includes one still starting, which a reload waits for
+        and then restarts, and one whose setup failed or is waiting to retry, very possibly
+        because of the file just replaced. Disabled and unloaded entries are left alone. The
+        entry being reconfigured is left to _async_catalog_settled().
+        """
+        current = (
+            self._get_reconfigure_entry().entry_id
+            if self.source == SOURCE_RECONFIGURE
+            else None
+        )
+        active = (
+            ConfigEntryState.LOADED,
+            ConfigEntryState.SETUP_IN_PROGRESS,
+            ConfigEntryState.SETUP_RETRY,
+            ConfigEntryState.SETUP_ERROR,
+        )
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if (
+                entry.entry_id != current
+                and entry.disabled_by is None
+                and entry.state in active
+                and entry.data.get(CONF_CATALOG) == name
+            ):
+                self.hass.config_entries.async_schedule_reload(entry.entry_id)
 
     async def async_step_manual(
         self, user_input: dict[str, Any] | None = None

@@ -2088,6 +2088,9 @@ class OptolinkRuntime:
     # The options the entry was set up with, so the update listener can tell an options
     # change (reload) from the entry data this integration writes to itself while running.
     options: dict[str, Any]
+    # The catalog file the entry was set up with. Reconfiguring the entry points it at another
+    # one, which the update listener reloads for just as it does for an options change.
+    catalog: str | None = None
 
 
 OptolinkConfigEntry = ConfigEntry[OptolinkRuntime]

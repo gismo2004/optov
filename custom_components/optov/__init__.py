@@ -52,6 +52,7 @@ GATEWAY_SENSORS = (
     "active_channels",
     "avg_response_time",
     "datapoint_rate",
+    "catalog",
 )
 FAULT_HISTORY_SENSOR = "fehlerhistorie"
 
@@ -138,7 +139,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
         raise ConfigEntryNotReady(f"Controller not reachable: {err}") from err
 
     entry.runtime_data = OptolinkRuntime(
-        client=client, coordinator=coordinator, options=dict(entry.options)
+        client=client,
+        coordinator=coordinator,
+        options=dict(entry.options),
+        catalog=os.path.basename(coordinator_db_path),
     )
 
     try:
@@ -156,7 +160,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
 
     # Home Assistant fires update listeners for any change to the entry, and this integration
     # writes to its own entry data while running (the title, the probe cache, the retired
-    # addresses). Only an options change is a reason to reload; the listener checks.
+    # addresses). Only an options change or another catalog is a reason to reload; the listener
+    # checks. It is also what reloads after Reconfigure, which updates the entry and stops there.
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     # The first sweep runs in the background so setup returns at once and the device page is
@@ -189,9 +194,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
 async def _async_options_updated(
     hass: HomeAssistant, entry: OptolinkConfigEntry
 ) -> None:
-    """Reload when the options changed, and only then. See async_setup_entry."""
-    if entry.runtime_data.options == dict(entry.options):
-        _LOGGER.debug("Config entry updated without an options change; not reloading")
+    """Reload when the options or the catalog changed, and only then. See async_setup_entry."""
+    runtime = entry.runtime_data
+    if runtime.options == dict(entry.options) and runtime.catalog == entry.data.get(
+        CONF_CATALOG
+    ):
+        _LOGGER.debug(
+            "Config entry updated without an options or catalog change; not reloading"
+        )
         return
     await hass.config_entries.async_reload(entry.entry_id)
 

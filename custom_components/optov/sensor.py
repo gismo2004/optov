@@ -15,6 +15,7 @@ from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from . import catalog_db
 from .conversions import DAYS
 from .coordinator import OptolinkConfigEntry, OptolinkCoordinator
 from .entity import OptolinkEntity
@@ -46,6 +47,14 @@ async def async_setup_entry(
     entities.append(OptolinkActiveChannelsSensor(coordinator, entry))
     entities.append(OptolinkLatencySensor(coordinator, entry))
     entities.append(OptolinkDatapointRateSensor(coordinator, entry))
+    entities.append(
+        OptolinkCatalogSensor(
+            coordinator,
+            await hass.async_add_executor_job(
+                catalog_db.catalog_info, coordinator.db_path
+            ),
+        )
+    )
 
     # Error history sensor under main heating controller
     entities.append(
@@ -351,6 +360,47 @@ class OptolinkLatencySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
     def native_value(self) -> Any:
         """Return average response time in ms."""
         return self.coordinator.avg_response_time_ms
+
+
+class OptolinkCatalogSensor(SensorEntity):
+    """Which catalog this controller runs on, and which version of the catalog format it has.
+
+    The state is the catalog's structure version, the number this integration checks against
+    `catalog_db.CATALOG_SCHEMA_VERSION` at every start. The attributes say which file it is and
+    how many controllers and which languages it covers.
+
+    Read once at setup: a catalog only changes with a reload. It describes the catalog, not the
+    controller, so it stays available while the controller does not answer.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "catalog"
+    _attr_icon = "mdi:database-cog"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_should_poll = False
+
+    def __init__(self, coordinator: OptolinkCoordinator, info: dict[str, Any]) -> None:
+        self._info = info
+        self._attr_unique_id = f"{coordinator.stable_id}_catalog"
+        self._attr_device_info = coordinator.get_gateway_device_info()
+
+    @property
+    def object_id_hint(self) -> str:
+        """Entity id built from the model rather than the device's display name."""
+        return "optov catalog"
+
+    @property
+    def native_value(self) -> Any:
+        """The catalog's structure version."""
+        return self._info["meta"].get("schema_version")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "file": self._info["file"],
+            "controllers": self._info["controllers"],
+            "languages": self._info["languages"],
+        }
 
 
 class OptolinkDatapointRateSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity):

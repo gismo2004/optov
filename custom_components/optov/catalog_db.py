@@ -117,22 +117,21 @@ _DIV_RATIOS = {"div2": 2.0, "div10": 10.0, "div100": 100.0, "div1000": 1000.0}
 # 1.5 s of a 7 s setup.
 #
 # The language is a column name, which cannot be bound, so it is validated against the table's
-# own columns and quoted. Anything unknown falls back to English.
-_CULTURE_COLUMNS: set[str] | None = None
+# own columns and quoted. Anything unknown falls back to English. The columns are read from the
+# catalog being queried each time rather than remembered: entries can use different catalogs and
+# switch between them at runtime, and the few reads per setup cost nothing measurable.
 
 
 def _culture_column(conn: sqlite3.Connection, culture: str | None) -> str:
     """A quoted `translations_p` column for a language, validated against the table itself."""
-    global _CULTURE_COLUMNS
-    if _CULTURE_COLUMNS is None:
-        _CULTURE_COLUMNS = {
-            r[1]
-            for r in conn.execute("PRAGMA table_info(translations_p)")
-            if r[1] != "text_key"
-        }
+    columns = {
+        r[1] for r in conn.execute("PRAGMA table_info(translations_p)") if r[1] != "text_key"
+    }
     wanted = (culture or "en").strip().lower()
-    if wanted not in _CULTURE_COLUMNS:
-        wanted = "en" if "en" in _CULTURE_COLUMNS else "de"
+    if wanted not in columns:
+        # English, then German, then whatever the catalog was built with: a catalog built for
+        # a single other language has neither.
+        wanted = next((c for c in ("en", "de") if c in columns), min(columns, default="en"))
     return f'"{wanted}"'
 
 
@@ -214,17 +213,10 @@ def list_catalogs(config_dir: str) -> list[dict[str, Any]]:
                 version = _schema_version(conn)
         except sqlite3.DatabaseError:
             continue
+        # An unusable one is still listed, so that it is visible and can be replaced. How a
+        # catalog is described to a person is translated text and is composed by the setup
+        # flow from these facts.
         usable = version == CATALOG_SCHEMA_VERSION
-        label = f"{name} ({devices} controllers, {'/'.join(languages)})"
-        if not usable:
-            # Still listed, so that it is visible and can be replaced, but it says what is
-            # wrong with it rather than failing after it has been chosen. Which side is behind
-            # decides the advice: rebuilding a catalog that is ahead would not help.
-            label += (
-                " -- newer than this integration, update it"
-                if version is not None and version > CATALOG_SCHEMA_VERSION
-                else " -- built for an older version, rebuild it"
-            )
         found.append(
             {
                 "name": name,
@@ -233,7 +225,6 @@ def list_catalogs(config_dir: str) -> list[dict[str, Any]]:
                 "languages": languages,
                 "schema_version": version,
                 "usable": usable,
-                "label": label,
             }
         )
     return found
@@ -363,6 +354,28 @@ def _schema_version(conn: sqlite3.Connection) -> int | None:
         return int(row[0]) if row else None
     except (TypeError, ValueError):
         return None
+
+
+def catalog_info(path: str) -> dict[str, Any]:
+    """What a catalog says about itself, for showing to a person. Blocking I/O.
+
+    Every `catalog_meta` key, the structure version among them, plus the file name, how many
+    controllers it describes and the languages it carries.
+    """
+    with closing(get_db_connection(path)) as conn:
+        meta = dict(conn.execute("SELECT key, value FROM catalog_meta").fetchall())
+        controllers = conn.execute("SELECT count(*) FROM devices").fetchone()[0]
+        languages = sorted(
+            r[1]
+            for r in conn.execute("PRAGMA table_info(translations_p)")
+            if r[1] != "text_key"
+        )
+    return {
+        "file": os.path.basename(path),
+        "meta": meta,
+        "controllers": controllers,
+        "languages": languages,
+    }
 
 
 def check_catalog(path: str) -> None:

@@ -70,6 +70,11 @@ You can keep more than one, under any names you like, for example one per contro
 which to use as soon as there is a choice and remembers that choice with the entry; with a single
 catalog it does not ask at all.
 
+**Changing it later.** *Reconfigure* on the integration entry picks another catalog or uploads a
+newer build, also when the entry failed to start because of its catalog. An upload under an
+existing name replaces that file for every controller using it. The *Catalog* sensor on the
+Optical interface device shows which file and version an entry runs on.
+
 A catalog records the structure it was built to, and the integration checks it on every start.
 If an update needs a newer one you are told to rebuild; if a catalog is newer than the
 integration you are told to update instead. Neither happens silently and there is nothing to
@@ -320,7 +325,8 @@ controller can have its own.
 
 **"Rebuild the catalog" or "update the integration" at startup.** The catalog and the
 integration are versioned against each other and these two are out of step. Rebuild with the
-current compiler, or update the integration, whichever the message asks for.
+current VExtractor and upload the new catalog with **Reconfigure** on the entry, or update the
+integration, whichever the message asks for.
 
 **The poll cycle is long.** The bus runs at 4800 baud and one datapoint is one round trip of
 about 65 ms. Several hundred enabled datapoints take a couple of cycles per full pass; the

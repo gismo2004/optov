@@ -25,7 +25,15 @@
       },
       "catalog": {
         "title": "Regelungs-Katalog",
-        "description": "OptoV benötigt einen Katalog der Regelungen. Er wird nicht mitgeliefert, sondern aus der eigenen Kopie der Regelungs-Servicesoftware erzeugt; siehe README, Abschnitt \"Building the catalog\". Einen vorhandenen auswählen oder einen neuen hochladen.",
+        "description": "OptoV benötigt einen Katalog der Regelungen. Er wird nicht mitgeliefert, sondern mit VExtractor aus der eigenen Kopie der Regelungs-Servicesoftware erzeugt; siehe README, Abschnitt \"The catalog\". Einen vorhandenen auswählen oder einen neuen hochladen.",
+        "data": {
+          "catalog": "Diesen Katalog verwenden",
+          "catalog_file": "Katalog hochladen"
+        }
+      },
+      "reconfigure": {
+        "title": "Regelungs-Katalog",
+        "description": "Einen anderen Katalog für diese Regelung wählen oder einen neu erzeugten hochladen. Die Integration wird mit dem gewählten Katalog neu geladen. Ein hochgeladener Katalog mit dem Namen eines vorhandenen ersetzt diese Datei für alle Regelungen, die sie verwenden.",
         "data": {
           "catalog": "Diesen Katalog verwenden",
           "catalog_file": "Katalog hochladen"
@@ -42,7 +50,8 @@
       "catalog_too_new": "Dieser Katalog stammt aus einer neueren Version des Erzeugungswerkzeugs, als diese Integration versteht. Integration aktualisieren."
     },
     "abort": {
-      "already_configured": "Diese Regelung ist bereits eingerichtet."
+      "already_configured": "Diese Regelung ist bereits eingerichtet.",
+      "reconfigure_successful": "Der Katalog wurde geändert. Die Integration wird damit neu geladen."
     }
   },
   "options": {
@@ -82,6 +91,9 @@
       },
       "error_history": {
         "name": "Fehlerhistorie"
+      },
+      "catalog": {
+        "name": "Katalog"
       }
     }
   },
@@ -113,22 +125,22 @@
   },
   "exceptions": {
     "catalog_missing": {
-      "message": "In {path} wurde kein Katalog gefunden. Der Katalog wird aus der eigenen Kopie der Regelungs-Servicesoftware erzeugt und nicht mit der Integration ausgeliefert. Siehe README, Abschnitt \"Building the catalog\", danach Home Assistant neu starten."
+      "message": "In {path} wurde kein Katalog gefunden. Der Katalog wird aus der eigenen Kopie der Regelungs-Servicesoftware erzeugt und nicht mit der Integration ausgeliefert. Wie in der README, Abschnitt \"The catalog\", beschrieben erzeugen und über \"Neu konfigurieren\" an diesem Eintrag hochladen."
     },
     "catalog_gone": {
-      "message": "Der Regelungs-Katalog \"{name}\" liegt nicht mehr in {path}. Datei unter diesem Namen wieder ablegen, oder diesen Eintrag entfernen und neu anlegen, um einen anderen Katalog zu wählen."
+      "message": "Der Regelungs-Katalog \"{name}\" liegt nicht mehr in {path}. Datei unter diesem Namen wieder ablegen oder über \"Neu konfigurieren\" an diesem Eintrag einen anderen Katalog wählen."
     },
     "catalog_ambiguous": {
-      "message": "In {path} liegen mehrere Regelungs-Kataloge, und dieser Eintrag legt nicht fest, welcher gilt. Eintrag entfernen und neu anlegen; die Einrichtung fragt dann nach dem passenden Katalog."
+      "message": "In {path} liegen mehrere Regelungs-Kataloge, und dieser Eintrag legt nicht fest, welcher gilt. Den passenden über \"Neu konfigurieren\" an diesem Eintrag wählen."
     },
     "catalog_outdated": {
-      "message": "Der Katalog \"{name}\" hat Strukturversion {found}, diese Integration benötigt {needed}. Mit dem aktuellen Werkzeug neu erzeugen und hochladen; siehe README, Abschnitt \"Building the catalog\"."
+      "message": "Der Katalog \"{name}\" hat Strukturversion {found}, diese Integration benötigt {needed}. Mit dem aktuellen VExtractor neu erzeugen und über \"Neu konfigurieren\" an diesem Eintrag hochladen."
     },
     "catalog_too_new": {
       "message": "Der Katalog \"{name}\" hat Strukturversion {found} und ist damit neuer als die Version {needed}, die diese Integration versteht. Integration aktualisieren."
     },
     "catalog_unreadable": {
-      "message": "Der Katalog \"{name}\" konnte nicht als Regelungs-Katalog gelesen werden. Neu erzeugen und erneut hochladen."
+      "message": "Der Katalog \"{name}\" konnte nicht als Regelungs-Katalog gelesen werden. Neu erzeugen und über \"Neu konfigurieren\" an diesem Eintrag hochladen."
     }
   },
   "card": {
@@ -171,6 +183,10 @@
   "text": {
     "no_faults": "Keine Einträge",
     "dst_mismatch_title": "Regelung: Zeitumstellung",
-    "dst_mismatch": "Die Regelung stellt um auf {configured}, {zone} stellt jedoch um auf {expected}. Die Angaben lauten Monat/Woche/Wochentag, wobei Woche 5 die letzte des Monats bedeutet und Wochentag 7 der Sonntag ist.\n\nDie Uhrzeit selbst wird bei jeder Abfrage korrigiert, die Auswirkung beschränkt sich also auf ein Abfrageintervall zweimal im Jahr. Dauerhaft behebbar, indem die Umstellwerte an der Regelung gesetzt werden oder ihre eigene Zeitumstellung abgeschaltet und die Uhrzeit Home Assistant überlassen wird."
+    "dst_mismatch": "Die Regelung stellt um auf {configured}, {zone} stellt jedoch um auf {expected}. Die Angaben lauten Monat/Woche/Wochentag, wobei Woche 5 die letzte des Monats bedeutet und Wochentag 7 der Sonntag ist.\n\nDie Uhrzeit selbst wird bei jeder Abfrage korrigiert, die Auswirkung beschränkt sich also auf ein Abfrageintervall zweimal im Jahr. Dauerhaft behebbar, indem die Umstellwerte an der Regelung gesetzt werden oder ihre eigene Zeitumstellung abgeschaltet und die Uhrzeit Home Assistant überlassen wird.",
+    "catalog_option": "{name} (Version {version}, {controllers} Regelungen, {languages})",
+    "catalog_option_one": "{name} (Version {version}, 1 Regelung, {languages})",
+    "catalog_option_outdated": "für eine ältere Version erzeugt, neu erzeugen",
+    "catalog_option_too_new": "neuer als diese Integration, Integration aktualisieren"
   }
 }

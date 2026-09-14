@@ -87,11 +87,25 @@ the user's own. Several may sit there and **each config entry records the one it
 with**, in `CONF_CATALOG`. No code may assume a single fixed catalog path: `get_db_connection()`
 takes one and has no default, and the coordinator carries `self.db_path` from the entry.
 
+**Reconfigure** changes `CONF_CATALOG` on an existing entry, choosing another file or uploading
+a new one. It updates the entry and stops; the entry's update listener reloads, because it
+compares the catalog the entry started with (`runtime_data.catalog`) as well as the options. Do
+not replace that with `async_update_reload_and_abort`: with an update listener present Home
+Assistant logs a usage warning for it and has announced it will stop working. Only an entry
+without a listener (setup failed) or an unchanged name after a re-upload is reloaded explicitly.
+
+Nothing module-level in `catalog_db` may cache what a catalog contains without keying it to the
+catalog file, since an entry can switch files at runtime and several entries can use different
+ones.
+
 `catalog_db.CATALOG_SCHEMA_VERSION` is the structure this code is written against, and the
 compiler writes its own number into the catalog's `catalog_meta` table. They are checked on
 upload and on every setup, in both directions, so an old catalog under a new integration and a
 new catalog under an old one each get a message naming the side that is behind. Raise it only
 together with the compiler's constant, and only when an older catalog would actually be wrong.
+
+The *Catalog* diagnostic sensor on the gateway device shows that structure version as its state,
+with the file name, controller count and languages as attributes (`catalog_db.catalog_info`).
 
 ## Device names
 
