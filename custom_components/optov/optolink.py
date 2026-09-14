@@ -84,6 +84,11 @@ MAX_TELEGRAM_PAYLOAD = 56
 # each of them would stretch the cycle by one connection timeout per datapoint.
 RECONNECT_INTERVAL = 30.0
 
+# Most incoming bytes kept while nothing reads them. A reply is consumed as it arrives and the
+# queue is flushed before every telegram, so only idle chatter ever gets this far: a controller
+# that is not being polled announces itself about twice a second, indefinitely.
+RX_QUEUE_LIMIT = 1024
+
 
 def calc_checksum(data: bytes) -> int:
     """Modulo-256 sum over the length byte and the payload.
@@ -151,7 +156,7 @@ class OptolinkClient:
         # chunk carries that number.
         self.instance = instance
         self.client: aioesphomeapi.APIClient | None = None
-        self.rx_queue: asyncio.Queue[int] = asyncio.Queue()
+        self.rx_queue: asyncio.Queue[int] = asyncio.Queue(maxsize=RX_QUEUE_LIMIT)
         self._lock = asyncio.Lock()
         self._synced = False
         self._connected = False
@@ -203,7 +208,13 @@ class OptolinkClient:
             if getattr(msg, "instance", self.instance) != self.instance:
                 return
             for b in msg.data:
-                self.rx_queue.put_nowait(b)
+                try:
+                    self.rx_queue.put_nowait(b)
+                except asyncio.QueueFull:
+                    # Nothing is reading, so this is chatter the next telegram flushes anyway.
+                    # Dropping it keeps a link that is not polled -- polling switched off for
+                    # the entry -- from growing for as long as Home Assistant runs.
+                    return
 
         try:
             await client.connect(on_stop=on_stop, login=True)

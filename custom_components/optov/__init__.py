@@ -141,11 +141,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
         client=client, coordinator=coordinator, options=dict(entry.options)
     )
 
-    _async_update_title(hass, entry, coordinator)
-    _async_migrate_identity(hass, entry, coordinator)
-    _async_reconcile_registry(hass, entry, coordinator)
-    await _async_register_frontend(hass)
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        _async_update_title(hass, entry, coordinator)
+        _async_migrate_identity(hass, entry, coordinator)
+        _async_reconcile_registry(hass, entry, coordinator)
+        await _async_register_frontend(hass)
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except Exception:
+        # Home Assistant does not unload an entry whose setup failed, so async_unload_entry
+        # never runs for it. Without closing the connection here its socket would stay open,
+        # receiving bytes, for as long as Home Assistant runs.
+        await client.disconnect()
+        raise
 
     # Home Assistant fires update listeners for any change to the entry, and this integration
     # writes to its own entry data while running (the title, the probe cache, the retired
