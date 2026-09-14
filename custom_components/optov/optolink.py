@@ -149,6 +149,15 @@ class OptolinkNotConnected(ConnectionError):
     """
 
 
+class OptolinkControllerSilent(ConnectionError):
+    """The node is connected, but not a single byte came back from the controller.
+
+    Distinct from a handshake that heard something and still failed: complete silence means the
+    controller is switched off, restarting, or not in front of the optical head, and asking
+    again at once cannot change that.
+    """
+
+
 class OptolinkClient:
     """Handles communication with OptoV controller over ESPHome serial_proxy."""
 
@@ -337,11 +346,13 @@ class OptolinkClient:
         self._flush_rx()
         self.client.serial_proxy_write(self.instance, bytes([EOT]))
         init_sent_at: float | None = None
+        heard = False
         loop = asyncio.get_running_loop()
         ends_at = loop.time() + deadline
 
         while loop.time() < ends_at:
             window = await self._collect(SYNC_WINDOW)
+            heard = heard or bool(window)
             if len(window) == 1 and window[0] == ACK and init_sent_at is not None:
                 await self._settle(ends_at)
                 self._synced = True
@@ -361,6 +372,10 @@ class OptolinkClient:
                 self.client.serial_proxy_write(self.instance, bytes([EOT]))
                 init_sent_at = None
 
+        if not heard:
+            raise OptolinkControllerSilent(
+                f"no byte from the controller within {deadline:.0f}s"
+            )
         raise ConnectionError(
             f"Failed to synchronize Optolink P300 protocol within {deadline:.0f}s"
         )
@@ -507,9 +522,11 @@ class OptolinkClient:
                     # link is healthy, so do NOT drop P300 sync and do NOT retry -- a resync
                     # costs several seconds and cannot change a definitive negative answer.
                     raise
-                except OptolinkNotConnected:
-                    # Closed on purpose, or the node is away and not due another attempt:
-                    # asking again straight away cannot give a different answer.
+                except (OptolinkNotConnected, OptolinkControllerSilent):
+                    # Closed on purpose, the node away and not due another attempt, or a
+                    # controller that sends nothing at all: asking again straight away cannot
+                    # give a different answer, and a second silent handshake would only double
+                    # the wait.
                     raise
                 except aioesphomeapi.APIConnectionError as err:
                     if self._connected:

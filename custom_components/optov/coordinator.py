@@ -61,6 +61,11 @@ from .translate import async_ui_text
 
 _LOGGER = logging.getLogger(__name__)
 
+
+class ControllerUnreachable(Exception):
+    """A read skipped because earlier in the same cycle nothing answered at all."""
+
+
 # Conversions that cannot be expressed as a bare div_ratio and must go through decode.py's
 # catalog-driven logic -- anything here either produces a non-numeric result or applies a
 # rule a divisor cannot express.
@@ -224,6 +229,12 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The latest run of each periodic background job, so a run that is still going is not
         # joined by another. See _start_job().
         self._jobs: dict[str, asyncio.Task] = {}
+        # Whether a poll cycle is running; why it found neither node nor controller answering,
+        # if it did; and how many of its telegrams were answered at all, a refusal included.
+        # See _read_reg() and the end of _async_update_data().
+        self._polling = False
+        self._cycle_unreachable: str | None = None
+        self._cycle_answered = 0
         # Addresses this controller answered ERR_NOT_IMPLEMENTED for. Learned at runtime from
         # the device itself rather than guessed from the catalog, which describes the whole
         # family and so lists datapoints no individual unit implements. See _read_reg().
@@ -833,6 +844,12 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if cached is not None:
                 return cached
 
+        if self._polling and self._cycle_unreachable is not None:
+            # Earlier in this cycle nothing answered at all. Asking again for each remaining
+            # datapoint would cost a full handshake timeout apiece and learn nothing new, so the
+            # rest of the cycle is skipped; the next cycle asks again.
+            raise ControllerUnreachable(self._cycle_unreachable)
+
         self._current_telegrams += 1
         # P300 protocol wire overhead: TX telegram (8B) + ACK (1B) + RX telegram (8B + length) + ACK (1B)
         self._current_bytes += 18 + length
@@ -840,7 +857,12 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raw = await self.client.read_raw(
                 address, length, optolink.function_code(fc_read)
             )
+        except (optolink.OptolinkNotConnected, optolink.OptolinkControllerSilent) as err:
+            self._cycle_unreachable = str(err)
+            raise
         except optolink.OptolinkDeviceError as err:
+            # A refusal is still an answer: the controller is there.
+            self._cycle_answered += 1
             if err.is_permanent:
                 self._unsupported_addresses.add(address)
                 _LOGGER.debug(
@@ -861,6 +883,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     length,
                 )
             raise
+        self._cycle_answered += 1
         self._cycle_blocks[(address, length, fc_read)] = raw
         return raw
 
@@ -870,6 +893,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_init_device()
 
         start_time = time.monotonic()
+        self._polling = True
+        self._cycle_unreachable = None
+        self._cycle_answered = 0
         self._current_telegrams = 0
         self._current_failed = 0
         self._current_bytes = 0
@@ -1080,6 +1106,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # and its read-back above all -- must go to the controller, not to a snapshot that is
         # already seconds old.
         self._cycle_blocks = {}
+        self._polling = False
 
         duration = time.monotonic() - start_time
         self.poll_duration = round(duration, 2)
@@ -1113,6 +1140,15 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.telegram_rate = 0.0
             self.active_wire_load = 0.0
 
+        if self._cycle_unreachable is not None and not self._cycle_answered:
+            # Nothing in this cycle was answered: the controller is off or restarting, or the
+            # node is away. Failing the update marks every entity unavailable rather than
+            # presenting the last readings as current, and leaves out the background jobs
+            # below. What this cycle picked goes back to the front of the rotation, so it is
+            # read first once the controller answers again.
+            for item_id in due:
+                self._last_read.pop(item_id, None)
+            raise UpdateFailed(f"The controller does not answer: {self._cycle_unreachable}")
         if not data:
             raise UpdateFailed("Failed to communicate with OptoV controller")
 
