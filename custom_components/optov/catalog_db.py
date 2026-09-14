@@ -696,7 +696,11 @@ def _condition_holds(probed_value: int | None, op: str, compare: int) -> bool:
     return False
 
 
-_ALIAS_CACHE: dict[tuple[int, str], dict[int, int]] = {}
+# Per catalog file, controller and language: the file's modification time and the aliases it
+# yielded. Keyed by the file because two catalogs can resolve the same controller differently,
+# and stamped with its modification time so a catalog replaced in place is not answered from
+# the one it replaced; the new result overwrites the old entry rather than adding another.
+_ALIAS_CACHE: dict[tuple[str, int, str], tuple[int, dict[int, int]]] = {}
 
 
 def get_condition_aliases(
@@ -716,9 +720,12 @@ def get_condition_aliases(
     cases that matter without inventing name patterns of our own. Anything still unmatched is
     left alone; its rule simply cannot be evaluated.
     """
-    cached = _ALIAS_CACHE.get((device_id, culture))
-    if cached is not None:
-        return cached
+    path = os.path.abspath(db_path)
+    version = os.stat(path).st_mtime_ns
+    cache_key = (path, device_id, culture)
+    cached = _ALIAS_CACHE.get(cache_key)
+    if cached is not None and cached[0] == version:
+        return cached[1]
 
     with closing(get_db_connection(db_path)) as conn:
         foreign = [
@@ -731,7 +738,7 @@ def get_condition_aliases(
             )
         ]
         if not foreign:
-            _ALIAS_CACHE[(device_id, culture)] = {}
+            _ALIAS_CACHE[cache_key] = (version, {})
             return {}
 
         own: dict[str, list[int]] = {}
@@ -765,7 +772,7 @@ def get_condition_aliases(
                 len(aliases),
                 len(foreign),
             )
-        _ALIAS_CACHE[(device_id, culture)] = aliases
+        _ALIAS_CACHE[cache_key] = (version, aliases)
         return aliases
 
 
