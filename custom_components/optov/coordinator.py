@@ -6,6 +6,7 @@ import logging
 import re
 import time
 from collections import deque
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -216,6 +217,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._dst_expected_for: tuple[int, str] | None = None
         self._error_codes: dict[str, str] = {}
         self._error_poll_ticks: int = 0
+        # Whether the error history has been read successfully at least once. An empty
+        # history is a valid answer -- a controller that never had a fault -- so emptiness
+        # cannot stand in for "not fetched yet".
+        self._error_history_loaded = False
+        # The latest run of each periodic background job, so a run that is still going is not
+        # joined by another. See _start_job().
+        self._jobs: dict[str, asyncio.Task] = {}
         # Addresses this controller answered ERR_NOT_IMPLEMENTED for. Learned at runtime from
         # the device itself rather than guessed from the catalog, which describes the whole
         # family and so lists datapoints no individual unit implements. See _read_reg().
@@ -1121,17 +1129,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if key not in self._unsupported_schedules
             )
             if has_empty_sched or (self._schedule_poll_ticks % 120 == 0):
-                self.config_entry.async_create_background_task(
-                    self.hass, self.async_refresh_schedules(), "optov_programmes"
-                )
+                self._start_job("programmes", self.async_refresh_schedules)
             self._schedule_poll_ticks += 1
 
         # 6. Background error history poll (startup and every ~30 min / 60 poll cycles)
         if self._error_history_dp:
-            if not self.error_history or (self._error_poll_ticks % 60 == 0):
-                self.config_entry.async_create_background_task(
-                    self.hass, self.async_refresh_error_history(), "optov_faults"
-                )
+            if not self._error_history_loaded or (self._error_poll_ticks % 60 == 0):
+                self._start_job("faults", self.async_refresh_error_history)
             self._error_poll_ticks += 1
 
         # Learn what a read actually costs on this link, so the next cycle's slice is sized
@@ -1190,9 +1194,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and abs(self.clock_drift) >= _CLOCK_TOLERANCE
                 and time.monotonic() - self._clock_corrected_at >= _CLOCK_RETRY_AFTER
             ):
-                self.config_entry.async_create_background_task(
-                    self.hass, self.async_sync_clock(), "optov_clock"
-                )
+                self._start_job("clock", self.async_sync_clock)
 
         self._check_dst_rule(data)
 
@@ -1200,6 +1202,24 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._disable_unsupported_entities(sensor_status_raw)
 
         return data
+
+    def _start_job(
+        self, name: str, job: Callable[[], Coroutine[Any, Any, Any]]
+    ) -> None:
+        """Run a periodic background job, unless its previous run has not finished yet.
+
+        The poll cycle asks for these every cycle while their data is still missing, and a run
+        that meets timeouts easily outlasts a cycle. Starting another regardless would let runs
+        pile up, each one queueing for the link ahead of the next poll. The job is called only
+        when it is really started, so no coroutine is created just to be thrown away.
+        """
+        running = self._jobs.get(name)
+        if running is not None and not running.done():
+            _LOGGER.debug("Background job %s is still running; not starting another", name)
+            return
+        self._jobs[name] = self.config_entry.async_create_background_task(
+            self.hass, job(), f"optov_{name}"
+        )
 
     def clock_datapoint(self) -> dict[str, Any] | None:
         """The controller's clock, identified by what it is rather than where it lives.
@@ -1855,6 +1875,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             self.error_history = entries
             self.last_error = entries[0] if entries else None
+            self._error_history_loaded = True
             _LOGGER.debug(
                 "Refreshed error history from %s (0x%04X): %d entries",
                 dp["name"],
