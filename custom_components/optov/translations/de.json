@@ -33,10 +33,11 @@
       },
       "reconfigure": {
         "title": "Regelungs-Katalog",
-        "description": "Einen anderen Katalog für diese Regelung wählen oder einen neu erzeugten hochladen. Die Integration wird mit dem gewählten Katalog neu geladen. Ein hochgeladener Katalog mit dem Namen eines vorhandenen ersetzt diese Datei für alle Regelungen, die sie verwenden.",
+        "description": "Einen anderen Katalog für diese Regelung wählen oder einen neu erzeugten hochladen; die Integration wird damit neu geladen. Ein hochgeladener Katalog mit dem Namen eines vorhandenen ersetzt diese Datei für alle Regelungen, die sie verwenden. Kataloge, die keine Regelung verwendet, können unten zum Löschen angehakt werden.",
         "data": {
           "catalog": "Diesen Katalog verwenden",
-          "catalog_file": "Katalog hochladen"
+          "catalog_file": "Katalog hochladen",
+          "delete": "Diese Kataloge löschen"
         }
       }
     },
@@ -47,11 +48,13 @@
       "catalog_failed": "Der Katalog konnte nicht installiert werden. Siehe Home-Assistant-Protokoll.",
       "catalog_missing": "Einen Katalog auswählen oder hochladen.",
       "catalog_outdated": "Dieser Katalog stammt aus einer älteren Version des Erzeugungswerkzeugs als diese Integration benötigt. Neu erzeugen und erneut hochladen.",
-      "catalog_too_new": "Dieser Katalog stammt aus einer neueren Version des Erzeugungswerkzeugs, als diese Integration versteht. Integration aktualisieren."
+      "catalog_too_new": "Dieser Katalog stammt aus einer neueren Version des Erzeugungswerkzeugs, als diese Integration versteht. Integration aktualisieren.",
+      "catalog_in_use": "Nicht gelöscht, noch in Verwendung: {entries}. Diese Regelungen zuerst auf einen anderen Katalog umstellen."
     },
     "abort": {
       "already_configured": "Diese Regelung ist bereits eingerichtet.",
-      "reconfigure_successful": "Der Katalog wurde geändert. Die Integration wird damit neu geladen."
+      "reconfigure_successful": "Der Katalog wurde geändert. Die Integration wird damit neu geladen.",
+      "catalog_removed": "Erledigt. Gelöscht: {name}."
     }
   },
   "options": {
@@ -187,6 +190,7 @@
     "catalog_option": "{name} (Version {version}, {controllers} Regelungen, {languages})",
     "catalog_option_one": "{name} (Version {version}, 1 Regelung, {languages})",
     "catalog_option_outdated": "für eine ältere Version erzeugt, neu erzeugen",
-    "catalog_option_too_new": "neuer als diese Integration, Integration aktualisieren"
+    "catalog_option_too_new": "neuer als diese Integration, Integration aktualisieren",
+    "catalog_option_in_use": "verwendet von {entries}"
   }
 }

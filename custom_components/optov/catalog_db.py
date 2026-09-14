@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import sqlite3
-from contextlib import closing
+from contextlib import closing, suppress
 from typing import Any
 
 from .conversions import schedule_type
@@ -289,6 +289,26 @@ def install_catalog(source: str, config_dir: str, filename: str | None = None) -
         "Catalog installed: %s (%.1f MB)", target, os.path.getsize(target) / 1024 / 1024
     )
     return target
+
+
+def remove_catalog(config_dir: str, name: str) -> None:
+    """Delete a catalog file, and whatever SQLite may have left beside it. Blocking I/O.
+
+    Only a plain `.db` file name directly inside the catalog directory is accepted, so a name
+    arriving from a form cannot point anywhere else. Whether an entry still uses the catalog is
+    the caller's to check first.
+    """
+    if not name or name != os.path.basename(name) or not name.endswith(".db"):
+        raise ValueError(f"not a catalog file name: {name!r}")
+    path = os.path.join(config_dir, name)
+    os.remove(path)
+    for suffix in ("-wal", "-shm", "-journal"):
+        with suppress(FileNotFoundError):
+            os.remove(path + suffix)
+    absolute = os.path.abspath(path)
+    for key in [k for k in _ALIAS_CACHE if k[0] == absolute]:
+        del _ALIAS_CACHE[key]
+    _LOGGER.info("Catalog deleted: %s", path)
 
 
 def _catalog_name(filename: str) -> str:

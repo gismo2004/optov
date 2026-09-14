@@ -72,8 +72,9 @@ catalog it does not ask at all.
 
 **Changing it later.** *Reconfigure* on the integration entry picks another catalog or uploads a
 newer build, also when the entry failed to start because of its catalog. An upload under an
-existing name replaces that file for every controller using it. The *Catalog* sensor on the
-Optical interface device shows which file and version an entry runs on.
+existing name replaces that file for every controller using it, and catalogs no controller uses
+can be deleted there too. The *Catalog* sensor on the Optical interface device shows which file
+and version an entry runs on.
 
 A catalog records the structure it was built to, and the integration checks it on every start.
 If an update needs a newer one you are told to rebuild; if a catalog is newer than the

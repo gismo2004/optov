@@ -87,8 +87,12 @@ the user's own. Several may sit there and **each config entry records the one it
 with**, in `CONF_CATALOG`. No code may assume a single fixed catalog path: `get_db_connection()`
 takes one and has no default, and the coordinator carries `self.db_path` from the entry.
 
-**Reconfigure** changes `CONF_CATALOG` on an existing entry, choosing another file or uploading
-a new one. It updates the entry and stops; the entry's update listener reloads, because it
+**Reconfigure** is one screen, not a menu: a flow has no way back from a second screen. It
+changes `CONF_CATALOG` on the entry (choose another file or upload a new one) and offers a
+checklist of catalogs to delete. The checklist shows every catalog, with the ones an entry
+records, in any state, disabled included, marked as in use and refused on submit; Home
+Assistant's list selector cannot grey an option out. Changing the catalog updates the entry and
+stops; the entry's update listener reloads, because it
 compares the catalog the entry started with (`runtime_data.catalog`) as well as the options. Do
 not replace that with `async_update_reload_and_abort`: with an update listener present Home
 Assistant logs a usage warning for it and has announced it will stop working. Only an entry

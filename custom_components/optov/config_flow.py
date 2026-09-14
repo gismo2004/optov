@@ -63,6 +63,7 @@ from .translate import async_ui_text
 
 MANUAL = "manual"
 CONF_CATALOG_FILE = "catalog_file"
+CONF_DELETE = "delete"
 
 
 def _install_uploaded_catalog(
@@ -98,6 +99,8 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         # whether it arrived as an upload, which may have replaced a file of the same name.
         self._catalog: str | None = None
         self._uploaded = False
+        # Catalogs deleted on the way, so the closing message can name them.
+        self._deleted: list[str] = []
 
     @staticmethod
     @callback
@@ -268,104 +271,183 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Point an existing entry at another catalog, or upload a newer build of its own.
+        """Point this entry at another catalog, upload a newer build, or delete catalogs.
 
-        The same choice as when adding a controller, offered from the entry's menu. It works
-        for an entry whose setup failed as well, which is exactly the state an outdated,
-        missing or unreadable catalog leaves it in.
+        One screen, because a flow has no way back from a second one. Offered from the entry's
+        menu, and available for an entry whose setup failed as well, which is exactly the state
+        an outdated, missing or unreadable catalog leaves it in.
         """
         return await self._async_catalog_step("reconfigure", user_input)
+
+    @property
+    def _reconfiguring(self) -> bool:
+        return self.source == SOURCE_RECONFIGURE
+
+    @callback
+    def _catalog_users(self) -> dict[str, list[str]]:
+        """Each catalog file an entry records, with the titles of the entries recording it."""
+        users: dict[str, list[str]] = {}
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if name := entry.data.get(CONF_CATALOG):
+                users.setdefault(name, []).append(entry.title)
+        return users
 
     async def _async_catalog_step(
         self, step_id: str, user_input: dict[str, Any] | None
     ) -> ConfigFlowResult:
-        """Choose a catalog that is already here or upload one, checked either way."""
-        errors: dict[str, str] = {}
+        """Choose a catalog that is already here or upload one, checked either way.
+
+        When reconfiguring, the form also carries a checklist of catalogs to delete. Every
+        catalog is listed, since the list selector cannot grey an entry out; the ones an entry
+        records, in any state, are labelled as in use and refused if ticked. The entry being
+        reconfigured counts too: to delete its catalog, point it elsewhere first.
+        """
+        config_dir = self.hass.config.path(DOMAIN)
         catalogs = await self.hass.async_add_executor_job(
-            catalog_db.list_catalogs, self.hass.config.path(DOMAIN)
+            catalog_db.list_catalogs, config_dir
         )
+        users = self._catalog_users() if self._reconfiguring else {}
+        errors: dict[str, str] = {}
+        placeholders = {"entries": ""}
 
         if user_input is not None:
-            if user_input.get(CONF_CATALOG_FILE):
-                try:
-                    self._catalog = await self.hass.async_add_executor_job(
-                        _install_uploaded_catalog,
-                        self.hass,
-                        user_input[CONF_CATALOG_FILE],
-                        self.hass.config.path(DOMAIN),
-                    )
-                except catalog_db.CatalogSchemaError as err:
-                    errors["base"] = (
-                        "catalog_outdated" if err.outdated else "catalog_too_new"
-                    )
-                except ValueError:
-                    errors["base"] = "catalog_invalid"
-                except Exception:
-                    errors["base"] = "catalog_failed"
-                else:
-                    self._uploaded = True
-                    self._async_reload_entries_using(self._catalog)
-                    return await self._async_catalog_settled()
-            elif user_input.get(CONF_CATALOG):
-                # Chosen from the list rather than uploaded, so it has not been through the
-                # checks the upload does.
-                chosen = next(
-                    (c for c in catalogs if c["name"] == user_input[CONF_CATALOG]), None
-                )
-                if chosen is None:
-                    errors["base"] = "catalog_missing"
-                elif not chosen["usable"]:
-                    errors["base"] = (
-                        "catalog_too_new"
-                        if chosen["schema_version"] is not None
-                        and chosen["schema_version"] > catalog_db.CATALOG_SCHEMA_VERSION
-                        else "catalog_outdated"
-                    )
-                else:
-                    self._catalog = chosen["name"]
-                    return await self._async_catalog_settled()
-            else:
-                errors["base"] = "catalog_missing"
+            # Deletions first, so that a catalog picked from the list is one still there, and
+            # nothing is deleted while something in the choice is wrong.
+            error = await self._async_delete_ticked(user_input, users, placeholders)
+            catalogs = [c for c in catalogs if c["name"] not in self._deleted]
+            error = error or await self._async_take_choice(user_input, catalogs)
+            if error is None:
+                return await self._async_catalog_settled()
+            errors["base"] = error
 
-        # When reconfiguring, the catalog the entry already uses is the one preselected.
-        current = (
-            self._get_reconfigure_entry().data.get(CONF_CATALOG)
-            if self.source == SOURCE_RECONFIGURE
-            else None
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=await self._async_catalog_schema(catalogs, users),
+            errors=errors,
+            description_placeholders=placeholders,
         )
+
+    async def _async_delete_ticked(
+        self,
+        user_input: dict[str, Any],
+        users: dict[str, list[str]],
+        placeholders: dict[str, str],
+    ) -> str | None:
+        """Delete the catalogs ticked for it; an error key if any is still in use."""
+        to_delete = user_input.get(CONF_DELETE) or []
+        if not to_delete:
+            return None
+        holders = {name: set(titles) for name, titles in users.items()}
+        if not user_input.get(CONF_CATALOG_FILE) and (kept := user_input.get(CONF_CATALOG)):
+            # The catalog being picked for this entry is about to be in use as well.
+            holders.setdefault(kept, set()).add(self._get_reconfigure_entry().title)
+        if in_use := [name for name in to_delete if name in holders]:
+            placeholders["entries"] = ", ".join(
+                f"{name} ({', '.join(sorted(holders[name]))})" for name in in_use
+            )
+            return "catalog_in_use"
+        for name in to_delete:
+            await self.hass.async_add_executor_job(
+                catalog_db.remove_catalog, self.hass.config.path(DOMAIN), name
+            )
+            self._deleted.append(name)
+        return None
+
+    async def _async_take_choice(
+        self, user_input: dict[str, Any], catalogs: list[dict[str, Any]]
+    ) -> str | None:
+        """Settle self._catalog from an upload or a pick; an error key if neither works."""
+        if file_id := user_input.get(CONF_CATALOG_FILE):
+            try:
+                self._catalog = await self.hass.async_add_executor_job(
+                    _install_uploaded_catalog, self.hass, file_id, self.hass.config.path(DOMAIN)
+                )
+            except catalog_db.CatalogSchemaError as err:
+                return "catalog_outdated" if err.outdated else "catalog_too_new"
+            except ValueError:
+                return "catalog_invalid"
+            except Exception:
+                return "catalog_failed"
+            self._uploaded = True
+            self._async_reload_entries_using(self._catalog)
+            return None
+        if name := user_input.get(CONF_CATALOG):
+            # Picked from the list rather than uploaded, so it has not been through the checks
+            # the upload does.
+            chosen = next((c for c in catalogs if c["name"] == name), None)
+            if chosen is None:
+                return "catalog_missing"
+            if not chosen["usable"]:
+                return f"catalog_{self._behind(chosen)}"
+            self._catalog = name
+            return None
+        if self._deleted:
+            # Only deletions asked for; the entry keeps the catalog it has.
+            self._catalog = self._get_reconfigure_entry().data.get(CONF_CATALOG)
+            return None
+        return "catalog_missing"
+
+    async def _async_catalog_schema(
+        self, catalogs: list[dict[str, Any]], users: dict[str, list[str]]
+    ) -> vol.Schema:
+        """The form: pick from what is here, upload, and when reconfiguring, tick to delete."""
         schema: dict[Any, Any] = {}
         if catalogs:
             names = [c["name"] for c in catalogs]
+            current = (
+                self._get_reconfigure_entry().data.get(CONF_CATALOG)
+                if self._reconfiguring
+                else None
+            )
+            options = [
+                SelectOptionDict(value=c["name"], label=await self._async_catalog_label(c))
+                for c in catalogs
+            ]
             default = current if current in names else names[0]
-            # Choosing an existing one, with what is in each so they can be told apart.
-            schema[vol.Optional(CONF_CATALOG, default=default)] = (
-                SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            SelectOptionDict(
-                                value=c["name"], label=await self._async_catalog_label(c)
-                            )
-                            for c in catalogs
-                        ],
-                        mode=SelectSelectorMode.LIST,
-                    )
-                )
+            schema[vol.Optional(CONF_CATALOG, default=default)] = SelectSelector(
+                SelectSelectorConfig(options=options, mode=SelectSelectorMode.LIST)
             )
         schema[vol.Optional(CONF_CATALOG_FILE)] = FileSelector(
             # A catalog as the compiler leaves it. `.xz` is still taken because an older
             # one may be compressed; it is unpacked once, on the way in.
             FileSelectorConfig(accept=".db,.xz")
         )
-        return self.async_show_form(
-            step_id=step_id, data_schema=vol.Schema(schema), errors=errors
-        )
+        if self._reconfiguring and catalogs:
+            deletable = []
+            for c in catalogs:
+                label = await self._async_catalog_label(c)
+                if c["name"] in users:
+                    in_use = await async_ui_text(
+                        self.hass,
+                        "catalog_option_in_use",
+                        entries=", ".join(sorted(users[c["name"]])),
+                    )
+                    label = f"{label} – {in_use}"
+                deletable.append(SelectOptionDict(value=c["name"], label=label))
+            schema[vol.Optional(CONF_DELETE, default=[])] = SelectSelector(
+                SelectSelectorConfig(
+                    options=deletable, multiple=True, mode=SelectSelectorMode.LIST
+                )
+            )
+        return vol.Schema(schema)
+
+    @staticmethod
+    def _behind(catalog: dict[str, Any]) -> str:
+        """Which side is behind for a catalog this integration cannot read.
+
+        Rebuilding a catalog that is ahead of the integration would not help, so the two get
+        different advice.
+        """
+        version = catalog["schema_version"]
+        if version is not None and version > catalog_db.CATALOG_SCHEMA_VERSION:
+            return "too_new"
+        return "outdated"
 
     async def _async_catalog_label(self, catalog: dict[str, Any]) -> str:
         """How a catalog is offered: its file, structure version, controllers and languages.
 
         A catalog this integration cannot read is still offered, so it can be seen and
-        replaced, and it says which side is behind: rebuilding a catalog that is ahead of the
-        integration would not help.
+        replaced, and it says which side is behind.
         """
         version = catalog["schema_version"]
         label = await async_ui_text(
@@ -378,12 +460,8 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         if catalog["usable"]:
             return label
-        behind = (
-            "catalog_option_too_new"
-            if version is not None and version > catalog_db.CATALOG_SCHEMA_VERSION
-            else "catalog_option_outdated"
-        )
-        return f"{label} – {await async_ui_text(self.hass, behind)}"
+        note = await async_ui_text(self.hass, f"catalog_option_{self._behind(catalog)}")
+        return f"{label} – {note}"
 
     async def _async_catalog_settled(self) -> ConfigFlowResult:
         """Go on once the catalog is settled.
@@ -395,7 +473,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         those two are reloaded explicitly. Home Assistant's combined update-and-reload helper
         is not used, since it warns about, and is set to refuse, entries with an update listener.
         """
-        if self.source != SOURCE_RECONFIGURE:
+        if not self._reconfiguring:
             return await self.async_step_user()
 
         entry = self._get_reconfigure_entry()
@@ -418,6 +496,11 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         if entry.state is not ConfigEntryState.LOADED or (self._uploaded and not changed):
             self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        if self._deleted:
+            return self.async_abort(
+                reason="catalog_removed",
+                description_placeholders={"name": ", ".join(self._deleted)},
+            )
         return self.async_abort(reason="reconfigure_successful")
 
     @callback
@@ -431,11 +514,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         because of the file just replaced. Disabled and unloaded entries are left alone. The
         entry being reconfigured is left to _async_catalog_settled().
         """
-        current = (
-            self._get_reconfigure_entry().entry_id
-            if self.source == SOURCE_RECONFIGURE
-            else None
-        )
+        current = self._get_reconfigure_entry().entry_id if self._reconfiguring else None
         active = (
             ConfigEntryState.LOADED,
             ConfigEntryState.SETUP_IN_PROGRESS,

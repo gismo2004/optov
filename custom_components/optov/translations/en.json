@@ -33,10 +33,11 @@
       },
       "reconfigure": {
         "title": "Controller catalog",
-        "description": "Choose another catalog for this controller, or upload a new build. The integration reloads with the catalog you pick. An upload with the name of a catalog already here replaces that file for every controller using it.",
+        "description": "Choose another catalog for this controller, or upload a new build; the integration reloads with it. An upload with the name of a catalog already here replaces that file for every controller using it. Catalogs no controller uses can be ticked for deletion below.",
         "data": {
           "catalog": "Use this catalog",
-          "catalog_file": "Upload a catalog"
+          "catalog_file": "Upload a catalog",
+          "delete": "Delete these catalogs"
         }
       }
     },
@@ -47,11 +48,13 @@
       "catalog_failed": "The catalog could not be installed. Check the Home Assistant log.",
       "catalog_missing": "Choose a catalog or upload one.",
       "catalog_outdated": "That catalog was built by an older version of the compiler than this integration needs. Rebuild it and upload it again.",
-      "catalog_too_new": "That catalog was built by a newer version of the compiler than this integration understands. Update the integration."
+      "catalog_too_new": "That catalog was built by a newer version of the compiler than this integration understands. Update the integration.",
+      "catalog_in_use": "Not deleted, still in use: {entries}. Switch those controllers to another catalog first."
     },
     "abort": {
       "already_configured": "This controller is already set up.",
-      "reconfigure_successful": "The catalog was changed. The integration reloads with it."
+      "reconfigure_successful": "The catalog was changed. The integration reloads with it.",
+      "catalog_removed": "Done. Deleted: {name}."
     }
   },
   "options": {
@@ -187,6 +190,7 @@
     "catalog_option": "{name} (version {version}, {controllers} controllers, {languages})",
     "catalog_option_one": "{name} (version {version}, 1 controller, {languages})",
     "catalog_option_outdated": "built for an older version, rebuild it",
-    "catalog_option_too_new": "newer than this integration, update the integration"
+    "catalog_option_too_new": "newer than this integration, update the integration",
+    "catalog_option_in_use": "in use by {entries}"
   }
 }
