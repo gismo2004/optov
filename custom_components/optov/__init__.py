@@ -191,6 +191,30 @@ async def async_unload_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
     return unload_ok
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> None:
+    """Delete the catalog of a removed entry, unless another entry still records it.
+
+    Reconfigure refuses to delete a catalog an entry uses, and a removed entry has no Reconfigure
+    left, so without this the catalog of the last controller could never be removed from within
+    Home Assistant. Home Assistant still lists the entry being removed, hence the id check.
+    """
+    name = entry.data.get(CONF_CATALOG)
+    if not name or any(
+        other.data.get(CONF_CATALOG) == name
+        for other in hass.config_entries.async_entries(DOMAIN)
+        if other.entry_id != entry.entry_id
+    ):
+        return
+    try:
+        await hass.async_add_executor_job(
+            catalog_db.remove_catalog, hass.config.path(DOMAIN), name
+        )
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as err:
+        _LOGGER.warning("Could not delete catalog %s of the removed entry: %s", name, err)
+
+
 async def _async_options_updated(
     hass: HomeAssistant, entry: OptolinkConfigEntry
 ) -> None:

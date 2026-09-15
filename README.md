@@ -73,8 +73,9 @@ catalog it does not ask at all.
 **Changing it later.** *Reconfigure* on the integration entry picks another catalog or uploads a
 newer build, also when the entry failed to start because of its catalog. An upload under an
 existing name replaces that file for every controller using it, and catalogs no controller uses
-can be deleted there too. The *Catalog* sensor on the Optical interface device shows which file
-and version an entry runs on.
+can be deleted there too. Removing an entry deletes its catalog as well, unless another entry uses
+it, so keep your copy of the file. The *Catalog* sensor on the Optical interface device shows
+which file and version an entry runs on.
 
 A catalog records the structure it was built to, and the integration checks it on every start.
 If an update needs a newer one you are told to rebuild; if a catalog is newer than the
@@ -148,8 +149,8 @@ entity identities from. The proxy name also appears in the integration's title, 
 controllers are told apart there. That has one consequence worth knowing before you start.
 
 **Your customisations survive a reinstall.** Enable a few extra entities by hand, put a device
-in an area, rename something: remove OptoV and add it again, and Home Assistant restores all of
-it, because the identities do not change. They are yours, written in the file above, rather than
+in an area, rename something: remove OptoV and add it again, uploading your catalog again, and
+Home Assistant restores all of it, because the identities do not change. They are yours, written in the file above, rather than
 anything Home Assistant generated. If the ESP32 itself dies, flash the replacement with the same
 configuration and the new hardware picks up exactly where the old one left off.
 

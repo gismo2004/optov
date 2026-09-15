@@ -98,6 +98,11 @@ not replace that with `async_update_reload_and_abort`: with an update listener p
 Assistant logs a usage warning for it and has announced it will stop working. Only an entry
 without a listener (setup failed) or an unchanged name after a re-upload is reloaded explicitly.
 
+Because Reconfigure refuses a catalog its own entry uses, the last entry's catalog could never be
+deleted from within Home Assistant. `async_remove_entry` closes that: removing an entry deletes
+its catalog unless another entry records the same file. Home Assistant still lists the entry
+being removed when it calls that hook, so it is excluded by id.
+
 Nothing module-level in `catalog_db` may cache what a catalog contains without keying it to the
 catalog file, since an entry can switch files at runtime and several entries can use different
 ones.
