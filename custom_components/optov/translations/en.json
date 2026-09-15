@@ -61,7 +61,7 @@
     "step": {
       "init": {
         "title": "OptoV",
-        "description": "Which datapoints become entities, and how the controller is polled.",
+        "description": "Which datapoints become entities, and how the controller is polled. A group switched on here appears about 30 seconds after saving, when Home Assistant reloads the integration.",
         "data": {
           "language": "Catalog language (names of datapoints and values)",
           "enable_diagnostics": "Diagnostics (trending, statistics, diagnosis pages)",

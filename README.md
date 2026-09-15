@@ -228,7 +228,8 @@ from a dashboard card or service, the updated programme is read back immediately
 | Keep the clock in sync | on | Correct the controller clock from Home Assistant when it drifts |
 | Verbose logging | off | Raise this integration's log level to debug without touching your `logger:` configuration |
 
-Switching a tier on enables its entities; switching it off disables them again. **Entities you
+Switching a tier on enables its entities about 30 seconds after saving, when Home Assistant
+reloads the integration; switching it off disables them again straight away. **Entities you
 switched on or off yourself are left alone.** Enable a single datapoint for a dashboard, or
 disable one you do not want, and it stays that way through tier changes, restarts and
 reinstalls. Everything you have not touched follows the tiers, also after removing and adding

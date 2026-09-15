@@ -61,7 +61,7 @@
     "step": {
       "init": {
         "title": "OptoV",
-        "description": "Welche Datenpunkte zu Entitäten werden und wie die Regelung abgefragt wird.",
+        "description": "Welche Datenpunkte zu Entitäten werden und wie die Regelung abgefragt wird. Eine hier eingeschaltete Gruppe erscheint etwa 30 Sekunden nach dem Speichern, wenn Home Assistant die Integration neu lädt.",
         "data": {
           "language": "Katalogsprache (Namen der Datenpunkte und Werte)",
           "enable_diagnostics": "Diagnose (Trend, Statistik, Diagnoseseiten)",

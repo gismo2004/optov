@@ -168,6 +168,33 @@ _MIN_GAP = 1.0
 _SENSOR_NOT_PRESENT = 6
 
 
+def tiers_enabled_by(options: dict[str, Any]) -> set[str]:
+    """The catalog tiers the options switch on.
+
+    They are *added* to the base set -- the controller's own overview readings plus its
+    operation menu -- which is not tier-driven, so leaving every option off gives the everyday
+    set, and switching one on brings in that whole branch for as long as it is on.
+    """
+    tiers: set[str] = set()
+    if options.get(CONF_ENABLE_DIAGNOSTICS, DEFAULT_ENABLE_DIAGNOSTICS):
+        tiers.update(
+            {
+                "Trending",
+                "Statistic",
+                "DiagnosisDiagnosis1",
+                "DiagnosisDiagnosis2",
+                "Lasterror",
+            }
+        )
+    if options.get(CONF_ENABLE_COMMISSIONING, DEFAULT_ENABLE_COMMISSIONING):
+        tiers.add("Installation")
+    if options.get(CONF_ENABLE_CODING2, DEFAULT_ENABLE_CODING2):
+        tiers.update({"Coding2", "DefaultSettings"})
+    if options.get(CONF_ENABLE_EXPERT, DEFAULT_ENABLE_EXPERT):
+        tiers.update({"Expertlayer", "CodeAccessLevelTD"})
+    return tiers
+
+
 class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching OptoV data dynamically from a DeviceProfile."""
 
@@ -182,6 +209,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.client = client
         self.config_entry = config_entry
         self.profile: DeviceProfile | None = None
+        # The controller's catalog row and the probed rule inputs the profile was built from,
+        # kept so the entity set for other options can be derived without probing again.
+        self._dev: dict[str, Any] | None = None
+        self._probed_values: dict[int, int] = {}
         self.device_info: DeviceInfo | None = None
         self.data: dict[str, Any] = {}
         self.schedules: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -620,39 +651,15 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.config_entry, data=new_data
                 )
 
-        # Optional tiers the user has switched on. These are *added* to the base set (the
-        # controller's own overview readings plus its operation menu), which is not tier-driven
-        # -- so leaving every toggle off gives the everyday set, and switching one on brings in
-        # that whole branch for as long as it is on.
-        enabled_tiers: set[str] = set()
-        if self.config_entry.options.get(
-            CONF_ENABLE_DIAGNOSTICS, DEFAULT_ENABLE_DIAGNOSTICS
-        ):
-            enabled_tiers.update(
-                {
-                    "Trending",
-                    "Statistic",
-                    "DiagnosisDiagnosis1",
-                    "DiagnosisDiagnosis2",
-                    "Lasterror",
-                }
-            )
-        if self.config_entry.options.get(
-            CONF_ENABLE_COMMISSIONING, DEFAULT_ENABLE_COMMISSIONING
-        ):
-            enabled_tiers.add("Installation")
-        if self.config_entry.options.get(CONF_ENABLE_CODING2, DEFAULT_ENABLE_CODING2):
-            enabled_tiers.update({"Coding2", "DefaultSettings"})
-        if self.config_entry.options.get(CONF_ENABLE_EXPERT, DEFAULT_ENABLE_EXPERT):
-            enabled_tiers.update({"Expertlayer", "CodeAccessLevelTD"})
-
+        self._dev = dev
+        self._probed_values = probed_values
         generated = await self.hass.async_add_executor_job(
             catalog_db.generate_profile,
             dev["id"],
             self.db_path,
             self._language,
             probed_values,
-            enabled_tiers,
+            tiers_enabled_by(self.config_entry.options),
         )
         total = sum(len(v) for v in generated.values() if isinstance(v, list))
         enabled = sum(
@@ -674,6 +681,31 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             data=generated,
             sw_version=sw_version,
             model_name=dev["model"],
+        )
+
+    async def async_profile_for_options(
+        self, options: dict[str, Any]
+    ) -> DeviceProfile | None:
+        """The entity set these options would produce, leaving the running profile alone.
+
+        Built from the catalog row and rule inputs the running profile came from, so nothing is
+        probed or written. None before the controller has been identified.
+        """
+        if self.profile is None or self._dev is None:
+            return None
+        generated = await self.hass.async_add_executor_job(
+            catalog_db.generate_profile,
+            self._dev["id"],
+            self.db_path,
+            self._language,
+            self._probed_values,
+            tiers_enabled_by(options),
+        )
+        return DeviceProfile(
+            sys_id=self.profile.sys_id,
+            data=generated,
+            sw_version=self.profile.sw_version,
+            model_name=self._dev["model"],
         )
 
     def _should_poll(self, item: dict[str, Any], domain: str) -> bool:

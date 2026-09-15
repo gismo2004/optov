@@ -36,7 +36,7 @@ from .const import (
 )
 from .coordinator import OptolinkConfigEntry, OptolinkCoordinator, OptolinkRuntime
 from .optolink import OptolinkClient
-from .profiles import parse_address
+from .profiles import DeviceProfile, parse_address
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -226,15 +226,32 @@ async def async_remove_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
 async def _async_options_updated(
     hass: HomeAssistant, entry: OptolinkConfigEntry
 ) -> None:
-    """Reload when the options or the catalog changed, and only then. See async_setup_entry."""
+    """Apply an options or catalog change; ignore the entry data this integration writes itself.
+
+    Another catalog, or options that switch nothing on, reload at once. Options that switch
+    entities on do not: those entities are enabled here, and Home Assistant reloads an entry
+    30 seconds after one of its entities is enabled, which then applies the whole change.
+    Reloading here as well would reload twice. The options are recorded as applied, so entry
+    data written while that reload is pending cannot bring it forward.
+    """
     runtime = entry.runtime_data
-    if runtime.options == dict(entry.options) and runtime.catalog == entry.data.get(
-        CONF_CATALOG
-    ):
+    options = dict(entry.options)
+    same_catalog = runtime.catalog == entry.data.get(CONF_CATALOG)
+    if runtime.options == options and same_catalog:
         _LOGGER.debug(
             "Config entry updated without an options or catalog change; not reloading"
         )
         return
+    if same_catalog:
+        profile = await runtime.coordinator.async_profile_for_options(options)
+        if profile and _async_apply_enabled_states(
+            hass, entry, runtime.coordinator, profile
+        ):
+            runtime.options = options
+            _LOGGER.info(
+                "Options saved; Home Assistant reloads the entry in about 30 seconds to apply them"
+            )
+            return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -430,13 +447,14 @@ def _async_reconcile_registry(
 
 
 def _expected_entities(
-    coordinator: OptolinkCoordinator,
+    coordinator: OptolinkCoordinator, profile: DeviceProfile | None = None
 ) -> dict[tuple[str, str], dict[str, Any] | None]:
-    """Every entity the profile produces, keyed the way the registry keys them.
+    """Every entity a profile produces, keyed the way the registry keys them.
 
-    A catalog datapoint maps to its profile item; the integration's own sensors map to None.
+    The running profile unless another is given. A catalog datapoint maps to its profile item;
+    the integration's own sensors map to None.
     """
-    profile = coordinator.profile
+    profile = profile or coordinator.profile
     prefix = f"{coordinator.stable_id}_"
     expected: dict[tuple[str, str], dict[str, Any] | None] = {}
     for platform, domain in (
@@ -512,25 +530,30 @@ def _async_track_manual_changes(hass: HomeAssistant) -> None:
 
 @callback
 def _async_apply_enabled_states(
-    hass: HomeAssistant, entry: OptolinkConfigEntry, coordinator: OptolinkCoordinator
-) -> None:
+    hass: HomeAssistant,
+    entry: OptolinkConfigEntry,
+    coordinator: OptolinkCoordinator,
+    profile: DeviceProfile | None = None,
+) -> int:
     """Switch each entity on or off as its tier says, except those decided by hand.
 
     Decided by hand means marked by _async_track_manual_changes, or disabled by the user, which
     Home Assistant records itself. Everything else follows the options: on if the profile enables
-    it and the controller has not reported the datapoint absent, off otherwise.
+    it and the controller has not reported the datapoint absent, off otherwise. The running
+    profile unless another is given; returns how many entities it switched on.
 
     Called before the platforms set up, so an entity a tier now enables is added normally, and
     again after them, for the entities Home Assistant has just restored from an earlier
     installation of this controller, which only reach the registry at that point. Switching one
     off then needs no reload; Home Assistant reloads the entry only after switching one on.
     """
-    if not coordinator.profile:
-        return
+    if not (profile or coordinator.profile):
+        return 0
     entity_reg = er.async_get(hass)
     own_enables: set[str] = hass.data.setdefault(OWN_ENABLES_KEY, set())
-    expected = _expected_entities(coordinator)
+    expected = _expected_entities(coordinator, profile)
     retired = set(entry.data.get("retired_items") or [])
+    switched_on = 0
     for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
         item = expected.get((reg_entry.domain, reg_entry.unique_id))
         if (
@@ -547,6 +570,8 @@ def _async_apply_enabled_states(
         elif reg_entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION and wants_on:
             own_enables.add(reg_entry.entity_id)
             entity_reg.async_update_entity(reg_entry.entity_id, disabled_by=None)
+            switched_on += 1
+    return switched_on
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:

@@ -207,6 +207,12 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
   leaves marked and user-disabled entities alone and sets everything else from the tiers, before
   the platforms and again after them for restored entities. Enabling an entity from code must go
   through `OWN_ENABLES_KEY`, or the listener takes it for a person's switch.
+- **An options change that switches entities on does not reload from the update listener.**
+  Home Assistant reloads an entry 30 seconds after one of its entities is enabled, whoever
+  enabled it, so `_async_options_updated` enables them for the new options
+  (`async_profile_for_options`) and leaves the reload to that. Reloading there as well is what
+  used to reload twice. Everything else (a tier off, language, interval, catalog) reloads at
+  once, because disabling triggers no reload of Home Assistant's.
 
 ## Working on the integration
 
