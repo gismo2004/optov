@@ -9,7 +9,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.persistent_notification import (
     async_create as pn_async_create,
 )
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import (
     ConfigEntryError,
     ConfigEntryNotReady,
@@ -44,6 +44,10 @@ CARD_FILENAME = "optov-cards.js"
 CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
 FRONTEND_KEY = f"{DOMAIN}_frontend"
 LOG_LEVEL_KEY = f"{DOMAIN}_saved_log_level"
+REGISTRY_LISTENER_KEY = f"{DOMAIN}_registry_listener"
+OWN_ENABLES_KEY = f"{DOMAIN}_own_enables"
+# Set in an entity's registry options once its enabled state has been changed by hand.
+MANUAL_OPTION = "manual"
 
 # Entities this integration creates that are not catalog datapoints.
 GATEWAY_SENSORS = (
@@ -60,6 +64,7 @@ FAULT_HISTORY_SENSOR = "fehlerhistorie"
 async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> bool:
     """Connect to the controller, build its entity set and start polling."""
     _async_apply_log_level(hass, entry)
+    _async_track_manual_changes(hass)
     _LOGGER.info("Setting up OptoV for %s", entry.title)
 
     # The catalog is the user's own build and lives in <config>/optov/. Without one there is
@@ -151,6 +156,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
         _async_reconcile_registry(hass, entry, coordinator)
         await _async_register_frontend(hass)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        # Entities Home Assistant restored from an earlier installation of this controller
+        # only reach the registry while the platforms set up; see _async_apply_enabled_states.
+        _async_apply_enabled_states(hass, entry, coordinator)
     except Exception:
         # Home Assistant does not unload an entry whose setup failed, so async_unload_entry
         # never runs for it. Without closing the connection here its socket would stay open,
@@ -380,40 +388,7 @@ def _async_reconcile_registry(
                 _LOGGER.info("Removing circuit device %s", dev.name)
                 device_reg.async_remove_device(dev.id)
 
-    # Every entity the profile produces, keyed the way the registry keys them.
-    prefix = f"{coordinator.stable_id}_"
-    expected: dict[tuple, dict[str, Any] | None] = {}
-    for platform, domain in (
-        ("sensors", "sensor"),
-        ("binary_sensors", "binary_sensor"),
-        ("numbers", "number"),
-        ("selects", "select"),
-        ("switches", "switch"),
-    ):
-        for item in getattr(profile, platform, []):
-            expected[(domain, f"{prefix}{item['id']}")] = item
-    for key in profile.schedules:
-        expected[("sensor", f"{prefix}schaltzeiten_{key}")] = None
-    for suffix in (*GATEWAY_SENSORS, FAULT_HISTORY_SENSOR):
-        expected[("sensor", f"{prefix}{suffix}")] = None
-
-    # Home Assistant records nothing about who enabled an entity: one the user switched on by
-    # hand looks exactly like one a tier brought in. Two lists stand in for that.
-    #
-    # `auto_enabled` is what the profile switched on last time, and is the only thing this
-    # integration will ever switch off again. `user_enabled` is what someone switched on by
-    # hand, and is never switched off -- switching a tier on and then off again used to take
-    # those with it, because a tier can make a hand-picked datapoint default-on for a while,
-    # which quietly moved it into the first list.
-    previously_auto = set(entry.data.get("auto_enabled") or [])
-    user_enabled = set(entry.data.get("user_enabled") or [])
-    auto_enabled = sorted(
-        uid
-        for (_domain, uid), item in expected.items()
-        if item is not None and item.get("enabled_by_default")
-    )
-    retired = set(entry.data.get("retired_items") or [])
-
+    expected = _expected_entities(coordinator)
     for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
         key = (reg_entry.domain, reg_entry.unique_id)
         if key not in expected:
@@ -427,29 +402,6 @@ def _async_reconcile_registry(
         if item is None:
             continue
         updates: dict[str, Any] = {}
-        uid = key[1]
-        default_on = bool(item.get("enabled_by_default"))
-
-        # On, not on by default, and not something this integration switched on: someone did
-        # it by hand. Remembered from here on, so no later tier change takes it away.
-        if (
-            reg_entry.disabled_by is None
-            and not default_on
-            and uid not in previously_auto
-        ):
-            user_enabled.add(uid)
-        # Switched off by hand again: forget it, or it would be switched back on below.
-        if reg_entry.disabled_by == er.RegistryEntryDisabler.USER:
-            user_enabled.discard(uid)
-
-        # Switch on what the profile enables and what the user asked for, unless the
-        # controller itself said the datapoint is absent. Switch off only what this
-        # integration switched on and a tier has since taken away.
-        wants_on = (default_on or uid in user_enabled) and item["id"] not in retired
-        if reg_entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION and wants_on:
-            updates["disabled_by"] = None
-        elif reg_entry.disabled_by is None and not wants_on and uid in previously_auto:
-            updates["disabled_by"] = er.RegistryEntryDisabler.INTEGRATION
         # Controls versus Configuration is decided at creation only; a reclassified datapoint
         # would otherwise move only for fresh installations.
         if reg_entry.entity_category != item.get("entity_category"):
@@ -467,18 +419,134 @@ def _async_reconcile_registry(
         if updates:
             entity_reg.async_update_entity(reg_entry.entity_id, **updates)
 
-    # Written once, after the loop, because the hand-picked entities are only discovered
-    # while walking it. Only what an entity still in the profile says counts: an entity that
-    # has gone is dropped from both lists rather than remembered forever.
-    known = {uid for _domain, uid in expected}
-    changes: dict[str, Any] = {}
-    if auto_enabled != sorted(previously_auto):
-        changes["auto_enabled"] = auto_enabled
-    kept_user = sorted(user_enabled & known)
-    if kept_user != sorted(entry.data.get("user_enabled") or []):
-        changes["user_enabled"] = kept_user
-    if changes:
-        hass.config_entries.async_update_entry(entry, data={**entry.data, **changes})
+    _async_apply_enabled_states(hass, entry, coordinator)
+
+    # Who enabled an entity is recorded on the entity itself; the entry no longer carries the
+    # lists an older version kept for it, which a re-added entry started without.
+    if stale := [key for key in ("auto_enabled", "user_enabled") if key in entry.data]:
+        hass.config_entries.async_update_entry(
+            entry, data={k: v for k, v in entry.data.items() if k not in stale}
+        )
+
+
+def _expected_entities(
+    coordinator: OptolinkCoordinator,
+) -> dict[tuple[str, str], dict[str, Any] | None]:
+    """Every entity the profile produces, keyed the way the registry keys them.
+
+    A catalog datapoint maps to its profile item; the integration's own sensors map to None.
+    """
+    profile = coordinator.profile
+    prefix = f"{coordinator.stable_id}_"
+    expected: dict[tuple[str, str], dict[str, Any] | None] = {}
+    for platform, domain in (
+        ("sensors", "sensor"),
+        ("binary_sensors", "binary_sensor"),
+        ("numbers", "number"),
+        ("selects", "select"),
+        ("switches", "switch"),
+    ):
+        for item in getattr(profile, platform, []):
+            expected[(domain, f"{prefix}{item['id']}")] = item
+    for key in profile.schedules:
+        expected[("sensor", f"{prefix}schaltzeiten_{key}")] = None
+    for suffix in (*GATEWAY_SENSORS, FAULT_HISTORY_SENSOR):
+        expected[("sensor", f"{prefix}{suffix}")] = None
+    return expected
+
+
+@callback
+def _async_track_manual_changes(hass: HomeAssistant) -> None:
+    """Mark an entity as the user's to decide the moment its enabled state is changed by hand.
+
+    Home Assistant records no author for enabling or disabling an entity. The registry update
+    does carry the state before the change, which is enough to tell a person's switch from the
+    rest: enabling a whole config entry or device lifts CONFIG_ENTRY or DEVICE rather than
+    anything in between, and the enables this integration makes itself are announced in
+    OWN_ENABLES_KEY first (its disables set INTEGRATION, which no person does).
+
+    The mark goes into the entity's registry options. Home Assistant keeps those with a removed
+    entity and restores them when it returns, so a choice made by hand outlives removing and
+    re-adding the integration. Registered once per Home Assistant, at the start of the first
+    setup, so a switch made while an entry is not running is seen as well.
+    """
+    if hass.data.get(REGISTRY_LISTENER_KEY):
+        return
+    hass.data[REGISTRY_LISTENER_KEY] = True
+    own_enables: set[str] = hass.data.setdefault(OWN_ENABLES_KEY, set())
+    entity_reg = er.async_get(hass)
+    by_hand = (None, er.RegistryEntryDisabler.USER)
+    from_hand_or_us = (*by_hand, er.RegistryEntryDisabler.INTEGRATION)
+
+    @callback
+    def _is_enabled_state_change(event_data: er.EventEntityRegistryUpdatedData) -> bool:
+        return event_data["action"] == "update" and "disabled_by" in event_data["changes"]
+
+    @callback
+    def _async_changed(event: Event[er.EventEntityRegistryUpdatedData]) -> None:
+        entity_id = event.data["entity_id"]
+        if entity_id in own_enables:
+            own_enables.discard(entity_id)
+            return
+        reg_entry = entity_reg.async_get(entity_id)
+        if (
+            reg_entry is None
+            or reg_entry.platform != DOMAIN
+            or reg_entry.options.get(DOMAIN, {}).get(MANUAL_OPTION)
+        ):
+            return
+        if (
+            reg_entry.disabled_by in by_hand
+            and event.data["changes"]["disabled_by"] in from_hand_or_us
+        ):
+            entity_reg.async_update_entity_options(
+                entity_id, DOMAIN, {**reg_entry.options.get(DOMAIN, {}), MANUAL_OPTION: True}
+            )
+
+    hass.bus.async_listen(
+        er.EVENT_ENTITY_REGISTRY_UPDATED,
+        _async_changed,
+        event_filter=_is_enabled_state_change,
+    )
+
+
+@callback
+def _async_apply_enabled_states(
+    hass: HomeAssistant, entry: OptolinkConfigEntry, coordinator: OptolinkCoordinator
+) -> None:
+    """Switch each entity on or off as its tier says, except those decided by hand.
+
+    Decided by hand means marked by _async_track_manual_changes, or disabled by the user, which
+    Home Assistant records itself. Everything else follows the options: on if the profile enables
+    it and the controller has not reported the datapoint absent, off otherwise.
+
+    Called before the platforms set up, so an entity a tier now enables is added normally, and
+    again after them, for the entities Home Assistant has just restored from an earlier
+    installation of this controller, which only reach the registry at that point. Switching one
+    off then needs no reload; Home Assistant reloads the entry only after switching one on.
+    """
+    if not coordinator.profile:
+        return
+    entity_reg = er.async_get(hass)
+    own_enables: set[str] = hass.data.setdefault(OWN_ENABLES_KEY, set())
+    expected = _expected_entities(coordinator)
+    retired = set(entry.data.get("retired_items") or [])
+    for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
+        item = expected.get((reg_entry.domain, reg_entry.unique_id))
+        if (
+            item is None
+            or reg_entry.disabled_by == er.RegistryEntryDisabler.USER
+            or reg_entry.options.get(DOMAIN, {}).get(MANUAL_OPTION)
+        ):
+            continue
+        wants_on = bool(item.get("enabled_by_default")) and item["id"] not in retired
+        if reg_entry.disabled_by is None and not wants_on:
+            entity_reg.async_update_entity(
+                reg_entry.entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
+            )
+        elif reg_entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION and wants_on:
+            own_enables.add(reg_entry.entity_id)
+            entity_reg.async_update_entity(reg_entry.entity_id, disabled_by=None)
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:

@@ -200,6 +200,13 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
 - **`with sqlite3.connect(...)` does not close the connection.** It ends the transaction and
   nothing else. Every catalog query goes through `contextlib.closing`, and a connection opened
   that way must not be used past the end of its block.
+- **Who enabled an entity lives on the entity, not in the entry.** Home Assistant records no
+  author for enabling or disabling, and restores a removed entity's enabled state and registry
+  options when it is re-added, but not the config entry. `_async_track_manual_changes` marks an
+  entity `manual` in its registry options when a person switches it; `_async_apply_enabled_states`
+  leaves marked and user-disabled entities alone and sets everything else from the tiers, before
+  the platforms and again after them for restored entities. Enabling an entity from code must go
+  through `OWN_ENABLES_KEY`, or the listener takes it for a person's switch.
 
 ## Working on the integration
 
