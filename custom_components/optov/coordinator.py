@@ -745,7 +745,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Most overdue first. Anything not reached this cycle grows more overdue and wins the
         # next one, so nothing starves however tight the budget gets.
         scored.sort(key=lambda entry: -entry[0])
-        picked: set[str] = {item_id for _, item_id in scored[:capacity]}
+        # A full sweep -- the first cycle after the entry (re)loads, or one requested through
+        # refresh_all -- reads everything enabled at once, however long that takes, so no
+        # entity waits a turn of the rotation for its first value. The rotation starts after it.
+        take = len(scored) if self._force_full_sweep else capacity
+        picked: set[str] = {item_id for _, item_id in scored[:take]}
         for item_id in picked:
             self._last_read[item_id] = now
 
@@ -919,7 +923,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ]
         due = self._select_due(pollable)
         self._current_datapoints = len(due)
-        self._force_full_sweep = False
+        full_sweep, self._force_full_sweep = self._force_full_sweep, False
         self._last_publish = time.monotonic()
 
         # 1. Read sensors
@@ -1079,6 +1083,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 if self.data and sel["id"] in self.data:
                     data[sel["id"]] = self.data[sel["id"]]
+            self._publish_partial(data, sensor_status, sensor_status_raw)
 
         # 5. Read switches (writable single bits)
         for sw in self.profile.switches:
@@ -1101,6 +1106,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 if self.data and sw["id"] in self.data:
                     data[sw["id"]] = self.data[sw["id"]]
+            self._publish_partial(data, sensor_status, sensor_status_raw)
 
         # The cached bytes describe this cycle only. Anything reading outside it -- a write
         # and its read-back above all -- must go to the controller, not to a snapshot that is
@@ -1145,9 +1151,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # node is away. Failing the update marks every entity unavailable rather than
             # presenting the last readings as current, and leaves out the background jobs
             # below. What this cycle picked goes back to the front of the rotation, so it is
-            # read first once the controller answers again.
+            # read first once the controller answers again, and a full sweep stays pending.
             for item_id in due:
                 self._last_read.pop(item_id, None)
+            self._force_full_sweep = self._force_full_sweep or full_sweep
             raise UpdateFailed(f"The controller does not answer: {self._cycle_unreachable}")
         if not data:
             raise UpdateFailed("Failed to communicate with OptoV controller")
@@ -1198,10 +1205,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Closed-loop correction on the observed cycle duration. This is what catches the
         # things a per-read estimate cannot see: a resync after a timeout, a schedule fetch or
         # an error-history sweep running alongside, or simply a slower controller.
+        # A full sweep lasts as long as everything enabled takes, not what the budget chose, so
+        # it says nothing about whether the budget fits and is left out.
         share = elapsed / max(1.0, self.scan_interval_seconds)
-        self._recent_shares.append(share)
+        if not full_sweep:
+            self._recent_shares.append(share)
         previous = self._backoff
-        if len(self._recent_shares) == _BACKOFF_WINDOW:
+        if not full_sweep and len(self._recent_shares) == _BACKOFF_WINDOW:
             # The median, so one unusual cycle -- a schedule fetch, a fault-history sweep, a
             # resync -- cannot move the budget on its own.
             typical = sorted(self._recent_shares)[_BACKOFF_WINDOW // 2]

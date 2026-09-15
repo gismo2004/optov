@@ -182,7 +182,9 @@ entity set (typically 50–80 datapoints), all enabled entities are polled every
 of channels are enabled (such as with the expert tier), the scheduler prioritises fast-moving process
 values and rotates the remaining entities across subsequent cycles according to urgency. Enabling
 large numbers of channels therefore proportionately lowers the effective update frequency of individual
-datapoints rather than overloading the bus. Live gateway sensors (`bus_load`, `datapoint_rate`,
+datapoints rather than overloading the bus. The first cycle after Home Assistant starts or the
+integration reloads is the exception: it reads every enabled channel in one go, however long
+that takes, and values appear as they are read. Live gateway sensors (`bus_load`, `datapoint_rate`,
 `poll_duration`) let you monitor this directly.
 
 **Asking the controller.** The catalog describes a whole family, so it lists datapoints your

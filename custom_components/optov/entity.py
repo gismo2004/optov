@@ -52,6 +52,16 @@ class OptolinkEntity(CoordinatorEntity[OptolinkCoordinator]):
         return (self.coordinator.data or {}).get(self._def["id"])
 
     @property
+    def available(self) -> bool:
+        """Unavailable until the datapoint has been read once, as well as whenever polling fails.
+
+        Before the first read there is nothing to show. Reported as unknown instead, a switch
+        is drawn with separate on and off buttons and its on icon, which reads like a state
+        rather than the absence of one.
+        """
+        return super().available and self._def["id"] in (self.coordinator.data or {})
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "address": f"0x{self._def['address']:04X}",
