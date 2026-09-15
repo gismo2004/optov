@@ -250,6 +250,9 @@ a reading and a setpoint in the header. Editing is per day, with an *apply to* c
 day, the working week, the weekend or the whole week, preselected from the pattern the week is
 already in.
 
+<img src="https://raw.githubusercontent.com/gismo2004/optov/main/docs/schedule-card.png"
+     alt="OptoV Schedule card" width="560">
+
 ```yaml
 type: custom:optov-schedule-card
 entities:                             # optional, otherwise every programme
@@ -266,6 +269,9 @@ title: <text>                         # optional
 **OptoV Fault History** lists the controller's fault buffer with date, text and code. The
 editor offers exactly the codes your controller has logged, most frequent first, so routine
 entries such as the controller noting its own restarts can be hidden.
+
+<img src="https://raw.githubusercontent.com/gismo2004/optov/main/docs/fault-history-card.png"
+     alt="OptoV Fault History card" width="560">
 
 ```yaml
 type: custom:optov-fault-history-card

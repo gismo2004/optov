@@ -39,6 +39,7 @@ custom_components/optov/
   translations/    the integration's own text, one file per language
   brand/           the mark and wordmark, SVG sources and PNG renders
 hacs.json          HACS metadata
+docs/              README images of the dashboard cards
 work/              git-ignored playground: deployment scripts, scratch data, throwaway probes
 ```
 
