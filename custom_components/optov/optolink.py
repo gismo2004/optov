@@ -156,6 +156,12 @@ SYNC_WINDOW = 0.1
 # How long an init may go unanswered before the handshake starts over with EOT.
 INIT_TIMEOUT = 0.5
 
+# How long the answer to an announcement may take. An implementation that runs on real KW
+# hardware gives up on an announcement it did not answer within 50 ms and waits for the next one,
+# so the answer has to go out promptly: the window is short enough that the byte leaves well
+# inside that, and short windows cost nothing because they simply repeat.
+KW_SYNC_WINDOW = 0.02
+
 # A KW controller left alone for about half a second goes back to announcing itself, and then
 # ignores a request until it is taken again. A telegram that follows the previous one inside this
 # window needs no new handshake; the window is set under that half second rather than over it,
@@ -504,7 +510,7 @@ class OptolinkClient:
             if loop.time() - asked_at >= INIT_TIMEOUT * 2:
                 self._transport.write(bytes([EOT]))
                 asked_at = loop.time()
-            window = await self._collect(SYNC_WINDOW)
+            window = await self._collect(KW_SYNC_WINDOW)
             if window and window[-1] == ENQ:
                 self._transport.write(bytes([0x01]))
                 self._synced = True
