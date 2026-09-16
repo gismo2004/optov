@@ -186,6 +186,11 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
 - **Read the block, not the field.** A datapoint's block length is the telegram the controller
   expects at that address; its byte length is the field you want from inside it. Requesting the
   field length when the two differ makes the controller reject the read.
+- **Where the catalog states no limits for a setting, the datapoint says what they are.** Its
+  parameter type's width and sign give the range and the conversion's divisor the step
+  (`decode.raw_bounds`, `catalog_db._number_limits`). Falling back to a made-up range instead
+  refused values the controller holds happily -- more than a third of a family's settings carry
+  no limits at all -- and a whole-number step hides the tenths a scaled datapoint is set in.
 - **Bit-field numbering is MSB-first within each byte**, across the whole block, not a
   little-endian shift-and-mask.
 - **Signedness follows the declared parameter type width**, not the datapoint's byte count, and

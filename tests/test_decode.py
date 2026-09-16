@@ -10,6 +10,7 @@ from decode import (
     extract_bitfield,
     insert_bitfield,
     is_signed,
+    raw_bounds,
 )
 
 
@@ -67,3 +68,12 @@ def test_what_counts_as_a_number():
     assert decodes_to_integer("NoConversion") and decodes_to_integer("Mult10")
     assert not decodes_to_number("DateTimeBCD")
     assert is_signed("SInt") and not is_signed("Byte")
+
+
+def test_a_type_says_what_it_can_hold():
+    # What a setting may be set to where the catalog states no limits of its own.
+    assert raw_bounds("SInt") == (-32768, 32767)
+    assert raw_bounds("Byte") == (0, 255)
+    assert raw_bounds("SByte") == (-128, 127)
+    assert raw_bounds("Int4") == (0, 4294967295)
+    assert raw_bounds(None) == (0, 65535)

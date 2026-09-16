@@ -81,6 +81,19 @@ def is_signed(parameter_type: str | None) -> bool:
     return bool(spec and spec[1])
 
 
+def raw_bounds(parameter_type: str | None) -> tuple[int, int]:
+    """The range the declared parameter type can hold, as raw integers.
+
+    For a setting the catalog states no limits for: what the wire allows is a better answer
+    than a guessed one. The controller refuses whatever it does not want, and says so.
+    """
+    spec = _PARAM_TYPES.get((parameter_type or "").strip().lower())
+    width, signed = (spec[0], spec[1]) if spec else (16, False)
+    if signed:
+        return -(1 << (width - 1)), (1 << (width - 1)) - 1
+    return 0, (1 << width) - 1
+
+
 def decodes_to_number(conversion: str | None) -> bool:
     """Whether decode_value() turns this conversion into a number rather than text or a date.
 

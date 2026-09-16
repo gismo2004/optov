@@ -14,7 +14,7 @@ from contextlib import closing, suppress
 from typing import Any
 
 from .conversions import schedule_type
-from .decode import decodes_to_integer, decodes_to_number
+from .decode import decodes_to_integer, decodes_to_number, raw_bounds
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -865,6 +865,29 @@ def _slug(name: str) -> str:
     return s or "unnamed"
 
 
+def _number_limits(dp: dict[str, Any], div: float) -> dict[str, Any]:
+    """What a writable number may be set to, and in what steps.
+
+    The catalog's own limits where it states them. Where it does not -- and it does not for
+    well over a third of this family's settings -- the datapoint itself answers: its parameter
+    type's width and sign give the range, the conversion's divisor the step. Inventing a range
+    instead refuses values the controller accepts and whole steps hide the tenths a scaled
+    datapoint is set in.
+    """
+    limits: dict[str, Any] = {}
+    if dp.get("min_value") is not None:
+        limits["min"] = dp["min_value"]
+    if dp.get("max_value") is not None:
+        limits["max"] = dp["max_value"]
+    if dp.get("stepping") is not None and dp["stepping"] > 0:
+        limits["step"] = dp["stepping"]
+    low, high = raw_bounds(dp.get("parameter_type"))
+    limits.setdefault("min", round(low / div, 3))
+    limits.setdefault("max", round(high / div, 3))
+    limits.setdefault("step", round(1 / div, 3))
+    return limits
+
+
 def _as_sensor(entry: dict[str, Any], sensor_category: str | None) -> dict[str, Any]:
     """A sensor may not be `config`; Home Assistant allows that only on writable entities."""
     if sensor_category:
@@ -1357,12 +1380,7 @@ def generate_profile(
                 else:
                     entry["div_ratio"] = _div_ratio(dp.get("conversion"))
                     entry.update(_unit_meta(unit_str))
-                    if dp.get("max_value") is not None:
-                        entry["max"] = dp["max_value"]
-                    if dp.get("min_value") is not None:
-                        entry["min"] = dp["min_value"]
-                    if dp.get("stepping") is not None and dp["stepping"] > 0:
-                        entry["step"] = dp["stepping"]
+                    entry.update(_number_limits(dp, entry["div_ratio"]))
                     profile["numbers"].append(entry)
             else:
                 if enum_values:
