@@ -721,7 +721,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def read_datapoint(call: ServiceCall) -> ServiceResponse:
         coordinator = _one_coordinator(hass, call)
         address = parse_address(call.data["address"])
-        length = int(call.data.get("bytes", 2))
+        # A datapoint is read as the whole block it sits in, and the block can be longer than
+        # the value: asking for the value's own length is what the controller refuses. So the
+        # catalog decides unless the caller says otherwise, which is what an address the
+        # catalog does not know needs.
+        item = coordinator.datapoint_at(address)
+        length = int(call.data.get("bytes") or (item or {}).get("block") or 2)
         try:
             raw = await coordinator.async_read_custom_datapoint(address, length)
         except OptolinkDeviceError as err:
@@ -734,18 +739,25 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 notification_id=f"optov_read_{address}",
             )
             raise
-        pn_async_create(
-            hass,
-            f"Address 0x{address:04X} ({length} bytes)\nRaw: {raw.hex(' ').upper()}\n"
-            f"Little-endian: {int.from_bytes(raw, 'little', signed=True)}",
-            title=f"Read 0x{address:04X}",
-            notification_id=f"optov_read_{address}",
-        )
-        return {
+        answer: dict[str, Any] = {
             "address": f"0x{address:04X}",
+            "bytes": length,
             "raw": raw.hex(" ").upper(),
             "value": int.from_bytes(raw, "little", signed=True),
         }
+        if item is not None:
+            # The catalog knows this one, so the answer is its value rather than its bytes.
+            answer["name"] = item["name"]
+            answer["value"] = coordinator.decode_datapoint(item, raw)
+            if item.get("unit"):
+                answer["unit"] = item["unit"]
+        pn_async_create(
+            hass,
+            "\n".join(f"{key}: {value}" for key, value in answer.items()),
+            title=f"Read 0x{address:04X}",
+            notification_id=f"optov_read_{address}",
+        )
+        return answer
 
     async def write_datapoint(call: ServiceCall) -> None:
         coordinator = _one_coordinator(hass, call)

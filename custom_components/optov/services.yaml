@@ -51,9 +51,10 @@ read_datapoint:
     bytes:
       name: Byte count
       description: >-
-        How many bytes to ask for. This is the datapoint's block length, which can be larger
-        than its value: the outside temperature is two bytes of a three-byte block, and asking
-        for two of them is refused. Defaults to 2.
+        How many bytes to ask for. Leave empty and the catalog decides, which is what a
+        datapoint the controller knows needs: it is read as the whole block it sits in, and
+        that block can be longer than the value itself. Only an address the catalog does not
+        describe needs a count here.
       required: false
       example: 2
       selector:

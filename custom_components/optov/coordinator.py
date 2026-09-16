@@ -1691,6 +1691,28 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Perform an ad-hoc read of any address without polling."""
         return await self.client.read_raw(address, length)
 
+    def datapoint_at(self, address: int) -> dict[str, Any] | None:
+        """This controller's datapoint at an address, whichever platform it became."""
+        for platform in DeviceProfile.PLATFORMS if self.profile else ():
+            for item in getattr(self.profile, platform, []):
+                if parse_address(item["address"]) == address:
+                    return item
+        return None
+
+    def decode_datapoint(self, item: dict[str, Any], raw: bytes) -> Any:
+        """What a block means for one datapoint, decoded as a poll cycle decodes it."""
+        field = raw if item.get("bit_length") else self._slice_field(item, raw)
+        return decode_value(
+            field,
+            item.get("conversion"),
+            parameter_type=item.get("parameter_type", "SInt"),
+            bit_start=item.get("bit_start", 0),
+            bit_length=item.get("bit_length", 0),
+            enum=item.get("options"),
+            factor=item.get("conversion_factor"),
+            offset=item.get("conversion_offset"),
+        )
+
     def _slice_field(self, item: dict[str, Any], raw: bytes) -> bytes:
         """Cut the field out of the block the controller returned."""
         block = item.get("block") or item["bytes"]
