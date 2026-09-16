@@ -213,7 +213,11 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
   written into that page -- `frontend.add_extra_js_url` among it -- reaches nobody whose shell
   predates it, for weeks. The dashboard resource list does not travel that way: the frontend
   fetches it over the websocket on every load. Hence the cards go into the resource list where
-  there is one, and into the page only for a YAML dashboard, which has no list.
+  there is one, and into the page only for a YAML dashboard, which has no list. The file is
+  served from `async_setup`, not from an entry: a dashboard asking for it while Home Assistant
+  is still starting, or while a controller is unreachable, would otherwise get a 404 -- and a
+  browser keeps a 404 for that URL. What frees it is a new `?v=`, which is the card file's own
+  timestamp, so an update writing fresh files moves it by itself.
 - **Who enabled an entity lives on the entity, not in the entry.** Home Assistant records no
   author for enabling or disabling, and restores a removed entity's enabled state and registry
   options when it is re-added, but not the config entry. `_async_track_manual_changes` marks an
