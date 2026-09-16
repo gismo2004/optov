@@ -389,6 +389,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as err:
                 _LOGGER.warning("Could not read DeviceIdentF0 at 0x00F0: %s", err)
 
+        if sys_id in optolink.FOREIGN_PROTOCOL_IDS:
+            raise optolink.UnsupportedProtocol(sys_id)
+
         dev = await self.hass.async_add_executor_job(
             catalog_db.get_device_by_system_id,
             sys_id,

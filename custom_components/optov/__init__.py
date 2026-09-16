@@ -50,7 +50,7 @@ from .const import (
     option,
 )
 from .coordinator import OptolinkConfigEntry, OptolinkCoordinator, OptolinkRuntime
-from .optolink import OptolinkClient, OptolinkDeviceError
+from .optolink import OptolinkClient, OptolinkDeviceError, UnsupportedProtocol
 from .profiles import DeviceProfile, parse_address
 
 _LOGGER = logging.getLogger(__name__)
@@ -162,6 +162,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
     try:
         await client.connect()
         await coordinator.async_init_device()
+    except UnsupportedProtocol as err:
+        await client.disconnect()
+        raise ConfigEntryError(
+            translation_domain=DOMAIN,
+            translation_key="controller_protocol",
+            translation_placeholders={"sys_id": f"0x{err.sys_id:04X}"},
+        ) from err
     except catalog_db.UnknownControllerError as err:
         # The link works and the controller answered; the catalog simply has no entry for what
         # it said. Retrying reads the same bytes again, so this is a setup error that names

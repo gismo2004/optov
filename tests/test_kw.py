@@ -142,3 +142,12 @@ def test_all_bits_set_is_not_a_reading():
     # A real value that happens to contain 0xFF is left alone, and so is an empty answer.
     assert not optolink.is_filler(bytes([0xFF, 0x16]))
     assert not optolink.is_filler(b"")
+
+
+def test_a_third_protocol_is_named_rather_than_guessed_at():
+    # GWG controllers address memory with a single byte; sending two would not be refused.
+    assert 0x2053 in optolink.FOREIGN_PROTOCOL_IDS
+    assert 0x2054 in optolink.FOREIGN_PROTOCOL_IDS
+    # The families this integration does drive are not in there.
+    assert 0x2048 not in optolink.FOREIGN_PROTOCOL_IDS
+    assert 0x2098 not in optolink.FOREIGN_PROTOCOL_IDS

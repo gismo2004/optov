@@ -53,6 +53,24 @@ FUNCTION_CODES = {
 
 PROTO_P300 = "P300"
 PROTO_KW = "KW"
+
+# System IDs whose controllers speak neither: the GWG protocol, which numbers its addresses in
+# one byte, and the two-wire bus family, which is not reached over an optical port at all. They
+# are in the catalog because they are in the same source as everything else, and they are named
+# here so a controller can be told what is wrong with it instead of being driven by guesswork: a
+# two-byte address sent to a protocol that expects one is not refused, it lands somewhere else,
+# and a write that lands somewhere else is a write to a heating system.
+FOREIGN_PROTOCOL_IDS = {0x2000, 0x2053, 0x2054}
+
+
+class UnsupportedProtocol(Exception):
+    """The controller was identified and speaks something this integration does not."""
+
+    def __init__(self, sys_id: int) -> None:
+        self.sys_id = sys_id
+        super().__init__(
+            f"System ID 0x{sys_id:04X} speaks neither P300 nor KW"
+        )
 # Wire bytes a read of `length` costs, as the bus-load figures count them: P300 sends a framed
 # telegram and an acknowledgement in each direction, KW four bytes and the bare answer.
 PROTO_OVERHEAD = {PROTO_P300: 18, PROTO_KW: 4}

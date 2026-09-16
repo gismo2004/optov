@@ -75,6 +75,11 @@ Two things the KW protocol cannot do, which you may notice if you have one of th
 Everything else is the same either way: the same catalog, the same entities, the same cards and
 services. Which protocol is in use is in the integration's diagnostics download.
 
+**A third protocol, GWG**, exists on the oldest wall-mounted units (System IDs 0x2053 and 0x2054)
+and addresses memory with a single byte. OptoV does not speak it and refuses those controllers by
+name rather than trying: a two-byte address sent to them would not be refused, it would land
+somewhere else. They are in the catalog because they are in the same source as everything else.
+
 ## Installation
 
 **Through HACS** (recommended). Add this repository as a custom repository of type

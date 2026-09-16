@@ -142,6 +142,9 @@
     "controller_unknown": {
       "message": "The controller reports System ID {sys_id} with hardware index {hw} and software index {sw}. The catalog “{name}” has no entry for that: it describes {variants} for this System ID. Report these three values in a GitHub issue so the controller can be supported."
     },
+    "controller_protocol": {
+      "message": "This controller identifies itself as System ID {sys_id}, which speaks neither P300 nor KW but the older GWG protocol, whose addresses are a single byte. OptoV cannot talk to it, and will not try: a two-byte address sent to it would land somewhere else rather than be refused."
+    },
     "no_controller": {
       "message": "No OptoV controller is set up, so there is nothing to do this to."
     },
