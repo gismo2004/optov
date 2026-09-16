@@ -167,6 +167,12 @@ _MIN_GAP = 1.0
 # entry while polling would wake every listener it has.
 STORAGE_VERSION = 1
 LEARNED = ("retired_items", "retired_addresses", "condition_cache", "condition_targets")
+
+# How many cycles an address may answer nothing, while other datapoints in the same cycle do
+# answer, before it counts as one this unit does not have. Three rather than one: a protocol
+# without error telegrams cannot distinguish a missing address from a telegram that went astray,
+# and a value that comes back on the second attempt must not cost the entity.
+SILENT_CYCLES_BEFORE_RETIRING = 3
 _SAVE_DELAY = 10
 
 # Sensor-health code meaning "this sensor is not fitted". The health nibble shares a block with
@@ -288,6 +294,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Addresses already acted on by _disable_unsupported_entities(), so the registry is
         # touched once per address rather than on every cycle.
         self._retired_addresses: set[int] = set()
+        # Addresses that answered nothing, and how many cycles running. Only KW fills this: it
+        # has no error telegram, so silence is the only "no" it can give.
+        self._silent: dict[int, int] = {}
         self._retired_item_ids: set[str] = set()
         self._store: Store[dict[str, Any]] | None = None
         self._learned: dict[str, Any] = {}
@@ -699,6 +708,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._language,
             probed_values,
             tiers_enabled_by(self.config_entry.options),
+            optolink.unreachable_function_codes(self.client.protocol),
         )
         total = sum(len(v) for v in generated.values() if isinstance(v, list))
         enabled = sum(
@@ -739,6 +749,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._language,
             self._probed_values,
             tiers_enabled_by(options),
+            optolink.unreachable_function_codes(self.client.protocol),
         )
         return DeviceProfile(
             sys_id=self.profile.sys_id,
@@ -926,8 +937,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ControllerUnreachable(self._cycle_unreachable)
 
         self._current_telegrams += 1
-        # P300 protocol wire overhead: TX telegram (8B) + ACK (1B) + RX telegram (8B + length) + ACK (1B)
-        self._current_bytes += 18 + length
+        self._current_bytes += (
+            optolink.PROTO_OVERHEAD.get(self.client.protocol, 18) + length
+        )
         try:
             raw = await self.client.read_raw(
                 address, length, optolink.function_code(fc_read)
@@ -958,7 +970,26 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     length,
                 )
             raise
+        except TimeoutError:
+            # A link that cannot refuse a read answers an address this unit does not have with
+            # silence -- the same thing a lost telegram looks like. Only a cycle in which other
+            # datapoints did answer tells the two apart, and only after several such cycles: a
+            # controller nobody can reach must retire nothing.
+            if self.client.protocol == optolink.PROTO_KW and self._cycle_answered:
+                misses = self._silent.get(address, 0) + 1
+                self._silent[address] = misses
+                if misses >= SILENT_CYCLES_BEFORE_RETIRING:
+                    self._unsupported_addresses.add(address)
+                    _LOGGER.debug(
+                        "0x%04X stayed silent for %d cycles while the bus answered; "
+                        "dropping it from the poll set (%d dropped so far)",
+                        address,
+                        misses,
+                        len(self._unsupported_addresses),
+                    )
+            raise
         self._cycle_answered += 1
+        self._silent.pop(address, None)
         self._cycle_blocks[(address, length, fc_read)] = raw
         return raw
 

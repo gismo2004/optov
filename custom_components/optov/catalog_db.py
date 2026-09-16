@@ -1107,8 +1107,15 @@ def generate_profile(
     culture: str,
     probed_values: dict[int, int],
     enabled_tiers: set[str] | None = None,
+    unreachable_fc: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Dynamically generate entity configurations from SQLite database for an installation."""
+    """Dynamically generate entity configurations from SQLite database for an installation.
+
+    `unreachable_fc` are catalog FCRead/FCWrite values this link has no telegram for (see
+    optolink.unreachable_function_codes). A datapoint that cannot be read is left out entirely,
+    and one that cannot be written becomes a reading rather than a control that always fails.
+    """
+    unreachable_fc = unreachable_fc or set()
     hidden_event_type_ids, hidden_group_ids = evaluate_rules(
         device_id, probed_values, db_path, culture
     )
@@ -1238,6 +1245,8 @@ def generate_profile(
             if tier not in TIER_CLASSIFICATION:
                 continue
             if dp.get("entity_kind") == KIND_ACTION:
+                continue
+            if (dp.get("fc_read") or "Virtual_READ") in unreachable_fc:
                 continue
 
             # Skip raw multi-byte array dumps (e.g. 168-byte EEPROM schedule arrays handled by schedule poller)
@@ -1421,7 +1430,10 @@ def generate_profile(
                 "hexbyte2utf16byte",
             ) or param_type in ("array", "string")
 
-            if dp.get("entity_kind") == KIND_WRITABLE:
+            writable = dp.get("entity_kind") == KIND_WRITABLE and (
+                dp.get("fc_write") or "undefined"
+            ) not in unreachable_fc
+            if writable:
                 # A writable datapoint one bit wide has exactly two states, so it is a switch --
                 # whether or not the catalog bothered to name them. Party mode, eco mode and the
                 # one-off hot water run are all this. As a select they took two taps and read

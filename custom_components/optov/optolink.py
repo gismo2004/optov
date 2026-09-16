@@ -53,6 +53,9 @@ FUNCTION_CODES = {
 
 PROTO_P300 = "P300"
 PROTO_KW = "KW"
+# Wire bytes a read of `length` costs, as the bus-load figures count them: P300 sends a framed
+# telegram and an acknowledgement in each direction, KW four bytes and the bare answer.
+PROTO_OVERHEAD = {PROTO_P300: 18, PROTO_KW: 4}
 
 # The same operation, as the KW protocol numbers it. What is absent here cannot be expressed in
 # KW at all -- above all the RPC, which is how the heat-pump families' fault buffers are read.
@@ -64,6 +67,18 @@ KW_FUNCTION_CODES = {
     FC_PROCESS_READ: FC_PROCESS_READ,
     FC_PROCESS_WRITE: FC_PROCESS_WRITE,
 }
+
+
+def unreachable_function_codes(protocol: str) -> set[str]:
+    """Catalog FCRead/FCWrite values this protocol has no telegram for.
+
+    Entities for those cannot work, so they are not generated at all -- see generate_profile().
+    """
+    if protocol != PROTO_KW:
+        return set()
+    return {
+        name for name, code in FUNCTION_CODES.items() if code not in KW_FUNCTION_CODES
+    }
 
 
 def function_code(name: str | None, default: int = FC_VIRTUAL_READ) -> int:

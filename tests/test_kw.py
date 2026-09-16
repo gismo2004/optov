@@ -121,3 +121,12 @@ def test_the_answer_must_be_as_long_as_it_was_asked_for():
         raise AssertionError("a short answer must not pass as a value")
 
     run(go())
+
+
+def test_what_kw_cannot_express_is_known_up_front():
+    # Entities for these would exist and never work, so the profile leaves them out.
+    missing = optolink.unreachable_function_codes(optolink.PROTO_KW)
+    assert "Remote_Procedure_Call" in missing
+    assert "Virtual_READ" not in missing and "GFA_READ" not in missing
+    # P300 reaches everything the catalog names.
+    assert optolink.unreachable_function_codes(optolink.PROTO_P300) == set()

@@ -23,7 +23,9 @@ part of this repository; you build it yourself, see [The catalog](#the-catalog).
 > **Status: beta.** One controller, a Vitocal heat pump with a Vitotronic 200 WO1A, has been
 > verified end to end on real hardware, with Home Assistant 2026.9 and ESPHome 2026.8. Others
 > are described by the same definitions and should work the same way, but none has been
-> confirmed on a physical unit. Reports are welcome, whether they work or not.
+> confirmed on a physical unit. Controllers that speak only the older KW protocol are supported
+> as of 2026-09 and that support is **experimental and untested on hardware**, see
+> [Protocols](#protocols). Reports are welcome, whether they work or not.
 
 ## What you need
 
@@ -34,6 +36,40 @@ part of this repository; you build it yourself, see [The catalog](#the-catalog).
 | Bridge | An ESP32 running **stock ESPHome 2026.3 or newer** with the built-in `serial_proxy` component (still marked experimental by ESPHome). No custom firmware component is needed: the ESP relays raw bytes and nothing else, the whole protocol lives in Home Assistant. |
 | Home Assistant | **2026.9 or newer**, with the ESPHome integration set up for that node. OptoV opens the serial proxy through Home Assistant's own serial layer, which reports a node that went away only from 2026.9 on. |
 | Catalog | Built once for your controller with [VExtractor](https://github.com/gismo2004/VExtractor), see [The catalog](#the-catalog). |
+
+## Protocols
+
+Controllers speak one of two protocols over the Optolink port, and OptoV works out which one
+yours is: it says hello, and what comes back decides. Nothing to configure.
+
+**P300** is what the verified controller speaks and what everything here is built around.
+
+**KW** is the older protocol, the only one the earliest Vitotronic controllers have -- among
+others the Vitotronic 200 KW1/KW2 and 300 KW3. The [openv wiki](https://github.com/openv/openv/wiki/Ger%C3%A4te)
+lists which controllers those are.
+
+> **KW support is highly experimental and has never touched a physical controller.** No unit
+> that speaks it was available to test against: the telegrams are covered by unit tests and the
+> protocol is chosen automatically, but nobody has yet seen a single real reading come back over
+> it. If you have such a controller, please try it and
+> [open an issue](https://github.com/gismo2004/optov/issues) with the log either way -- that is
+> the only way it stops being experimental.
+
+Two things the KW protocol cannot do, which you may notice if you have one of these controllers:
+
+- **It has no way to refuse a read.** Where a P300 controller answers "I do not have that
+  address" and the datapoint is dropped for good, a KW controller simply says nothing. So the
+  catalog's own installation rules are the only filter on what gets asked for, and an address
+  that stays silent for three cycles while the rest of the bus answers is dropped as absent.
+  Expect the first few cycles after setup to be slower than the ones after that.
+- **It has no remote procedure call.** Datapoints only reachable that way get no entity, since
+  it could never show a reading: on a Vitotronic 050 HK1W that is 16 of them, on a Vitotronic
+  200 KW1/KW2 none at all -- the ones affected there are commands that get no entity anyway. The
+  heat-pump families read their fault history that way, but those controllers speak P300, so
+  their fault history is unaffected.
+
+Everything else is the same either way: the same catalog, the same entities, the same cards and
+services. Which protocol is in use is in the integration's diagnostics download.
 
 ## Installation
 
