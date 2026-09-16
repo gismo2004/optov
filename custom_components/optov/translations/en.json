@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "OptoV",
-        "description": "Pick the ESPHome node that is wired to the controller's Optolink port, or enter the connection by hand.",
+        "description": "Pick the serial port wired to the controller's Optolink port; the serial proxies of your ESPHome nodes are listed there. For a node Home Assistant does not have, choose “Enter manually” and type its address.",
         "data": {
           "device": "Serial port",
           "language": "Catalog language (names of datapoints and values)",
@@ -12,7 +12,7 @@
       },
       "manual": {
         "title": "Connection details",
-        "description": "The ESPHome node's address and its API encryption key.",
+        "description": "The address and API encryption key of an ESPHome node that Home Assistant does not have.",
         "data": {
           "host": "Host or IP address",
           "port": "Port",
@@ -118,11 +118,6 @@
         "fri": "Friday",
         "sat": "Saturday",
         "sun": "Sunday"
-      }
-    },
-    "device": {
-      "options": {
-        "manual": "Enter the connection details by hand"
       }
     }
   },

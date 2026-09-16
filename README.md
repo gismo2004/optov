@@ -43,12 +43,13 @@ part of this repository; you build it yourself, see [The catalog](#the-catalog).
 **By hand.** Copy `custom_components/optov/` into your Home Assistant
 `config/custom_components/` directory and restart.
 
-Then add the integration under **Settings → Devices & services → Add integration**. Every
-serial proxy on every ESPHome node is offered, so pick the one wired to the controller. Nothing
-in the ESPHome API says which port that is, so the choice is yours; a wrong one simply fails to
-start with "controller not reachable". Ports already used by another entry are not offered,
-because a serial proxy serves exactly one client. If the node's API key is not stored on its
-ESPHome entry you are asked for it. Setup then asks you to upload the catalog.
+Then add the integration under **Settings → Devices & services → Add integration**. The port
+list is Home Assistant's own and shows the serial proxies of every ESPHome node, along with
+whatever already uses one. Pick the port wired to the controller: nothing in the ESPHome API
+says which that is, so the choice is yours, and a wrong one simply fails to start with
+"controller not reachable". A serial proxy serves exactly one client, so do not pick one that is
+already in use. For a node Home Assistant does not have, choose *Enter manually* and type its
+address; its API key is then asked for. Setup then asks you to upload the catalog.
 
 ## The catalog
 

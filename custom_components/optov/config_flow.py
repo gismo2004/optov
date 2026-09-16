@@ -1,14 +1,14 @@
 """Setup and options.
 
-Setup finds ESPHome nodes that expose a serial proxy for the Optolink port and offers them,
-falling back to typing the connection details. Nothing is read from the controller during
+Setup offers the serial ports Home Assistant knows, which include the proxies of every
+ESPHome node, falling back to typing the connection of a node it does not have. Nothing is read from the controller during
 setup: the first poll identifies it and builds the entity set, so setup stays fast and does not
 touch a serial link that a previous instance may still be releasing.
 """
 
-import json
 import os
 from typing import Any
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import voluptuous as vol
 from homeassistant.components.file_upload import process_uploaded_file
@@ -28,6 +28,7 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    SerialPortSelector,
 )
 
 from . import catalog_db
@@ -61,7 +62,6 @@ from .const import (
 )
 from .translate import async_ui_text
 
-MANUAL = "manual"
 CONF_CATALOG_FILE = "catalog_file"
 CONF_DELETE = "delete"
 
@@ -78,15 +78,6 @@ def _install_uploaded_catalog(
     with process_uploaded_file(hass, file_id) as path:
         installed = catalog_db.install_catalog(str(path), config_dir, path.name)
     return os.path.basename(installed)
-
-
-def _read_json(path: str) -> dict[str, Any]:
-    """A JSON file, or {} if it is missing or unreadable. Executor only."""
-    try:
-        with open(path, encoding="utf-8") as handle:
-            return json.load(handle)
-    except (OSError, ValueError):
-        return {}
 
 
 class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -116,78 +107,20 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         path = os.path.join(self.hass.config.path(DOMAIN), self._catalog or "")
         return await self.hass.async_add_executor_job(get_available_languages, path)
 
-    async def _async_serial_proxies(self) -> dict[str, dict[str, Any]]:
-        """Every serial proxy on every ESPHome node, keyed by "<entry id>:<instance>".
-
-        No guessing about which port is wired to a controller. Nothing the API reports
-        distinguishes one: a proxy carries a name, an electrical type and its modem pins, and
-        the line settings that would actually identify the port -- 4800 baud, even parity, two
-        stop bits -- are not advertised at all. Filtering on the name only hides correctly
-        wired ports whose owner called them something else, so the list is complete and the
-        choice is the user's.
-
-        Ports already taken by another entry are left out, because a proxy serves exactly one
-        client: a second one would break both.
-
-        A loaded ESPHome entry reports its proxies in runtime data; one that is not loaded is
-        read from its stored device info.
-        """
-        taken = {
-            (entry.data.get(CONF_HOST), entry.data.get(CONF_INSTANCE, 0))
-            for entry in self._async_current_entries()
-        }
-        found: dict[str, dict[str, Any]] = {}
-        for entry in self.hass.config_entries.async_entries("esphome"):
-            host = entry.data.get("host")
-            if not host:
-                continue
-            runtime = getattr(entry, "runtime_data", None)
-            info = getattr(runtime, "device_info", None) if runtime else None
-            if info is not None:
-                proxies = list(getattr(info, "serial_proxies", []) or [])
-            else:
-                stored = await self.hass.async_add_executor_job(
-                    _read_json,
-                    self.hass.config.path(".storage", f"esphome.{entry.entry_id}"),
-                )
-                proxies = (
-                    stored.get("data", {})
-                    .get("device_info", {})
-                    .get("serial_proxies", [])
-                    or []
-                )
-
-            node = entry.title or entry.data.get("device_name", host)
-            for instance, proxy in enumerate(proxies):
-                if (host, instance) in taken:
-                    continue
-                raw_name = (
-                    proxy.get("name", "")
-                    if isinstance(proxy, dict)
-                    else getattr(proxy, "name", "")
-                ) or ""
-                proxy_name = raw_name.strip()
-                name = proxy_name or f"port {instance}"
-                found[f"{entry.entry_id}:{instance}"] = {
-                    # One node with one port needs no port name unless explicitly named; several need telling apart.
-                    "title": node
-                    if len(proxies) == 1 and not proxy_name
-                    else f"{node} · {name}",
-                    "host": host,
-                    "port": entry.data.get("port", DEFAULT_PORT),
-                    "noise_psk": entry.data.get("noise_psk", ""),
-                    "instance": instance,
-                    "proxy_name": proxy_name,
-                }
-        return found
-
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Offer the serial proxies on the network, or go to manual entry.
+        """Offer the serial ports Home Assistant knows, or take a node it does not have.
 
         A missing catalog is dealt with first: without one there is nothing to set up, and
         asking for it here is far kinder than letting setup fail afterwards.
+
+        The list is Home Assistant's own, so it groups the serial proxies of every ESPHome node
+        and marks the ones another integration already holds. Nothing in the API tells a port
+        wired to a controller from any other, so which one it is stays the user's to say; a
+        wrong one simply fails to start. Anything entered by hand that is not a port URL is
+        taken for the address of a node Home Assistant does not have, whose connection details
+        the next step asks for.
         """
         if self._catalog is None:
             catalogs = await self.hass.async_add_executor_job(
@@ -198,63 +131,45 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 # None to use, one that cannot be read, or several with no way to guess which.
                 return await self.async_step_catalog()
-        nodes = await self._async_serial_proxies()
-        if not nodes:
-            return await self.async_step_manual()
 
         if user_input is not None:
-            chosen = user_input[CONF_DEVICE]
-            if chosen == MANUAL:
-                return await self.async_step_manual()
-            node = nodes[chosen]
-            if not node["noise_psk"]:
-                # The node's key is not stored on its ESPHome entry; ask for it, with the rest
-                # of the details filled in.
-                return await self.async_step_manual(
-                    {
-                        CONF_HOST: node["host"],
-                        CONF_PORT: node["port"],
-                        CONF_INSTANCE: node["instance"],
-                        CONF_PROXY_NAME: node.get("proxy_name", ""),
-                        **user_input,
-                    }
-                )
-            return await self._async_create(
-                host=node["host"],
-                port=node["port"],
-                key=node["noise_psk"],
-                title=node["title"],
-                instance=node["instance"],
-                proxy_name=node.get("proxy_name", ""),
-                language=user_input[CONF_LANGUAGE],
-                scan_interval=user_input[CONF_SCAN_INTERVAL],
-            )
+            device = str(user_input[CONF_DEVICE]).strip()
+            if "://" not in device:
+                return await self.async_step_manual({CONF_HOST: device, **user_input})
+            return await self._async_create(device, *self._proxy_of(device), user_input)
 
-        options = [
-            SelectOptionDict(value=entry_id, label=f"{node['title']} ({node['host']})")
-            for entry_id, node in sorted(
-                nodes.items(), key=lambda kv: kv[1]["title"].lower()
-            )
-        ] + [SelectOptionDict(value=MANUAL, label=MANUAL)]
         languages = await self._async_languages()
         schema = vol.Schema(
             {
-                vol.Required(CONF_DEVICE, default=options[0]["value"]): SelectSelector(
-                    SelectSelectorConfig(
-                        options=options,
-                        mode=SelectSelectorMode.LIST,
-                        translation_key="device",
-                    )
+                vol.Required(CONF_DEVICE): SerialPortSelector(),
+                vol.Optional(CONF_LANGUAGE, default=DEFAULT_LANGUAGE): vol.In(languages),
+                vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
+                    int, vol.Range(min=5, max=600)
                 ),
-                vol.Optional(CONF_LANGUAGE, default=DEFAULT_LANGUAGE): vol.In(
-                    languages
-                ),
-                vol.Optional(
-                    CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
-                ): vol.All(int, vol.Range(min=5, max=600)),
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
+
+    @callback
+    def _proxy_of(self, device: str) -> tuple[str, int, int, str]:
+        """The node's address and API port, the proxy's position on it and its name, from a URL.
+
+        A serial proxy of a node Home Assistant has is addressed by name; the position is what
+        an unnamed one falls back to, in the entity identities, so both are kept.
+        """
+        url = urlparse(device)
+        name = parse_qs(url.query).get("port_name", [""])[0]
+        node = self.hass.config_entries.async_get_entry(url.path.strip("/"))
+        info = getattr(getattr(node, "runtime_data", None), "device_info", None)
+        names = [proxy.name for proxy in getattr(info, "serial_proxies", [])]
+        if node is None:
+            return url.hostname or "", url.port or DEFAULT_PORT, 0, name
+        return (
+            node.data.get(CONF_HOST, ""),
+            node.data.get(CONF_PORT, DEFAULT_PORT),
+            names.index(name) if name in names else 0,
+            name,
+        )
 
     async def async_step_catalog(
         self, user_input: dict[str, Any] | None = None
@@ -535,19 +450,20 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Type the connection details."""
         if user_input is not None and user_input.get(CONF_ENCRYPTION_KEY):
+            host = user_input[CONF_HOST]
+            instance = int(user_input.get(CONF_INSTANCE, 0))
             proxy_name = user_input.get(CONF_PROXY_NAME, "").strip()
-            title = user_input[CONF_HOST]
-            if proxy_name:
-                title = f"{title} · {proxy_name}"
+            # This node has no connection of Home Assistant's to travel on, so the URL carries
+            # its own: the proxy by name where there is one, by position otherwise.
+            query = urlencode(
+                {
+                    "port_name": proxy_name or instance,
+                    "key": user_input[CONF_ENCRYPTION_KEY],
+                }
+            )
+            device = f"esphome://{host}:{user_input[CONF_PORT]}/?{query}"
             return await self._async_create(
-                host=user_input[CONF_HOST],
-                port=user_input[CONF_PORT],
-                key=user_input[CONF_ENCRYPTION_KEY],
-                title=title,
-                instance=int(user_input.get(CONF_INSTANCE, 0)),
-                proxy_name=proxy_name,
-                language=user_input.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
-                scan_interval=user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                device, host, int(user_input[CONF_PORT]), instance, proxy_name, user_input
             )
 
         given = user_input or {}
@@ -578,33 +494,41 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def _async_create(
         self,
-        *,
+        device: str,
         host: str,
         port: int,
-        key: str,
-        title: str,
         instance: int,
-        language: str,
-        scan_interval: int,
-        proxy_name: str = "",
+        proxy_name: str,
+        user_input: dict[str, Any],
     ) -> ConfigFlowResult:
+        """Record the port and go.
+
+        The address and the proxy travel with the URL because the port is looked up by them at
+        every start: a URL of a node Home Assistant has names that node's config entry, and
+        that name changes when the node is set up again.
+        """
         # Identified by the port, not the node: one node can carry several, and each serves
-        # exactly one client.
+        # exactly one client. The node's API port is part of it because it always was: an id
+        # that does not match an existing entry's would let the same port be added twice.
         await self.async_set_unique_id(f"optov_{host}_{port}_{instance}")
         self._abort_if_unique_id_configured()
         data = {
+            CONF_DEVICE: device,
             CONF_HOST: host,
-            CONF_PORT: port,
-            CONF_ENCRYPTION_KEY: key,
             CONF_INSTANCE: instance,
             CONF_CATALOG: self._catalog,
         }
         if proxy_name:
             data[CONF_PROXY_NAME] = proxy_name
         return self.async_create_entry(
-            title=title,
+            title=f"{host} · {proxy_name}" if proxy_name else host,
             data=data,
-            options={CONF_LANGUAGE: language, CONF_SCAN_INTERVAL: scan_interval},
+            options={
+                CONF_LANGUAGE: user_input.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
+                CONF_SCAN_INTERVAL: user_input.get(
+                    CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                ),
+            },
         )
 
 

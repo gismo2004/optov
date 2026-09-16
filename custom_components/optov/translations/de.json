@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "OptoV",
-        "description": "Den ESPHome-Knoten wählen, der an der Optolink-Schnittstelle der Regelung hängt, oder die Verbindung von Hand eingeben.",
+        "description": "Den seriellen Port wählen, der an der Optolink-Schnittstelle der Regelung hängt; die seriellen Proxys der ESPHome-Knoten stehen dort zur Auswahl. Für einen Knoten, den Home Assistant nicht kennt, “Manuell eingeben” wählen und seine Adresse eintragen.",
         "data": {
           "device": "Serieller Port",
           "language": "Katalogsprache (Namen der Datenpunkte und Werte)",
@@ -12,7 +12,7 @@
       },
       "manual": {
         "title": "Verbindungsdaten",
-        "description": "Adresse des ESPHome-Knotens und sein API-Verschlüsselungsschlüssel.",
+        "description": "Adresse und API-Verschlüsselungsschlüssel eines ESPHome-Knotens, den Home Assistant nicht kennt.",
         "data": {
           "host": "Host oder IP-Adresse",
           "port": "Port",
@@ -118,11 +118,6 @@
         "fri": "Freitag",
         "sat": "Samstag",
         "sun": "Sonntag"
-      }
-    },
-    "device": {
-      "options": {
-        "manual": "Verbindungsdaten von Hand eingeben"
       }
     }
   },

@@ -25,6 +25,7 @@ from . import catalog_db
 from .const import (
     CONF_CATALOG,
     CONF_DEBUG_LOGGING,
+    CONF_DEVICE,
     CONF_ENCRYPTION_KEY,
     CONF_HOST,
     CONF_INSTANCE,
@@ -225,18 +226,30 @@ def _port_url(hass: HomeAssistant, entry: OptolinkConfigEntry) -> str:
     """The entry's serial port as a serialx URL.
 
     A node Home Assistant's ESPHome integration has is reached over that integration's own
-    connection; any other node gets one of its own, with the stored key. Proxies are numbered
-    by their position in the node's list, both in the entry and in serialx.
+    connection, looked up by the node's address at every start: such a URL names that node's
+    config entry, and setting the node up again gives it a new one while its address stays.
+    Any other node keeps the URL it was set up with, which carries its own key. The URL is
+    written back to the entry, which is where Home Assistant looks to tell who holds a port.
     """
     host, instance = entry.data[CONF_HOST], entry.data.get(CONF_INSTANCE, 0)
+    url = entry.data.get(CONF_DEVICE, "")
     for node in hass.config_entries.async_entries("esphome"):
         if node.data.get("host") == host:
             info = node.state is ConfigEntryState.LOADED and node.runtime_data.device_info
             if not info or instance >= len(info.serial_proxies):
                 raise ConfigEntryNotReady(f"ESPHome at {host} has not listed its proxies yet")
-            return str(build_url(node.entry_id, info.serial_proxies[instance].name))
-    query = urlencode({"port_name": instance, "key": entry.data[CONF_ENCRYPTION_KEY]})
-    return f"esphome://{host}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}/?{query}"
+            url = str(build_url(node.entry_id, info.serial_proxies[instance].name))
+            break
+    else:
+        if not url:
+            # Set up before the port was recorded, and its node is not one Home Assistant has.
+            query = urlencode(
+                {"port_name": instance, "key": entry.data[CONF_ENCRYPTION_KEY]}
+            )
+            url = f"esphome://{host}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}/?{query}"
+    if url != entry.data.get(CONF_DEVICE):
+        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_DEVICE: url})
+    return url
 
 
 async def _async_options_updated(

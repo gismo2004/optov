@@ -201,6 +201,11 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
 - **`with sqlite3.connect(...)` does not close the connection.** It ends the transaction and
   nothing else. Every catalog query goes through `contextlib.closing`, and a connection opened
   that way must not be used past the end of its block.
+- **The serial port is looked up by the node's address, not taken from the entry.** The URL of
+  a proxy on a node Home Assistant has names that node's config entry, and setting the node up
+  again gives it a new id. `_port_url` resolves it from `CONF_HOST` and the proxy's position at
+  every start and writes the result to `CONF_DEVICE`, the key Home Assistant reads to show who
+  holds a port. A node it does not have keeps the `esphome://` URL it was set up with.
 - **Who enabled an entity lives on the entity, not in the entry.** Home Assistant records no
   author for enabling or disabling, and restores a removed entity's enabled state and registry
   options when it is re-added, but not the config entry. `_async_track_manual_changes` marks an
