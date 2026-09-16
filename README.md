@@ -319,9 +319,17 @@ long-term statistics. Two identical controllers get a numeric suffix on the seco
 **Setup says the controller is not reachable.** Check that the ESPHome node is online and that
 nothing else is connected to its serial proxy. The handshake needs the port to itself.
 
+**Setup fails with "No handler registered for URI scheme esphome-hass".** Home Assistant offers
+the serial proxies of ESPHome nodes once its `usb` integration has been loaded, which happens
+with `default_config`. Restart Home Assistant once after installing OptoV and it is there.
+
 **All entities show "unavailable".** The controller does not answer, and the log says "The
 controller does not answer". Check that it is switched on and that the read head sits on the
 optical port. The entities come back by themselves once it answers again.
+
+**Reporting a problem.** The integration entry has a *Download diagnostics* item in its menu.
+It holds the controller, its catalog version, the generated entity set, which datapoints turned
+out not to be fitted and how the bus is doing, with the node's address and key left out.
 
 **Single entities show "unavailable".** The controller's own sensor-health code reports a fault
 for that sensor, short circuit, open circuit or not fitted. The code is in the entity's

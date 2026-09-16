@@ -50,7 +50,10 @@ read_datapoint:
         text:
     bytes:
       name: Byte count
-      description: Number of bytes to read. Leave empty to use the catalog's block length.
+      description: >-
+        How many bytes to ask for. This is the datapoint's block length, which can be larger
+        than its value: the outside temperature is two bytes of a three-byte block, and asking
+        for two of them is refused. Defaults to 2.
       required: false
       example: 2
       selector:

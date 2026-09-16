@@ -33,6 +33,7 @@ custom_components/optov/
   errors.py        error-history buffer decoding
   sensor.py / binary_sensor.py / number.py / select.py / switch.py   entity platforms
   config_flow.py   setup and options
+  diagnostics.py   the download on the entry: controller, catalog, learned state, bus figures
   translate.py     the integration's own UI strings from translations/, for values
   entity.py        what every catalog-driven entity shares
   frontend/        the two dashboard cards (one file)

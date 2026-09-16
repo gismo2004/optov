@@ -139,6 +139,18 @@
     },
     "catalog_unreadable": {
       "message": "The catalog \"{name}\" could not be read as a controller catalog. Rebuild it and upload it with Reconfigure on this entry."
+    },
+    "no_controller": {
+      "message": "No OptoV controller is set up, so there is nothing to do this to."
+    },
+    "which_controller": {
+      "message": "More than one controller is set up. Say which one the call is for."
+    },
+    "unknown_schedule": {
+      "message": "No controller has a weekly programme called \"{schedule}\"."
+    },
+    "controller_refused": {
+      "message": "The controller refused {address} with error {code}. 0x01 means it does not have that address; 0x04 means the length does not match its own layout, so read the datapoint's whole block, not just its value."
     }
   },
   "card": {

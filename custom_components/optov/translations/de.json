@@ -139,6 +139,18 @@
     },
     "catalog_unreadable": {
       "message": "Der Katalog \"{name}\" konnte nicht als Regelungs-Katalog gelesen werden. Neu erzeugen und über \"Neu konfigurieren\" an diesem Eintrag hochladen."
+    },
+    "no_controller": {
+      "message": "Es ist keine OptoV-Regelung eingerichtet, also gibt es nichts zu tun."
+    },
+    "which_controller": {
+      "message": "Es ist mehr als eine Regelung eingerichtet. Bitte angeben, welche gemeint ist."
+    },
+    "unknown_schedule": {
+      "message": "Keine Regelung hat ein Wochenprogramm namens \"{schedule}\"."
+    },
+    "controller_refused": {
+      "message": "Die Regelung hat {address} mit Fehler {code} abgelehnt. 0x01 heißt, sie hat diese Adresse nicht; 0x04 heißt, die Länge passt nicht zu ihrem eigenen Aufbau -- dann den ganzen Block des Datenpunkts lesen, nicht nur seinen Wert."
     }
   },
   "card": {

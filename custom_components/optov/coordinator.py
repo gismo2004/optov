@@ -597,6 +597,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._store.async_delay_save(lambda: self._learned, _SAVE_DELAY)
 
     @property
+    def learned(self) -> dict[str, Any]:
+        """What this controller taught us, as it sits in its store. For diagnostics."""
+        return self._learned
+
+    @property
     def retired_items(self) -> set[str]:
         """Datapoints this unit does not have, kept disabled instead of enabled again."""
         return self._retired_item_ids

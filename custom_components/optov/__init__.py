@@ -12,14 +12,24 @@ from homeassistant.components.persistent_notification import (
     async_create as pn_async_create,
 )
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
+from homeassistant.core import (
+    Event,
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+    callback,
+)
 from homeassistant.exceptions import (
     ConfigEntryError,
     ConfigEntryNotReady,
+    HomeAssistantError,
     ServiceValidationError,
 )
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.typing import ConfigType
 
 from . import catalog_db
 from .const import (
@@ -39,7 +49,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import OptolinkConfigEntry, OptolinkCoordinator, OptolinkRuntime
-from .optolink import OptolinkClient
+from .optolink import OptolinkClient, OptolinkDeviceError
 from .profiles import DeviceProfile, parse_address
 
 _LOGGER = logging.getLogger(__name__)
@@ -63,6 +73,19 @@ GATEWAY_SENSORS = (
     "catalog",
 )
 FAULT_HISTORY_SENSOR = "fehlerhistorie"
+
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Put the services in place, whether or not a controller is set up.
+
+    Home Assistant validates an automation against the services that exist, so registering them
+    with an entry left every automation calling one broken until that entry loaded.
+    """
+    _async_register_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> bool:
@@ -176,25 +199,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
     entry.async_create_background_task(
         hass, coordinator.async_refresh(), f"{DOMAIN}_first_refresh"
     )
-    _async_register_services(hass)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> bool:
-    """Stop polling and drop the connection. Services go with the last entry."""
+    """Stop polling and drop the connection. The services stay, as they do not need an entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         try:
             await entry.runtime_data.client.disconnect()
         except Exception as err:
             _LOGGER.debug("Disconnect on unload: %s", err)
-        if not [
-            e
-            for e in hass.config_entries.async_loaded_entries(DOMAIN)
-            if e is not entry
-        ]:
-            for service in _SERVICES:
-                hass.services.async_remove(DOMAIN, service)
     return unload_ok
 
 
@@ -656,16 +671,6 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
 # to a controller by `config_entry_id` where it matters. A single controller needs no id.
 # ---------------------------------------------------------------------------------------
 
-_SERVICES = (
-    "refresh_all",
-    "sync_clock",
-    "read_datapoint",
-    "write_datapoint",
-    "read_schedule",
-    "set_schedule_day",
-    "set_schedule_window",
-)
-
 
 def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[OptolinkCoordinator]:
     """The controllers a call addresses: one by id, or every loaded one."""
@@ -676,7 +681,9 @@ def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[OptolinkCoordi
         if not wanted or entry.entry_id == wanted
     ]
     if not found:
-        raise ServiceValidationError("No OptoV controller is loaded")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="no_controller"
+        )
     return found
 
 
@@ -685,7 +692,7 @@ def _one_coordinator(hass: HomeAssistant, call: ServiceCall) -> OptolinkCoordina
     found = _coordinators(hass, call)
     if len(found) > 1:
         raise ServiceValidationError(
-            "More than one controller is set up; pass config_entry_id"
+            translation_domain=DOMAIN, translation_key="which_controller"
         )
     return found[0]
 
@@ -699,14 +706,31 @@ def _schedule_owner(
         key = coordinator.resolve_schedule(ref)
         if key is not None:
             return coordinator, key
-    raise ServiceValidationError(f"{ref!r} is not a programme of any controller")
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="unknown_schedule",
+        translation_placeholders={"schedule": ref},
+    )
+
+
+def _refused(err: OptolinkDeviceError, address: int) -> HomeAssistantError:
+    """The controller's own refusal, in words the caller can act on.
+
+    It answered and said no: either it does not have the address, or the length asked for does
+    not match its own layout. Neither is a fault of the link, so it must not read like one.
+    """
+    return HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key="controller_refused",
+        translation_placeholders={
+            "address": f"0x{address:04X}",
+            "code": f"0x{err.code:02X}" if err.code is not None else "-",
+        },
+    )
 
 
 @callback
 def _async_register_services(hass: HomeAssistant) -> None:
-    if hass.services.has_service(DOMAIN, "refresh_all"):
-        return
-
     async def refresh_all(call: ServiceCall) -> None:
         for coordinator in _coordinators(hass, call):
             await coordinator.async_refresh_all()
@@ -718,12 +742,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
                     "Clock sync: %s exposes no clock datapoint", coordinator.name
                 )
 
-    async def read_datapoint(call: ServiceCall) -> None:
+    async def read_datapoint(call: ServiceCall) -> ServiceResponse:
         coordinator = _one_coordinator(hass, call)
         address = parse_address(call.data["address"])
         length = int(call.data.get("bytes", 2))
         try:
             raw = await coordinator.async_read_custom_datapoint(address, length)
+        except OptolinkDeviceError as err:
+            raise _refused(err, address) from err
         except Exception as err:
             pn_async_create(
                 hass,
@@ -739,12 +765,20 @@ def _async_register_services(hass: HomeAssistant) -> None:
             title=f"Read 0x{address:04X}",
             notification_id=f"optov_read_{address}",
         )
+        return {
+            "address": f"0x{address:04X}",
+            "raw": raw.hex(" ").upper(),
+            "value": int.from_bytes(raw, "little", signed=True),
+        }
 
     async def write_datapoint(call: ServiceCall) -> None:
         coordinator = _one_coordinator(hass, call)
         address = parse_address(call.data["address"])
         data = bytes.fromhex(str(call.data["data"]).replace(" ", "").replace("0x", ""))
-        await coordinator.async_write_custom_datapoint(address, data)
+        try:
+            await coordinator.async_write_custom_datapoint(address, data)
+        except OptolinkDeviceError as err:
+            raise _refused(err, address) from err
         pn_async_create(
             hass,
             f"Wrote {len(data)} bytes to 0x{address:04X}: {data.hex(' ').upper()}",
@@ -752,7 +786,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             notification_id=f"optov_write_{address}",
         )
 
-    async def read_schedule(call: ServiceCall) -> None:
+    async def read_schedule(call: ServiceCall) -> ServiceResponse:
         coordinator, key = _schedule_owner(hass, call)
         await coordinator.async_refresh_schedules(key)
         lines = []
@@ -772,6 +806,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             title=f"Programme {key}",
             notification_id=f"optov_schedule_{key}",
         )
+        return {"schedule": key, "weekly_schedule": coordinator.schedules.get(key, {})}
 
     async def set_schedule_day(call: ServiceCall) -> None:
         coordinator, key = _schedule_owner(hass, call)
@@ -794,13 +829,16 @@ def _async_register_services(hass: HomeAssistant) -> None:
             call.data.get("mode"),
         )
 
-    for name, handler in (
-        ("refresh_all", refresh_all),
-        ("sync_clock", sync_clock),
-        ("read_datapoint", read_datapoint),
-        ("write_datapoint", write_datapoint),
-        ("read_schedule", read_schedule),
-        ("set_schedule_day", set_schedule_day),
-        ("set_schedule_window", set_schedule_window),
+    # The two reading services answer their caller as well as posting the notification, so a
+    # script can use the value without going through an entity.
+    answers = SupportsResponse.OPTIONAL
+    for name, handler, response in (
+        ("refresh_all", refresh_all, SupportsResponse.NONE),
+        ("sync_clock", sync_clock, SupportsResponse.NONE),
+        ("read_datapoint", read_datapoint, answers),
+        ("write_datapoint", write_datapoint, SupportsResponse.NONE),
+        ("read_schedule", read_schedule, answers),
+        ("set_schedule_day", set_schedule_day, SupportsResponse.NONE),
+        ("set_schedule_window", set_schedule_window, SupportsResponse.NONE),
     ):
-        hass.services.async_register(DOMAIN, name, handler)
+        hass.services.async_register(DOMAIN, name, handler, supports_response=response)
