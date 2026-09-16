@@ -75,10 +75,13 @@ Two things the KW protocol cannot do, which you may notice if you have one of th
 Everything else is the same either way: the same catalog, the same entities, the same cards and
 services. Which protocol is in use is in the integration's diagnostics download.
 
-**A third protocol, GWG**, exists on the oldest wall-mounted units (System IDs 0x2053 and 0x2054)
-and addresses memory with a single byte. OptoV does not speak it and refuses those controllers by
-name rather than trying: a two-byte address sent to them would not be refused, it would land
-somewhere else. They are in the catalog because they are in the same source as everything else.
+**A third protocol, GWG**, runs on the oldest wall-hung gas units -- System IDs 0x2053 and 0x2054,
+the Vitodens 100/200 generation with a VR20 board -- and addresses memory with a single byte.
+OptoV does not speak it and refuses those controllers by name rather than trying: a two-byte
+address sent to them would not be refused, it would land somewhere else. The same refusal covers
+the two-wire bus family (0x2000) and the OpenTherm entries (0x2621, 0x26FF), whose datapoints are
+OpenTherm data-ids rather than addresses. All of them are in the catalog because they come from
+the same source as everything else; being described there does not make them reachable.
 
 ## Installation
 

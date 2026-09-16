@@ -148,6 +148,8 @@ def test_a_third_protocol_is_named_rather_than_guessed_at():
     # GWG controllers address memory with a single byte; sending two would not be refused.
     assert 0x2053 in optolink.FOREIGN_PROTOCOL_IDS
     assert 0x2054 in optolink.FOREIGN_PROTOCOL_IDS
+    # And the OpenTherm entries, whose datapoints are not addresses at all.
+    assert 0x2621 in optolink.FOREIGN_PROTOCOL_IDS
     # The families this integration does drive are not in there.
     assert 0x2048 not in optolink.FOREIGN_PROTOCOL_IDS
     assert 0x2098 not in optolink.FOREIGN_PROTOCOL_IDS

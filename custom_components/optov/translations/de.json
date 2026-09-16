@@ -143,7 +143,7 @@
       "message": "Die Regelung meldet System-ID {sys_id} mit Hardware-Index {hw} und Software-Index {sw}. Der Katalog „{name}“ kennt das nicht: er beschreibt zu dieser System-ID {variants}. Melde diese drei Werte in einem GitHub-Issue, damit die Regelung unterstützt werden kann."
     },
     "controller_protocol": {
-      "message": "Diese Regelung meldet sich als System-ID {sys_id}. Sie spricht weder P300 noch KW, sondern das ältere GWG-Protokoll mit einem Adressbyte. OptoV kann nicht mit ihr sprechen und versucht es auch nicht: eine Zwei-Byte-Adresse würde dort nicht abgelehnt, sondern irgendwo anders landen."
+      "message": "Diese Regelung meldet sich als System-ID {sys_id}. Solche Regelungen kann diese Integration nicht über Optolink ansprechen: sie sprechen das ältere GWG-Protokoll mit einem Adressbyte, hängen an einem Zwei-Draht-Bus statt an der optischen Schnittstelle, oder sind als OpenTherm-Daten statt über Adressen beschrieben. OptoV versucht es nicht: eine Adresse würde dort nicht abgelehnt, sondern irgendwo anders landen."
     },
     "no_controller": {
       "message": "Es ist keine OptoV-Regelung eingerichtet, also gibt es nichts zu tun."
