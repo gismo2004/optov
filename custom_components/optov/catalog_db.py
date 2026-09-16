@@ -865,6 +865,13 @@ def _slug(name: str) -> str:
     return s or "unnamed"
 
 
+def _as_sensor(entry: dict[str, Any], sensor_category: str | None) -> dict[str, Any]:
+    """A sensor may not be `config`; Home Assistant allows that only on writable entities."""
+    if sensor_category:
+        entry["entity_category"] = sensor_category
+    return entry
+
+
 def _div_ratio(conv: str | None) -> float:
     if not conv:
         return 1.0
@@ -1346,9 +1353,7 @@ def generate_profile(
                     profile["selects"].append(entry)
                 elif is_datetime_or_str:
                     entry["conversion"] = dp.get("conversion") or "NoConversion"
-                    if sensor_category:
-                        entry["entity_category"] = sensor_category
-                    profile["sensors"].append(entry)
+                    profile["sensors"].append(_as_sensor(entry, sensor_category))
                 else:
                     entry["div_ratio"] = _div_ratio(dp.get("conversion"))
                     entry.update(_unit_meta(unit_str))
@@ -1362,15 +1367,11 @@ def generate_profile(
             else:
                 if enum_values:
                     entry["options"] = enum_values
-                    if sensor_category:
-                        entry["entity_category"] = sensor_category
-                    profile["sensors"].append(entry)
+                    profile["sensors"].append(_as_sensor(entry, sensor_category))
                 else:
                     ptype = (dp.get("parameter_type") or "").strip().lower()
                     if ptype == "bit":
-                        if sensor_category:
-                            entry["entity_category"] = sensor_category
-                        profile["binary_sensors"].append(entry)
+                        profile["binary_sensors"].append(_as_sensor(entry, sensor_category))
                     else:
                         entry["div_ratio"] = _div_ratio(dp.get("conversion"))
                         entry.update(_unit_meta(unit_str))
@@ -1386,9 +1387,7 @@ def generate_profile(
                             entry.setdefault("state_class", "measurement")
                             if decodes_to_integer(conversion):
                                 entry["display_precision"] = 0
-                        if sensor_category:
-                            entry["entity_category"] = sensor_category
-                        profile["sensors"].append(entry)
+                        profile["sensors"].append(_as_sensor(entry, sensor_category))
 
         # Deduplicate IDs
         platforms = ("sensors", "binary_sensors", "numbers", "selects", "switches")

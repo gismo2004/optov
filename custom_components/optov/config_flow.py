@@ -57,6 +57,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SYNC_CLOCK,
     DOMAIN,
+    option,
 )
 from .translate import async_ui_text
 
@@ -392,9 +393,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
         options = dict(entry.options)
         languages = await self._async_languages()
-        language = options.get(
-            CONF_LANGUAGE, entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
-        )
+        language = option(entry, CONF_LANGUAGE, DEFAULT_LANGUAGE)
         if language not in languages:
             # The new catalog does not carry the language in use. Take one it does, so the
             # options page offers a valid choice rather than failing to save.
@@ -541,13 +540,8 @@ class OptoVOptionsFlow(OptionsFlow):
 
         current = self.config_entry.options
         # Entries created before language and interval moved into options carry them in data.
-        language = current.get(
-            CONF_LANGUAGE, self.config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
-        )
-        interval = current.get(
-            CONF_SCAN_INTERVAL,
-            self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-        )
+        language = option(self.config_entry, CONF_LANGUAGE, DEFAULT_LANGUAGE)
+        interval = option(self.config_entry, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         languages = await self.hass.async_add_executor_job(
             get_available_languages,
             os.path.join(

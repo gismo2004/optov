@@ -31,6 +31,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.setup import async_when_setup
 
 from . import catalog_db
 from .const import (
@@ -46,6 +47,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PLATFORMS,
+    option,
 )
 from .coordinator import OptolinkConfigEntry, OptolinkCoordinator, OptolinkRuntime
 from .optolink import OptolinkClient, OptolinkDeviceError
@@ -55,7 +57,6 @@ _LOGGER = logging.getLogger(__name__)
 
 CARD_FILENAME = "optov-cards.js"
 CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
-FRONTEND_KEY = f"{DOMAIN}_frontend"
 REGISTRY_LISTENER_KEY = f"{DOMAIN}_registry_listener"
 OWN_ENABLES_KEY = f"{DOMAIN}_own_enables"
 # Set in an entity's registry options once its enabled state has been changed by hand.
@@ -77,12 +78,17 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Put the services in place, whether or not a controller is set up.
+    """Put the services and the dashboard cards in place, before any controller is set up.
 
-    Home Assistant validates an automation against the services that exist, so registering them
-    with an entry left every automation calling one broken until that entry loaded.
+    Both belong to the integration rather than to a controller. Home Assistant validates an
+    automation against the services that exist, so registering them with an entry left every
+    automation calling one broken until that entry loaded. The card file is the same story from
+    the other side: served from an entry, it is missing while Home Assistant is still starting
+    and missing altogether while a controller is unreachable, and a dashboard that asked for it
+    in that window shows a broken card until someone reloads the page.
     """
     _async_register_services(hass)
+    await _async_register_frontend(hass)
     return True
 
 
@@ -150,9 +156,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
         )
 
     client = OptolinkClient(_port_url(hass, entry), entry.data[CONF_HOST])
-    scan_interval = entry.options.get(
-        CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-    )
+    scan_interval = option(entry, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     coordinator = OptolinkCoordinator(hass, client, scan_interval, entry)
     coordinator.db_path = coordinator_db_path
     try:
@@ -173,7 +177,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
         _async_update_title(hass, entry, coordinator)
         _async_migrate_identity(hass, entry, coordinator)
         _async_reconcile_registry(hass, entry, coordinator)
-        await _async_register_frontend(hass)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         # Entities Home Assistant restored from an earlier installation of this controller
         # only reach the registry while the platforms set up; see _async_apply_enabled_states.
@@ -603,7 +606,7 @@ def _async_apply_enabled_states(
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
-    """Serve the dashboard cards and make Home Assistant load them, once per Home Assistant.
+    """Serve the dashboard cards and make Home Assistant load them.
 
     A dashboard kept in storage gets a resource entry, the way a card has always reached a
     browser: the frontend asks for that list over the websocket every time it loads a
@@ -614,9 +617,9 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
 
     A dashboard kept in YAML has no such list to write to: there the module is added to the
     page, which is the only way that works, and a card update then waits for the shell.
+
+    The resource is written once Lovelace is up, which is after this runs.
     """
-    if hass.data.get(FRONTEND_KEY):
-        return
     card_path = hass.config.path("custom_components", DOMAIN, "frontend", CARD_FILENAME)
     try:
         mtime = await hass.async_add_executor_job(os.path.getmtime, card_path)
@@ -627,33 +630,35 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     await hass.http.async_register_static_paths(
         [StaticPathConfig(CARD_URL, card_path, cache_headers=False)]
     )
-    hass.data[FRONTEND_KEY] = True
     # The stamp makes a browser fetch the file again after an update rather than keep its copy.
     url = f"{CARD_URL}?v={int(mtime)}"
 
-    resources = _card_resources(hass)
-    if resources is None:
-        add_extra_js_url(hass, url)
-        return
-    try:
-        await resources.async_get_info()  # loads the collection from storage
-        ours = next(
-            (
-                item
-                for item in resources.async_items()
-                if str(item.get("url", "")).split("?")[0] == CARD_URL
-            ),
-            None,
-        )
-        if ours is None:
-            await resources.async_create_item({"res_type": "module", "url": url})
-            _LOGGER.info("Registered the dashboard cards as a resource: %s", url)
-        elif ours.get("url") != url:
-            await resources.async_update_item(
-                ours["id"], {"res_type": "module", "url": url}
+    async def _register(hass: HomeAssistant, _component: str) -> None:
+        resources = _card_resources(hass)
+        if resources is None:
+            add_extra_js_url(hass, url)
+            return
+        try:
+            await resources.async_get_info()  # loads the collection from storage
+            ours = next(
+                (
+                    item
+                    for item in resources.async_items()
+                    if str(item.get("url", "")).split("?")[0] == CARD_URL
+                ),
+                None,
             )
-    except Exception as err:
-        _LOGGER.warning("Could not register the dashboard cards as a resource: %s", err)
+            if ours is None:
+                await resources.async_create_item({"res_type": "module", "url": url})
+                _LOGGER.info("Registered the dashboard cards as a resource: %s", url)
+            elif ours.get("url") != url:
+                await resources.async_update_item(
+                    ours["id"], {"res_type": "module", "url": url}
+                )
+        except Exception as err:
+            _LOGGER.warning("Could not register the dashboard cards as a resource: %s", err)
+
+    async_when_setup(hass, "lovelace", _register)
 
 
 @callback

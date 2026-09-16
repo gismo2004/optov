@@ -1,5 +1,8 @@
 """Constants for OptoV integration."""
 
+from typing import Any
+
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 
 DOMAIN = "optov"
@@ -42,3 +45,9 @@ PLATFORMS = [
     Platform.SELECT,
     Platform.SWITCH,
 ]
+
+
+def option(entry: ConfigEntry, key: str, default: Any) -> Any:
+    """A setting of an entry, from its options or from the data of an entry made before that
+    setting moved there."""
+    return entry.options.get(key, entry.data.get(key, default))

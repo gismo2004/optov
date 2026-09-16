@@ -39,6 +39,7 @@ from .const import (
     DEFAULT_LANGUAGE,
     DEFAULT_SYNC_CLOCK,
     DOMAIN,
+    option,
 )
 from .conversions import (
     DAY_INDEX,
@@ -235,10 +236,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.db_path: str | None = None
         # See stable_id(). Settled once the node has answered, before any entity is built.
         self._stable_id: str | None = None
-        self._language = config_entry.options.get(
-            CONF_LANGUAGE,
-            config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
-        )
+        self._language = option(config_entry, CONF_LANGUAGE, DEFAULT_LANGUAGE)
 
         self.error_history: list[dict[str, Any]] = []
         self.last_error: dict[str, Any] | None = None
