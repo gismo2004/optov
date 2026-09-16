@@ -162,6 +162,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
     try:
         await client.connect()
         await coordinator.async_init_device()
+    except catalog_db.UnknownControllerError as err:
+        # The link works and the controller answered; the catalog simply has no entry for what
+        # it said. Retrying reads the same bytes again, so this is a setup error that names
+        # them instead of a "not ready" that hides them in a retry loop.
+        await client.disconnect()
+        # Shortened: a System ID covers twenty boards in the GWG families.
+        known = ", ".join(err.variants[:8]) + ("..." if len(err.variants) > 8 else "")
+        raise ConfigEntryError(
+            translation_domain=DOMAIN,
+            translation_key="controller_unknown",
+            translation_placeholders={
+                "sys_id": f"0x{err.sys_id:04X}",
+                "hw": "-" if err.hw_index is None else f"0x{err.hw_index:02X}",
+                "sw": "-" if err.sw_index is None else f"0x{err.sw_index:02X}",
+                "name": os.path.basename(coordinator_db_path),
+                "variants": known or "-",
+            },
+        ) from err
     except Exception as err:
         await client.disconnect()
         raise ConfigEntryNotReady(f"Controller not reachable: {err}") from err

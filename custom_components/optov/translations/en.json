@@ -139,6 +139,9 @@
     "catalog_unreadable": {
       "message": "The catalog \"{name}\" could not be read as a controller catalog. Rebuild it and upload it with Reconfigure on this entry."
     },
+    "controller_unknown": {
+      "message": "The controller reports System ID {sys_id} with hardware index {hw} and software index {sw}. The catalog “{name}” has no entry for that: it describes {variants} for this System ID. Report these three values in a GitHub issue so the controller can be supported."
+    },
     "no_controller": {
       "message": "No OptoV controller is set up, so there is nothing to do this to."
     },

@@ -356,8 +356,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sw_version = f"v{sw_index:02X}" if sw_index is not None else ""
         if hw_index is not None:
             _LOGGER.info(
-                "DeviceIdent 0x%04X, hardware index %d, software index %d",
+                "DeviceIdent 0x%04X, hardware index 0x%02X, software index 0x%02X "
+                "(identification extension %02X%02X)",
                 sys_id,
+                hw_index,
+                sw_index,
                 hw_index,
                 sw_index,
             )
@@ -387,10 +390,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             sw_index,
             f0,
         )
-        if not dev:
-            raise ValueError(
-                f"Controller System ID 0x{sys_id:04X} is not supported in the database."
-            )
         # Both before the profile: the entity set is built from what this controller taught us
         # before, and that is kept under its stable id.
         self._stable_id = self._compute_stable_id()

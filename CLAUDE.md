@@ -196,7 +196,10 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
 - **Signedness follows the declared parameter type width**, not the datapoint's byte count, and
   unsigned types are not masked at all.
 - **A System ID is not an identity.** Many controllers share one; identification needs the
-  hardware and software indices too, and occasionally one extra register.
+  hardware and software indices too (0x00FA/0x00FB, the catalog's `<HardwareIndex><SoftwareIndex>`
+  extension), and occasionally one extra register. Where every variant of a System ID declares
+  the same hardware index, that byte separates nothing, and a controller reporting an unknown one
+  is still placed by its software index -- which is what the model suffixes name.
 - **The catalog is a superset.** It describes a controller family, so it lists datapoints a
   given unit does not have. That is expected, not an error.
 - **One telegram per datapoint, and do not try to be clever about it.** Reading a range that

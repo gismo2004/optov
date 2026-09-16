@@ -139,6 +139,9 @@
     "catalog_unreadable": {
       "message": "Der Katalog \"{name}\" konnte nicht als Regelungs-Katalog gelesen werden. Neu erzeugen und über \"Neu konfigurieren\" an diesem Eintrag hochladen."
     },
+    "controller_unknown": {
+      "message": "Die Regelung meldet System-ID {sys_id} mit Hardware-Index {hw} und Software-Index {sw}. Der Katalog „{name}“ kennt das nicht: er beschreibt zu dieser System-ID {variants}. Melde diese drei Werte in einem GitHub-Issue, damit die Regelung unterstützt werden kann."
+    },
     "no_controller": {
       "message": "Es ist keine OptoV-Regelung eingerichtet, also gibt es nichts zu tun."
     },

@@ -13,8 +13,15 @@ import sqlite3
 from contextlib import closing, suppress
 from typing import Any
 
-from .conversions import schedule_type
-from .decode import decodes_to_integer, decodes_to_number, raw_bounds
+try:
+    # Real package context (Home Assistant importing custom_components.optov.catalog_db).
+    from .conversions import schedule_type
+    from .decode import decodes_to_integer, decodes_to_number, raw_bounds
+except ImportError:
+    # Standalone context: a script adds the integration directory to sys.path and imports
+    # this module directly, with no parent package.
+    from conversions import schedule_type
+    from decode import decodes_to_integer, decodes_to_number, raw_bounds
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +42,33 @@ CATALOG_FILENAME = "catalog.db"
 #
 #   1  level-name key stems on datapoint_defs, catalog_meta itself
 CATALOG_SCHEMA_VERSION = 1
+
+
+def _ext_label(hw_index: int | None, sw_index: int | None) -> str:
+    """The identification extension the way the catalog spells it, or "-" when it is unread."""
+    if hw_index is None or sw_index is None:
+        return "-"
+    return f"{hw_index:02X}{sw_index:02X}"
+
+
+class UnknownControllerError(ValueError):
+    """The controller said who it is and the catalog has no entry that fits.
+
+    Carries the identification extensions the catalog does hold for that System ID, so the
+    message can show what the controller would have had to report instead.
+    """
+
+    def __init__(
+        self, sys_id: int, hw_index: int | None, sw_index: int | None, variants: list[str]
+    ) -> None:
+        self.sys_id = sys_id
+        self.hw_index = hw_index
+        self.sw_index = sw_index
+        self.variants = variants
+        super().__init__(
+            f"Controller System ID 0x{sys_id:04X} with identification extension "
+            f"{_ext_label(hw_index, sw_index)} is not in the catalog"
+        )
 
 
 class CatalogSchemaError(ValueError):
@@ -482,7 +516,9 @@ def _select_variant(
     2. **IdentificationExtension** = `<HardwareIndex:X2><SoftwareIndex:X2>`. Exact match first,
        then the `ident_ext..ident_ext_till` range, comparing the hardware and software bytes
        independently rather than as one 16-bit number.
-    3. Failing both, the candidate that declares no extension at all, which acts as the
+    3. The software index on its own, but only where every candidate declares the same
+       hardware index, so that byte cannot be what separates them.
+    4. Failing those, the candidate that declares no extension at all, which acts as the
        catch-all.
     """
     if len(candidates) == 1:
@@ -517,11 +553,38 @@ def _select_variant(
             if lo and hi and lo[0] <= hw_index <= hi[0] and lo[1] <= sw_index <= hi[1]:
                 return c
 
+    # Stage 2b -- the software index alone, when the hardware byte cannot be telling variants
+    # apart because every candidate declares the same one. A controller reporting a hardware
+    # index the catalog never saw is then still one of these variants: the datapoint set
+    # follows the software index, which is what the model suffixes name ("Softwarestand 4").
+    # Where the hardware indices do differ -- the GWG families, where the byte names the board
+    # -- nothing is assumed and the lookup is left to fail.
+    if sw_index is not None and len({(c["ident_ext"] or "")[:2] for c in candidates}) == 1:
+        for c in candidates:
+            ext, till = _bytes(c["ident_ext"]), _bytes(c["ident_ext_till"])
+            if ext and (ext[1] == sw_index or (till and ext[1] <= sw_index <= till[1])):
+                _LOGGER.warning(
+                    "Hardware index 0x%02X is not the 0x%02X that every variant of this "
+                    "System ID declares; selecting %s by software index 0x%02X alone",
+                    hw_index,
+                    ext[0],
+                    c["model"],
+                    sw_index,
+                )
+                return c
+
     # Stage 3 -- the extension-less catch-all.
     for c in candidates:
         if not c["ident_ext"]:
             return c
     return None
+
+
+def _variant_label(candidate: Any) -> str:
+    """Name one variant the way the catalog declares it: model and extension range."""
+    ext, till = candidate["ident_ext"] or "-", candidate["ident_ext_till"] or ""
+    span = f"{ext}..{till}" if till and till != ext else ext
+    return f"{candidate['model']} ({span})"
 
 
 def get_device_by_system_id(
@@ -548,29 +611,24 @@ def get_device_by_system_id(
             (hex_id, dec_id),
         ).fetchall()
         if not candidates:
-            return None
+            raise UnknownControllerError(sys_id, hw_index, sw_index, [])
 
         row = _select_variant(candidates, hw_index, sw_index, f0, sys_id & 0xFF)
         if row is None:
-            _LOGGER.warning(
-                "System ID 0x%04X matches %d controllers but none fits hardware index %s / "
-                "software index %s / F0 %s",
+            raise UnknownControllerError(
                 sys_id,
-                len(candidates),
                 hw_index,
                 sw_index,
-                f0,
+                [_variant_label(c) for c in candidates],
             )
-            return None
         if len(candidates) > 1:
             _LOGGER.info(
                 "System ID 0x%04X matches %d controllers; selected %s "
-                "(hardware index %s, software index %s, F0 %s)",
+                "(identification extension %s, F0 %s)",
                 sys_id,
                 len(candidates),
                 row["model"],
-                hw_index,
-                sw_index,
+                _ext_label(hw_index, sw_index),
                 f0,
             )
 

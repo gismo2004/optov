@@ -338,9 +338,13 @@ for that sensor, short circuit, open circuit or not fitted. The code is in the e
 attribute, and open an issue with the log lines for that address. The catalog is a superset and
 a wrong scaling or byte order for your variant is a catalog fix, not a code change.
 
-**"Controller System ID ... is not supported in the database."** The catalog was built for a
-different controller. Run VExtractor again and give it the id from that message, or answer `all`
-to cover every controller at once.
+**"The controller reports System ID ... The catalog has no entry for that."** The message
+names the System ID, the hardware index and the software index your controller reports, and the
+variants the catalog holds for that System ID. Usually the catalog was built for a different
+controller: run VExtractor again and give it the id from that message, or answer `all` to cover
+every controller at once. If the System ID is in the catalog but no variant fits, the three
+values belong in an issue -- the controller is describing itself in a way the service software
+never recorded.
 
 **Setup asks which catalog to use.** There is more than one in `<config>/optov/`. Pick the one
 that describes this controller, or upload another. The choice is stored with the entry, so each
