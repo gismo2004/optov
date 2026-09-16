@@ -40,6 +40,7 @@ custom_components/optov/
   translations/    the integration's own text, one file per language
   brand/           the mark and wordmark, SVG sources and PNG renders
 hacs.json          HACS metadata
+tests/             what runs without hardware: decoder, conversions, faults, the card
 docs/              README images of the dashboard cards
 work/              git-ignored playground: deployment scripts, scratch data, throwaway probes
 ```
@@ -223,13 +224,17 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
 
 ## Working on the integration
 
-There is no test suite. Verification means running against a real controller, so changes to the
-transport or the decoder need hardware in the loop. Probe scripts for that live in `work/`.
+`tests/` holds what can be checked without hardware, and CI runs it on every push: the decoder,
+the conversions and the fault buffer are free of Home Assistant imports on purpose, so they are
+imported directly and tested against the rules the catalog implies -- signedness by declared
+width, MSB-first bit fields, the round trip of every schedule layout. Everything above them --
+the transport's timing, the catalog queries, the coordinator -- still needs a real controller,
+and the probe scripts for that live in `work/`.
 
-The dashboard card is the exception: `node work/tools/dv-card-smoke.js` renders it against a stub
-DOM and a fake Home Assistant and fails on any exception. Run it after every card change.
-`node --check` only parses, and a runtime error in the card surfaces in the browser as
-"Configuration error" with nothing in any log.
+`node tests/card_smoke.js` renders the dashboard card against a stub DOM and a fake Home
+Assistant and fails on any exception. Run it after every card change. `node --check` only
+parses, and a runtime error in the card surfaces in the browser as "Configuration error" with
+nothing in any log.
 
 Home Assistant does not re-import Python on a config-entry reload; a full restart is required to
 pick up code changes.

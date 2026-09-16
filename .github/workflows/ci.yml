@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    name: Tests and checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      # serialx is what the transport speaks to; it comes with Home Assistant at runtime.
+      - run: pip install pytest pyflakes serialx
+      - run: python -m pyflakes custom_components/optov/*.py tests/*.py
+      - run: python -m pytest -q tests
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      # The card fails in a browser with "Configuration error" and nothing in any log, so it
+      # is rendered here against a stub DOM instead.
+      - run: node tests/card_smoke.js
+
+  hassfest:
+    name: Home Assistant manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hacs/action@main
+        with:
+          category: integration
