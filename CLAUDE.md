@@ -192,12 +192,12 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
   refused values the controller holds happily -- more than a third of a family's settings carry
   no limits at all -- and a whole-number step hides the tenths a scaled datapoint is set in.
 - **Only P300 is spoken, and a controller that speaks only the older KW protocol identifies
-  itself.** It beacons ENQ (0x05) and never acknowledges the `16 00 00` init, which is how the
-  service software tells the two apart as well -- it calls them VS1 and VS2 and probes for both.
-  So an unanswered init is a diagnosis, not just a failure. KW would be a second transport, not a
-  second catalog: its telegram is a bare `<FC> <addr_hi> <addr_lo> <len>` with no framing and no
-  way to refuse, so the display conditions would be the only filter on what a unit has, and a
-  silent timeout would have to mean "unavailable" rather than a zero.
+  itself.** It beacons ENQ (0x05) and never acknowledges the `16 00 00` init, so an unanswered
+  init is a diagnosis rather than just a failure. The openv wiki documents which controllers are
+  KW-only and the protocol itself. KW is a second transport, not a second catalog: its telegram is
+  a bare `<FC> <addr_hi> <addr_lo> <len>` with no framing and no way to refuse a read, so the
+  display conditions are the only filter on what a unit has, and a silent timeout has to mean
+  "unavailable" rather than a zero.
 - **Bit-field numbering is MSB-first within each byte**, across the whole block, not a
   little-endian shift-and-mask.
 - **Signedness follows the declared parameter type width**, not the datapoint's byte count, and

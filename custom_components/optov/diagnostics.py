@@ -52,6 +52,7 @@ async def async_get_config_entry_diagnostics(
             "probed_registers": len(learned.get("condition_cache") or {}),
         },
         "bus": {
+            "protocol": entry.runtime_data.client.protocol,
             "scan_interval": coordinator.scan_interval_seconds,
             "polled_datapoints": coordinator.active_channels,
             "cycle_seconds": coordinator.poll_duration,

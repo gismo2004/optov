@@ -1,4 +1,9 @@
-"""Asynchronous Optolink P300 client over a serial port opened with serialx."""
+"""Asynchronous Optolink client over a serial port opened with serialx.
+
+Speaks P300, and the older KW protocol for the controllers that have nothing else. Which one it
+is is not configured but found out in the handshake, and the two differ only in how a telegram
+is put on the wire: everything above read_raw()/write_raw() is the same for both.
+"""
 
 import asyncio
 import contextlib
@@ -24,6 +29,8 @@ FC_PHYSICAL_WRITE = 0x04
 FC_EEPROM_READ = 0x05
 FC_EEPROM_WRITE = 0x06
 FC_RPC = 0x07  # "Remote_Procedure_Call"
+FC_PROCESS_WRITE = 0x78  # 120
+FC_PROCESS_READ = 0x7B  # 123
 FC_GFA_READ = 0xC9  # 201
 FC_GFA_WRITE = 0xCA  # 202
 
@@ -38,8 +45,24 @@ FUNCTION_CODES = {
     "EEPROM_READ": FC_EEPROM_READ,
     "EEPROM_WRITE": FC_EEPROM_WRITE,
     "Remote_Procedure_Call": FC_RPC,
+    "PROZESS_READ": FC_PROCESS_READ,
+    "PROZESS_WRITE": FC_PROCESS_WRITE,
     "GFA_READ": FC_GFA_READ,
     "GFA_WRITE": FC_GFA_WRITE,
+}
+
+PROTO_P300 = "P300"
+PROTO_KW = "KW"
+
+# The same operation, as the KW protocol numbers it. What is absent here cannot be expressed in
+# KW at all -- above all the RPC, which is how the heat-pump families' fault buffers are read.
+KW_FUNCTION_CODES = {
+    FC_VIRTUAL_READ: 0xF7,
+    FC_VIRTUAL_WRITE: 0xF4,
+    FC_GFA_READ: 0x6B,
+    FC_GFA_WRITE: 0x68,
+    FC_PROCESS_READ: FC_PROCESS_READ,
+    FC_PROCESS_WRITE: FC_PROCESS_WRITE,
 }
 
 
@@ -106,6 +129,13 @@ SYNC_WINDOW = 0.1
 # How long an init may go unanswered before the handshake starts over with EOT.
 INIT_TIMEOUT = 0.5
 
+# A KW controller left alone goes back to announcing itself and then ignores requests until it is
+# taken again. A telegram that follows the previous one inside this window needs no new handshake.
+KW_IDLE = 0.4
+# A KW answer has no header to recognise and no checksum to check -- there is nothing to wait for
+# but the byte count, so waiting long buys nothing and costs a cycle.
+KW_TIMEOUT = 1.0
+
 
 def _reason(err: BaseException) -> str:
     """What to log for a failure. A timeout carries no message of its own; its type does."""
@@ -126,7 +156,8 @@ class OptolinkDeviceError(Exception):
     Distinct from transport failures (timeout, checksum, desync): the link is healthy and the
     answer is definitive, so callers should neither resync nor retry. Typically means the
     datapoint does not exist on this hardware variant -- the catalog covers a whole controller
-    family, and not every address in it is implemented by every member.
+    family, and not every address in it is implemented by every member. Also raised for an
+    operation this link cannot express at all, which is as definitive as a refusal.
     """
 
     def __init__(
@@ -217,6 +248,10 @@ class OptolinkClient:
         self.rx_queue: asyncio.Queue[int] = asyncio.Queue(maxsize=RX_QUEUE_LIMIT)
         self._lock = asyncio.Lock()
         self._synced = False
+        # Which protocol the controller turned out to speak, and when it last heard from us --
+        # the KW line has to be taken again once it has been quiet (see _transact_kw).
+        self.protocol = PROTO_P300
+        self._last_kw_tx = 0.0
         self._transport: Any | None = None
         # The opening in use while the port works; None once it went away or was closed.
         self._link: _Link | None = None
@@ -320,6 +355,17 @@ class OptolinkClient:
             buf.append(b)
         return bytes(buf)
 
+    async def _sync(self, deadline: float = 4.0) -> None:
+        """Bring the link into the protocol this controller speaks.
+
+        A controller already known to speak KW is not asked about P300 again: the init it ignores
+        would cost the whole deadline on every resync.
+        """
+        if self.protocol == PROTO_KW:
+            await self._sync_kw(deadline)
+        else:
+            await self._sync_p300(deadline)
+
     async def _sync_p300(self, deadline: float = 4.0):
         """Bring the link into P300.
 
@@ -384,17 +430,46 @@ class OptolinkClient:
             raise OptolinkControllerSilent(
                 f"no byte from the controller within {deadline:.0f}s"
             )
-        # A P300 controller acknowledges the init every time, so an invitation that leads
-        # nowhere says something about what is on the other end.
-        raise ConnectionError(
-            f"Failed to synchronize Optolink P300 protocol within {deadline:.0f}s: "
-            + (
-                "the controller announced itself but never acknowledged the init, as a "
-                "controller that speaks only the older KW protocol does -- or another program "
-                "on the same port took the answer"
-                if invited
-                else "nothing the controller sent looked like an announcement"
+        if invited:
+            # It announced itself and ignored every init. A P300 controller acknowledges the
+            # init every time, so this one has only the older KW protocol -- which is spoken
+            # from here on, with no init to answer.
+            _LOGGER.info(
+                "%s does not answer the P300 init; it speaks the older KW protocol",
+                self.name,
             )
+            self.protocol = PROTO_KW
+            await self._sync_kw(deadline)
+            return
+        raise ConnectionError(
+            f"Failed to synchronize Optolink P300 protocol within {deadline:.0f}s: nothing the "
+            "controller sent looked like an announcement"
+        )
+
+    async def _sync_kw(self, deadline: float = 4.0) -> None:
+        """Take the KW line: one announcement, one answer.
+
+        The controller announces itself with ENQ about twice a second and listens as soon as it
+        gets a single 0x01. There is nothing to acknowledge and nothing to negotiate, so the only
+        thing to wait for is an announcement -- the freshest one, because a node that buffered a
+        burst of them while nobody was subscribed delivers the lot at once and answering the
+        first would answer an announcement the controller has long moved on from.
+        """
+        self._flush_rx()
+        loop = asyncio.get_running_loop()
+        ends_at = loop.time() + deadline
+        while loop.time() < ends_at:
+            window = await self._collect(SYNC_WINDOW)
+            if window and window[-1] == ENQ:
+                self._transport.write(bytes([0x01]))
+                self._synced = True
+                self._last_kw_tx = loop.time()
+                _LOGGER.debug("KW line taken.")
+                return
+            if window:
+                _LOGGER.debug("Ignoring %s while taking the line", window.hex(" "))
+        raise OptolinkControllerSilent(
+            f"no announcement from the controller within {deadline:.0f}s"
         )
 
     async def _collect(self, window: float) -> bytes:
@@ -514,6 +589,58 @@ class OptolinkClient:
 
         return resp_payload
 
+    async def _transact_kw(
+        self, function_code: int, address: int, data_length: int, data: bytes = b""
+    ) -> bytes:
+        """Send one KW telegram and return an answer shaped like a P300 response payload.
+
+        Wire format, which is the whole of it:
+
+            fc | addrHi | addrLo | dataLen | data...
+
+        No start byte, no length echo, no checksum, no acknowledgement. A read is answered with
+        exactly `dataLen` bytes and nothing else; a write with a single byte. There is no error
+        telegram, so an address this unit does not have cannot be told apart from one it does --
+        which is why the catalog's display conditions are the only filter on what is asked for.
+
+        The answer is returned behind a synthetic five-byte header, the one a P300 response
+        carries, so that no caller above has to know which protocol it got.
+        """
+        kw_fc = KW_FUNCTION_CODES.get(function_code)
+        if kw_fc is None:
+            # As definitive as a refusal: no number of retries gives KW a function code it
+            # does not have, so this travels the same path as an address the unit lacks.
+            raise OptolinkDeviceError(
+                f"function code 0x{function_code:02X} has no KW equivalent, so 0x{address:04X} "
+                f"cannot be reached on {self.name}",
+                address=address,
+                code=ERR_NOT_IMPLEMENTED,
+            )
+        loop = asyncio.get_running_loop()
+        if loop.time() - self._last_kw_tx > KW_IDLE:
+            # Quiet long enough that the controller has gone back to announcing itself, in which
+            # state it ignores a request. Taking the line again costs one announcement.
+            await self._sync_kw()
+
+        self._flush_rx()
+        self._transport.write(
+            bytes([kw_fc, (address >> 8) & 0xFF, address & 0xFF, data_length]) + data
+        )
+        # A write is acknowledged with one byte whose value says nothing; that it arrived at all
+        # is the acknowledgement.
+        answer = await self._read_exact(1 if data else data_length, timeout=KW_TIMEOUT)
+        self._last_kw_tx = loop.time()
+        header = bytes(
+            [
+                MSGID_RESPONSE,
+                function_code,
+                (address >> 8) & 0xFF,
+                address & 0xFF,
+                data_length,
+            ]
+        )
+        return header + (b"" if data else answer)
+
     async def _transact_retry(
         self, function_code: int, address: int, data_length: int, data: bytes = b""
     ) -> bytes:
@@ -530,7 +657,11 @@ class OptolinkClient:
                     if self._link is None:
                         await self._reconnect_locked()
                     if not self._synced:
-                        await self._sync_p300()
+                        await self._sync()
+                    if self.protocol == PROTO_KW:
+                        return await self._transact_kw(
+                            function_code, address, data_length, data
+                        )
                     return await self._transact(
                         function_code, address, data_length, data
                     )
