@@ -58,10 +58,14 @@ lists which controllers those are.
 Two things the KW protocol cannot do, which you may notice if you have one of these controllers:
 
 - **It has no way to refuse a read.** Where a P300 controller answers "I do not have that
-  address" and the datapoint is dropped for good, a KW controller simply says nothing. So the
-  catalog's own installation rules are the only filter on what gets asked for, and an address
-  that stays silent for three cycles while the rest of the bus answers is dropped as absent.
-  Expect the first few cycles after setup to be slower than the ones after that.
+  address", a KW controller either says nothing or answers with every bit set -- both were seen
+  on a controller that speaks both protocols, which returned `ff ff` for an address it refuses
+  outright over P300. Neither can be told from a reading of -0.1, so neither is published as a
+  value: the entity is unavailable instead. An address that gives nothing usable for twenty
+  cycles, while the rest of the bus answers, stops being asked **for that session only** -- the
+  next restart tries it again, because a protocol that cannot say no never gives certainty
+  enough to disable an entity for good. The catalog's own installation rules stay the real
+  filter, and the first minutes after a start are slower than the rest.
 - **It has no remote procedure call.** Datapoints only reachable that way get no entity, since
   it could never show a reading: on a Vitotronic 050 HK1W that is 16 of them, on a Vitotronic
   200 KW1/KW2 none at all -- the ones affected there are commands that get no entity anyway. The

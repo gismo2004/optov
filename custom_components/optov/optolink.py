@@ -69,6 +69,18 @@ KW_FUNCTION_CODES = {
 }
 
 
+def is_filler(raw: bytes) -> bool:
+    """Whether an answer is all bits set, which KW returns instead of refusing.
+
+    Measured on a controller that speaks both: over P300 it answers 0x01C1 with the outside
+    temperature and refuses 0x01ED outright, while over KW both come back as `ff ff`. A protocol
+    with no error telegram has to put something on the wire, and this is what it puts. It cannot
+    be told apart from a genuine reading of -0.1 degrees, so it is treated as nothing rather than
+    as a value, and only after several cycles as a reason to stop asking.
+    """
+    return bool(raw) and all(byte == 0xFF for byte in raw)
+
+
 def unreachable_function_codes(protocol: str) -> set[str]:
     """Catalog FCRead/FCWrite values this protocol has no telegram for.
 
@@ -484,7 +496,14 @@ class OptolinkClient:
         self._transport.write(bytes([EOT]))
         loop = asyncio.get_running_loop()
         ends_at = loop.time() + deadline
+        # The first take after the port opens can fall entirely inside the moment before the
+        # node starts delivering, and then the one EOT is spent on nobody; asking again costs a
+        # byte. Measured: a take that failed for four seconds succeeded 1.4 s after a new EOT.
+        asked_at = loop.time()
         while loop.time() < ends_at:
+            if loop.time() - asked_at >= INIT_TIMEOUT * 2:
+                self._transport.write(bytes([EOT]))
+                asked_at = loop.time()
             window = await self._collect(SYNC_WINDOW)
             if window and window[-1] == ENQ:
                 self._transport.write(bytes([0x01]))

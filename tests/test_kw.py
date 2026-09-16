@@ -133,3 +133,12 @@ def test_what_kw_cannot_express_is_known_up_front():
     assert "Virtual_READ" not in missing and "GFA_READ" not in missing
     # P300 reaches everything the catalog names.
     assert optolink.unreachable_function_codes(optolink.PROTO_P300) == set()
+
+
+def test_all_bits_set_is_not_a_reading():
+    # What a controller answers for an address it does not implement when it cannot refuse.
+    assert optolink.is_filler(bytes([0xFF, 0xFF]))
+    assert optolink.is_filler(bytes([0xFF]))
+    # A real value that happens to contain 0xFF is left alone, and so is an empty answer.
+    assert not optolink.is_filler(bytes([0xFF, 0x16]))
+    assert not optolink.is_filler(b"")

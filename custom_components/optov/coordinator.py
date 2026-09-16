@@ -168,11 +168,13 @@ _MIN_GAP = 1.0
 STORAGE_VERSION = 1
 LEARNED = ("retired_items", "retired_addresses", "condition_cache", "condition_targets")
 
-# How many cycles an address may answer nothing, while other datapoints in the same cycle do
-# answer, before it counts as one this unit does not have. Three rather than one: a protocol
-# without error telegrams cannot distinguish a missing address from a telegram that went astray,
-# and a value that comes back on the second attempt must not cost the entity.
-SILENT_CYCLES_BEFORE_RETIRING = 3
+# How many cycles an address may give nothing usable -- silence, or the all-bits-set filler a
+# controller sends when it cannot refuse -- while other datapoints in the same cycle do answer,
+# before it stops being asked for. Generous, and never written down: a protocol that cannot say
+# no offers no certainty, and all bits set is also a reading of -0.1 degrees. So the address is
+# only dropped for as long as this session lasts, and the next start asks again -- unlike a
+# refusal, which is definitive and is remembered.
+KW_CYCLES_BEFORE_SKIPPING = 20
 _SAVE_DELAY = 10
 
 # Sensor-health code meaning "this sensor is not fitted". The health nibble shares a block with
@@ -294,9 +296,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Addresses already acted on by _disable_unsupported_entities(), so the registry is
         # touched once per address rather than on every cycle.
         self._retired_addresses: set[int] = set()
-        # Addresses that answered nothing, and how many cycles running. Only KW fills this: it
-        # has no error telegram, so silence is the only "no" it can give.
-        self._silent: dict[int, int] = {}
+        # Addresses that gave nothing usable, and for how many cycles running, plus the ones
+        # that have given up their turn for this session. Only KW fills these: it has no error
+        # telegram, so silence and filler are the only "no" it can give. Neither is persisted.
+        self._nothing_usable: dict[int, int] = {}
+        self._skipped_this_session: set[int] = set()
         self._retired_item_ids: set[str] = set()
         self._store: Store[dict[str, Any]] | None = None
         self._learned: dict[str, Any] = {}
@@ -909,7 +913,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         the same handful of absent datapoints is re-asked every cycle forever, each costing a
         full telegram round trip and a failure in the statistics.
         """
-        if address in self._unsupported_addresses:
+        if address in self._unsupported_addresses or address in self._skipped_this_session:
             raise optolink.OptolinkDeviceError(
                 f"0x{address:04X} is not implemented on this controller",
                 address=address,
@@ -971,27 +975,42 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             raise
         except TimeoutError:
-            # A link that cannot refuse a read answers an address this unit does not have with
-            # silence -- the same thing a lost telegram looks like. Only a cycle in which other
-            # datapoints did answer tells the two apart, and only after several such cycles: a
-            # controller nobody can reach must retire nothing.
-            if self.client.protocol == optolink.PROTO_KW and self._cycle_answered:
-                misses = self._silent.get(address, 0) + 1
-                self._silent[address] = misses
-                if misses >= SILENT_CYCLES_BEFORE_RETIRING:
-                    self._unsupported_addresses.add(address)
-                    _LOGGER.debug(
-                        "0x%04X stayed silent for %d cycles while the bus answered; "
-                        "dropping it from the poll set (%d dropped so far)",
-                        address,
-                        misses,
-                        len(self._unsupported_addresses),
-                    )
+            # Silence is one of the two ways a link that cannot refuse says no; the other is
+            # below. Which of them a controller uses is its own business -- both are handled.
+            self._nothing_usable_from(address)
             raise
         self._cycle_answered += 1
-        self._silent.pop(address, None)
+        if self.client.protocol == optolink.PROTO_KW and optolink.is_filler(raw):
+            # All bits set: the answer to an address this controller does not implement. Not
+            # published as a value, because -0.1 degrees on every sensor a unit does not have is
+            # worse than the sensor being unavailable.
+            self._nothing_usable_from(address)
+            raise optolink.OptolinkProtocolError(
+                f"0x{address:04X} answered with all bits set, which is not a reading"
+            )
+        self._nothing_usable.pop(address, None)
         self._cycle_blocks[(address, length, fc_read)] = raw
         return raw
+
+    def _nothing_usable_from(self, address: int) -> None:
+        """One more cycle in which this address gave nothing that could be a value.
+
+        Only counted when something else answered in the same cycle, so a controller nobody can
+        reach costs no entity at all.
+        """
+        if self.client.protocol != optolink.PROTO_KW or not self._cycle_answered:
+            return
+        seen = self._nothing_usable.get(address, 0) + 1
+        self._nothing_usable[address] = seen
+        if seen >= KW_CYCLES_BEFORE_SKIPPING:
+            self._skipped_this_session.add(address)
+            _LOGGER.debug(
+                "0x%04X gave nothing usable in %d cycles while the bus answered; "
+                "not asking again until the next start (%d addresses so far)",
+                address,
+                seen,
+                len(self._skipped_this_session),
+            )
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data dynamically for all points defined in the active profile."""
