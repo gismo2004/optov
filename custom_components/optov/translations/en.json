@@ -5,7 +5,7 @@
         "title": "OptoV",
         "description": "Pick the serial port wired to the controller's Optolink port; the serial proxies of your ESPHome nodes are listed there. For a node Home Assistant does not have, choose “Enter manually” and type its address.",
         "data": {
-          "device": "Serial port",
+          "device": "Serial port, or the address of a node Home Assistant does not have",
           "language": "Catalog language (names of datapoints and values)",
           "scan_interval": "Poll interval (seconds)"
         }

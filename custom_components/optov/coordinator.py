@@ -12,10 +12,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -160,6 +161,13 @@ _PUBLISH_EVERY = 2.0
 # Shortest gap left between the end of one sweep and the start of the next.
 _MIN_GAP = 1.0
 
+# What a controller taught us about itself, kept under its stable id rather than in the config
+# entry: a re-added entry is a new one while the controller is the same, and writing to the
+# entry while polling would wake every listener it has.
+STORAGE_VERSION = 1
+LEARNED = ("retired_items", "retired_addresses", "condition_cache", "condition_targets")
+_SAVE_DELAY = 10
+
 # Sensor-health code meaning "this sensor is not fitted". The health nibble shares a block with
 # the value it describes, so every reading comes with it for free. 0 is healthy and 1..9 are
 # various faults, of which only 6 says the hardware is absent rather than broken -- consistent
@@ -281,12 +289,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._unsupported_schedules: set[str] = set()
         # Addresses already acted on by _disable_unsupported_entities(), so the registry is
         # touched once per address rather than on every cycle.
-        self._retired_addresses: set[int] = set(
-            config_entry.data.get("retired_addresses") or []
-        )
-        self._retired_item_ids: set[str] = set(
-            config_entry.data.get("retired_items") or []
-        )
+        self._retired_addresses: set[int] = set()
+        self._retired_item_ids: set[str] = set()
+        self._store: Store[dict[str, Any]] | None = None
+        self._learned: dict[str, Any] = {}
         # Rotation state for the slow pool, plus the measured cost of one datapoint read and
         # the worst-case refresh interval that follows from it.
         self._read_cost: float = _DEFAULT_READ_COST
@@ -297,10 +303,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._deferred_last: int = -1
         self._last_publish: float = 0.0
         self._force_full_sweep: bool = True
-        # Addresses already known absent are skipped from the very first poll rather than
-        # being re-discovered each start.
-        self._unsupported_addresses |= self._retired_addresses
-
         self.bus_load: float | None = None
         self.poll_duration: float | None = None
         self.active_channels: int = 0
@@ -391,13 +393,15 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ValueError(
                 f"Controller System ID 0x{sys_id:04X} is not supported in the database."
             )
+        # Both before the profile: the entity set is built from what this controller taught us
+        # before, and that is kept under its stable id.
+        self._stable_id = self._compute_stable_id()
+        await self._async_load_learned()
         self.profile = await self._async_generate_self_configuring_profile(
             dev, sys_id, sw_version
         )
 
-        # Build clean DeviceInfo
         host = self.config_entry.data.get(CONF_HOST, "")
-        self._stable_id = self._compute_stable_id()
 
         # "Controller", like its circuits are "Warmwasser" and its bridge is "Optical
         # interface": every device here is named after what it is. The product name is not
@@ -555,6 +559,48 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         port = _slug(proxy) if proxy else f"port{instance}"
         return f"{_slug(node)}_{port}"
 
+    async def _async_load_learned(self) -> None:
+        """Take in what this controller taught us before: retired datapoints, the probe cache.
+
+        Addresses already known absent are skipped from the very first poll rather than being
+        re-discovered each start. An entry that still carries all this from when it lived in
+        the config entry hands it over once.
+        """
+        # One file per controller, named after the identity its entities carry.
+        self._store = Store(self.hass, STORAGE_VERSION, f"{DOMAIN}.{self.stable_id}")
+        stored = await self._store.async_load()
+        self._learned = stored if stored is not None else {
+            key: value
+            for key in LEARNED
+            if (value := self.config_entry.data.get(key)) is not None
+        }
+        if stored is None and self._learned:
+            # Taken over from the entry: write it out before the entry stops carrying it, or a
+            # restart in between would lose it and every unfitted datapoint would come back.
+            self._save_learned()
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                data={
+                    k: v for k, v in self.config_entry.data.items() if k not in LEARNED
+                },
+            )
+        learned = self._learned
+        self._retired_item_ids = set(learned.get("retired_items") or [])
+        self._retired_addresses = {int(a) for a in learned.get("retired_addresses") or []}
+        self._unsupported_addresses |= self._retired_addresses
+
+    @callback
+    def _save_learned(self, **values: Any) -> None:
+        """Record what was learned. Written out shortly after, off the poll path."""
+        self._learned.update(values)
+        if self._store is not None:
+            self._store.async_delay_save(lambda: self._learned, _SAVE_DELAY)
+
+    @property
+    def retired_items(self) -> set[str]:
+        """Datapoints this unit does not have, kept disabled instead of enabled again."""
+        return self._retired_item_ids
+
     async def _probe_equipment(
         self, targets: list[dict[str, Any]], probed_values: dict[int, int]
     ) -> None:
@@ -606,14 +652,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         targets = await self.hass.async_add_executor_job(
             catalog_db.get_probe_targets, dev["id"], self.db_path
         )
-        cached_conditions = self.config_entry.data.get("condition_cache")
-        cached_targets = self.config_entry.data.get("condition_targets")
+        cached_conditions = self._learned.get("condition_cache")
+        cached_targets = self._learned.get("condition_targets")
         target_ids = sorted(int(t["id"]) for t in targets)
         # Reuse the cache only while it was built from the same set of rule inputs. Keying on
         # the *attempted* targets rather than the probed values matters: a register the
         # controller refuses never appears in the cache, so a "does the cache contain every
-        # target" test can never be satisfied and the probe would repeat on every start --
-        # which, because storing the result updates the config entry, also reloads it.
+        # target" test can never be satisfied and the probe would repeat on every start.
         if (
             cached_conditions
             and isinstance(cached_conditions, dict)
@@ -643,13 +688,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 len(probed_values),
                 len(targets),
             )
-            new_data = dict(self.config_entry.data)
-            new_data["condition_cache"] = {str(k): v for k, v in probed_values.items()}
-            new_data["condition_targets"] = target_ids
-            if new_data != dict(self.config_entry.data):
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry, data=new_data
-                )
+            self._save_learned(
+                condition_cache={str(k): v for k, v in probed_values.items()},
+                condition_targets=target_ids,
+            )
 
         self._dev = dev
         self._probed_values = probed_values
@@ -1539,22 +1581,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         first poll would retire it again -- churning the registry on each restart and briefly
         showing entities for hardware that is not there.
         """
-        new_data = dict(self.config_entry.data)
-        new_data["retired_items"] = sorted(self._retired_item_ids)
-        new_data["retired_addresses"] = sorted(self._retired_addresses)
-        # Left behind by the withdrawn merged-read experiment; drop them rather than carry
-        # dead fields in the entry for ever.
-        for gone in (
-            "refused_ranges",
-            "merged_ranges",
-            "hopeless_ranges",
-            "merge_knowledge",
-        ):
-            new_data.pop(gone, None)
-        if new_data != dict(self.config_entry.data):
-            self.hass.config_entries.async_update_entry(
-                self.config_entry, data=new_data
-            )
+        self._save_learned(
+            retired_items=sorted(self._retired_item_ids),
+            retired_addresses=sorted(self._retired_addresses),
+        )
 
     def _disable_unsupported_entities(
         self, sensor_status_raw: dict[str, int] | None = None

@@ -581,7 +581,7 @@ def _async_apply_enabled_states(
     entity_reg = er.async_get(hass)
     own_enables: set[str] = hass.data.setdefault(OWN_ENABLES_KEY, set())
     expected = _expected_entities(coordinator, profile)
-    retired = set(entry.data.get("retired_items") or [])
+    retired = coordinator.retired_items
     switched_on = 0
     for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
         item = expected.get((reg_entry.domain, reg_entry.unique_id))
