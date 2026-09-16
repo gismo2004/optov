@@ -101,8 +101,11 @@ def test_a_line_that_went_quiet_is_taken_again_before_the_telegram():
 
         asyncio.get_running_loop().create_task(announce())
         payload = await client._transact_kw(optolink.FC_VIRTUAL_READ, 0x0802, 2)
-        # 0x01 answers the announcement, then the read goes out.
-        assert bytes(client._transport.written) == bytes([0x01, 0xF7, 0x08, 0x02, 0x02])
+        # EOT puts it back to announcing itself, 0x01 answers the announcement, then the read
+        # goes out with nothing in front of it.
+        assert bytes(client._transport.written) == bytes(
+            [0x04, 0x01, 0xF7, 0x08, 0x02, 0x02]
+        )
         assert payload[5:] == bytes([0x11, 0x22])
 
     run(go())

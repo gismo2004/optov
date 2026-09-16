@@ -144,8 +144,11 @@ SYNC_WINDOW = 0.1
 # How long an init may go unanswered before the handshake starts over with EOT.
 INIT_TIMEOUT = 0.5
 
-# A KW controller left alone goes back to announcing itself and then ignores requests until it is
-# taken again. A telegram that follows the previous one inside this window needs no new handshake.
+# A KW controller left alone for about half a second goes back to announcing itself, and then
+# ignores a request until it is taken again. A telegram that follows the previous one inside this
+# window needs no new handshake; the window is set under that half second rather than over it,
+# because taking the line when it was not necessary costs one announcement while skipping a
+# necessary one costs a telegram that is never answered.
 KW_IDLE = 0.4
 # A KW answer has no header to recognise and no checksum to check -- there is nothing to wait for
 # but the byte count, so waiting long buys nothing and costs a cycle.
@@ -465,12 +468,20 @@ class OptolinkClient:
         """Take the KW line: one announcement, one answer.
 
         The controller announces itself with ENQ about twice a second and listens as soon as it
-        gets a single 0x01. There is nothing to acknowledge and nothing to negotiate, so the only
-        thing to wait for is an announcement -- the freshest one, because a node that buffered a
-        burst of them while nobody was subscribed delivers the lot at once and answering the
-        first would answer an announcement the controller has long moved on from.
+        gets a single 0x01. That byte is the answer to the announcement rather than the start of
+        a telegram, which is why it is written on its own and why the telegrams that follow
+        inside the same cycle carry nothing in front of them.
+
+        There is nothing to acknowledge and nothing to negotiate, so the only thing to wait for
+        is an announcement -- the freshest one, because a node that buffered a burst of them
+        while nobody was subscribed delivers the lot at once, and answering the first would
+        answer an announcement the controller has long moved on from.
+
+        EOT first for the same reason it comes first in the P300 handshake: it puts a controller
+        that is in some other state back to announcing itself.
         """
         self._flush_rx()
+        self._transport.write(bytes([EOT]))
         loop = asyncio.get_running_loop()
         ends_at = loop.time() + deadline
         while loop.time() < ends_at:
