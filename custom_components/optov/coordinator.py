@@ -340,30 +340,25 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         System ID is DeviceGroup:Device big-endian. The last two are two independent
         single-byte indices, NOT a little-endian 16-bit version -- reading them as one number
         yields a meaningless "software version". All four come back in one telegram.
-        """
-        sys_id = self.config_entry.data.get("sys_id")
-        hw_index = sw_index = None
-        try:
-            ident = await self.client.read_raw(0x00F8, 4)
-            if not sys_id:
-                sys_id = int.from_bytes(ident[0:2], "big")
-            hw_index, sw_index = ident[2], ident[3]
-        except Exception as err:
-            _LOGGER.error("Failed to read DeviceIdent: %s", err)
-            if not sys_id:
-                sys_id = 0x0000
 
-        sw_version = f"v{sw_index:02X}" if sw_index is not None else ""
-        if hw_index is not None:
-            _LOGGER.info(
-                "DeviceIdent 0x%04X, hardware index 0x%02X, software index 0x%02X "
-                "(identification extension %02X%02X)",
-                sys_id,
-                hw_index,
-                sw_index,
-                hw_index,
-                sw_index,
-            )
+        A controller that does not answer this read is not identified at all, and the failure is
+        left to speak for itself. Standing in a System ID of 0x0000 instead reported a link that
+        never came up, or a controller that does not speak P300, as a catalog that lacks an
+        entry -- and sent at least one user looking for the entry.
+        """
+        ident = await self.client.read_raw(0x00F8, 4)
+        sys_id = int.from_bytes(ident[0:2], "big")
+        hw_index, sw_index = ident[2], ident[3]
+        sw_version = f"v{sw_index:02X}"
+        _LOGGER.info(
+            "DeviceIdent 0x%04X, hardware index 0x%02X, software index 0x%02X "
+            "(identification extension %02X%02X)",
+            sys_id,
+            hw_index,
+            sw_index,
+            hw_index,
+            sw_index,
+        )
 
         # Register 0x00F0 (2 bytes little-endian) is only consulted under a narrow guard --
         # Device byte 0xC0..0xCB and software index >= 200 -- so an ordinary controller never

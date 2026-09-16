@@ -353,7 +353,7 @@ class OptolinkClient:
         self._flush_rx()
         self._transport.write(bytes([EOT]))
         init_sent_at: float | None = None
-        heard = False
+        heard = invited = False
         loop = asyncio.get_running_loop()
         ends_at = loop.time() + deadline
 
@@ -370,6 +370,7 @@ class OptolinkClient:
                 # listening already. Either way the init goes out now, and only now.
                 self._transport.write(bytes([0x16, 0x00, 0x00]))
                 init_sent_at = loop.time()
+                invited = True
                 continue
             if window:
                 _LOGGER.debug("Ignoring %s while synchronizing", window.hex(" "))
@@ -383,8 +384,17 @@ class OptolinkClient:
             raise OptolinkControllerSilent(
                 f"no byte from the controller within {deadline:.0f}s"
             )
+        # A P300 controller acknowledges the init every time, so an invitation that leads
+        # nowhere says something about what is on the other end.
         raise ConnectionError(
-            f"Failed to synchronize Optolink P300 protocol within {deadline:.0f}s"
+            f"Failed to synchronize Optolink P300 protocol within {deadline:.0f}s: "
+            + (
+                "the controller announced itself but never acknowledged the init, as a "
+                "controller that speaks only the older KW protocol does -- or another program "
+                "on the same port took the answer"
+                if invited
+                else "nothing the controller sent looked like an announcement"
+            )
         )
 
     async def _collect(self, window: float) -> bytes:
