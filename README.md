@@ -229,7 +229,6 @@ from a dashboard card or service, the updated programme is read back immediately
 | Coding 2 | off | Expert coding parameters |
 | Expert layer | off | Service-level parameters |
 | Keep the clock in sync | on | Correct the controller clock from Home Assistant when it drifts |
-| Verbose logging | off | Raise this integration's log level to debug without touching your `logger:` configuration |
 
 Switching a tier on enables its entities about 30 seconds after saving, when Home Assistant
 reloads the integration; switching it off disables them again straight away. **Entities you
@@ -335,7 +334,7 @@ out not to be fitted and how the bus is doing, with the node's address and key l
 for that sensor, short circuit, open circuit or not fitted. The code is in the entity's
 `sensor_status` attribute.
 
-**A value looks wrong.** Switch on verbose logging in the options, note the entity's `address`
+**A value looks wrong.** Switch on *Enable debug logging* in the integration's menu, note the entity's `address`
 attribute, and open an issue with the log lines for that address. The catalog is a superset and
 a wrong scaling or byte order for your variant is a catalog fix, not a code change.
 

@@ -69,8 +69,7 @@
           "enable_coding2": "Codierung 2 (Experteneinstellungen)",
           "enable_expert": "Expertenebene",
           "scan_interval": "Abfrageintervall (Sekunden)",
-          "sync_clock": "Uhrzeit der Regelung mit Home Assistant synchron halten",
-          "debug_logging": "Ausführliches Protokoll (zur Fehlersuche)"
+          "sync_clock": "Uhrzeit der Regelung mit Home Assistant synchron halten"
         }
       }
     }
@@ -192,12 +191,16 @@
   },
   "text": {
     "no_faults": "Keine Einträge",
-    "dst_mismatch_title": "Regelung: Zeitumstellung",
-    "dst_mismatch": "Die Regelung stellt um auf {configured}, {zone} stellt jedoch um auf {expected}. Die Angaben lauten Monat/Woche/Wochentag, wobei Woche 5 die letzte des Monats bedeutet und Wochentag 7 der Sonntag ist.\n\nDie Uhrzeit selbst wird bei jeder Abfrage korrigiert, die Auswirkung beschränkt sich also auf ein Abfrageintervall zweimal im Jahr. Dauerhaft behebbar, indem die Umstellwerte an der Regelung gesetzt werden oder ihre eigene Zeitumstellung abgeschaltet und die Uhrzeit Home Assistant überlassen wird.",
     "catalog_option": "{name} (Version {version}, {controllers} Regelungen, {languages})",
     "catalog_option_one": "{name} (Version {version}, 1 Regelung, {languages})",
     "catalog_option_outdated": "für eine ältere Version erzeugt, neu erzeugen",
     "catalog_option_too_new": "neuer als diese Integration, Integration aktualisieren",
     "catalog_option_in_use": "verwendet von {entries}"
+  },
+  "issues": {
+    "dst_mismatch": {
+      "title": "Regelung: Zeitumstellung",
+      "description": "Die Regelung stellt um auf {configured}, {zone} stellt jedoch um auf {expected}. Die Angaben lauten Monat/Woche/Wochentag, wobei Woche 5 die letzte des Monats bedeutet und Wochentag 7 der Sonntag ist.\n\nDie Uhrzeit selbst wird bei jeder Abfrage korrigiert, die Auswirkung beschränkt sich also auf ein Abfrageintervall zweimal im Jahr. Dauerhaft behebbar, indem die Umstellwerte an der Regelung gesetzt werden oder ihre eigene Zeitumstellung abgeschaltet und die Uhrzeit Home Assistant überlassen wird."
+    }
   }
 }

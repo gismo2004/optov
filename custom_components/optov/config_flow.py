@@ -35,7 +35,6 @@ from . import catalog_db
 from .catalog_db import get_available_languages
 from .const import (
     CONF_CATALOG,
-    CONF_DEBUG_LOGGING,
     CONF_DEVICE,
     CONF_ENABLE_CODING2,
     CONF_ENABLE_COMMISSIONING,
@@ -49,7 +48,6 @@ from .const import (
     CONF_PROXY_NAME,
     CONF_SCAN_INTERVAL,
     CONF_SYNC_CLOCK,
-    DEFAULT_DEBUG_LOGGING,
     DEFAULT_ENABLE_CODING2,
     DEFAULT_ENABLE_COMMISSIONING,
     DEFAULT_ENABLE_DIAGNOSTICS,
@@ -586,10 +584,6 @@ class OptoVOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_SYNC_CLOCK,
                     default=current.get(CONF_SYNC_CLOCK, DEFAULT_SYNC_CLOCK),
-                ): bool,
-                vol.Optional(
-                    CONF_DEBUG_LOGGING,
-                    default=current.get(CONF_DEBUG_LOGGING, DEFAULT_DEBUG_LOGGING),
                 ): bool,
             }
         )

@@ -17,7 +17,6 @@ CONF_ENABLE_DIAGNOSTICS = "enable_diagnostics"
 CONF_ENABLE_COMMISSIONING = "enable_commissioning"
 CONF_ENABLE_CODING2 = "enable_coding2"
 CONF_ENABLE_EXPERT = "enable_expert"
-CONF_DEBUG_LOGGING = "debug_logging"
 CONF_SYNC_CLOCK = "sync_clock"
 
 DEFAULT_PORT = 6053
@@ -33,10 +32,6 @@ DEFAULT_ENABLE_DIAGNOSTICS = False
 DEFAULT_ENABLE_COMMISSIONING = False
 DEFAULT_ENABLE_CODING2 = False
 DEFAULT_ENABLE_EXPERT = False
-# Off, so a normal installation says almost nothing in the log. Turning it on raises
-# this integration's own logger to debug without touching Home Assistant's logger
-# configuration, which is what you want when reporting a problem.
-DEFAULT_DEBUG_LOGGING = False
 # On by default: a controller clock that has drifted silently shifts every weekly programme.
 DEFAULT_SYNC_CLOCK = True
 

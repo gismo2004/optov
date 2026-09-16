@@ -69,8 +69,7 @@
           "enable_coding2": "Coding 2 (expert settings)",
           "enable_expert": "Expert layer",
           "scan_interval": "Poll interval (seconds)",
-          "sync_clock": "Keep the controller clock in sync with Home Assistant",
-          "debug_logging": "Verbose logging (for troubleshooting)"
+          "sync_clock": "Keep the controller clock in sync with Home Assistant"
         }
       }
     }
@@ -192,12 +191,16 @@
   },
   "text": {
     "no_faults": "No entries",
-    "dst_mismatch_title": "Controller: daylight-saving settings",
-    "dst_mismatch": "The controller changes over at {configured}, but {zone} changes at {expected}. Each entry reads month/week/weekday, where week 5 means the last one of the month and weekday 7 is Sunday.\n\nThe clock itself is corrected on every poll, so the effect is limited to one poll interval twice a year. To fix it at the source, set the changeover values on the controller, or switch its own changeover off and let Home Assistant keep the time.",
     "catalog_option": "{name} (version {version}, {controllers} controllers, {languages})",
     "catalog_option_one": "{name} (version {version}, 1 controller, {languages})",
     "catalog_option_outdated": "built for an older version, rebuild it",
     "catalog_option_too_new": "newer than this integration, update the integration",
     "catalog_option_in_use": "in use by {entries}"
+  },
+  "issues": {
+    "dst_mismatch": {
+      "title": "Controller: daylight-saving settings",
+      "description": "The controller changes over at {configured}, but {zone} changes at {expected}. Each entry reads month/week/weekday, where week 5 means the last one of the month and weekday 7 is Sunday.\n\nThe clock itself is corrected on every poll, so the effect is limited to one poll interval twice a year. To fix it at the source, set the changeover values on the controller, or switch its own changeover off and let Home Assistant keep the time."
+    }
   }
 }

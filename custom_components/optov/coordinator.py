@@ -15,6 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -58,7 +59,6 @@ from .decode import (
 from .errors import decode_boiler_error_history, decode_wp_error_history
 from .optolink import OptolinkClient
 from .profiles import DeviceProfile, parse_address, stable_object_id
-from .translate import async_ui_text
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1524,11 +1524,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.dst_status = f"matches {zone} ({render(expected)})"
             if self._dst_warned is not None:
                 self._dst_warned = None
-                self.config_entry.async_create_background_task(
-                    self.hass,
-                    self._notify_dst_mismatch("", "", zone),
-                    "optov_dst_clear",
-                )
+                self._dst_issue("", "", zone)
             return
         self.dst_status = (
             f"controller {render(configured)} but {zone} changes at {render(expected)}"
@@ -1541,41 +1537,32 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "to one poll interval twice a year.",
                 self.dst_status,
             )
-            self.config_entry.async_create_background_task(
-                self.hass,
-                self._notify_dst_mismatch(render(configured), render(expected), zone),
-                "optov_dst_notify",
-            )
+            self._dst_issue(render(configured), render(expected), zone)
 
-    async def _notify_dst_mismatch(
-        self, configured: str, expected: str, zone: str
-    ) -> None:
-        """Raise, or clear, a notification about the controller's changeover settings.
+    @callback
+    def _dst_issue(self, configured: str, expected: str, zone: str) -> None:
+        """Raise, or withdraw, the repair about the controller's changeover settings.
 
-        Worth interrupting somebody for once, because it is a real misconfiguration and a log
-        line is not read. It carries a fixed id so repeats replace rather than stack, and it is
-        dismissed as soon as the settings agree again.
+        A real misconfiguration that a log line does not carry, and one nobody can act on in a
+        hurry, so it belongs where Home Assistant keeps such things rather than in a
+        notification somebody dismisses. It goes as soon as the settings agree again.
         """
-        from homeassistant.components.persistent_notification import (
-            async_create,
-            async_dismiss,
-        )
-
-        note_id = f"{DOMAIN}_dst_{self.config_entry.entry_id}"
+        issue_id = f"dst_{self.config_entry.entry_id}"
         if not configured:
-            async_dismiss(self.hass, note_id)
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
-        async_create(
+        ir.async_create_issue(
             self.hass,
-            await async_ui_text(
-                self.hass,
-                "dst_mismatch",
-                configured=configured,
-                expected=expected,
-                zone=zone,
-            ),
-            title=await async_ui_text(self.hass, "dst_mismatch_title"),
-            notification_id=note_id,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="dst_mismatch",
+            translation_placeholders={
+                "configured": configured,
+                "expected": expected,
+                "zone": zone,
+            },
         )
 
     def _persist_retired(self) -> None:

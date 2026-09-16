@@ -34,7 +34,6 @@ from homeassistant.helpers.typing import ConfigType
 from . import catalog_db
 from .const import (
     CONF_CATALOG,
-    CONF_DEBUG_LOGGING,
     CONF_DEVICE,
     CONF_ENCRYPTION_KEY,
     CONF_HOST,
@@ -42,7 +41,6 @@ from .const import (
     CONF_PORT,
     CONF_PROXY_NAME,
     CONF_SCAN_INTERVAL,
-    DEFAULT_DEBUG_LOGGING,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -57,7 +55,6 @@ _LOGGER = logging.getLogger(__name__)
 CARD_FILENAME = "optov-cards.js"
 CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
 FRONTEND_KEY = f"{DOMAIN}_frontend"
-LOG_LEVEL_KEY = f"{DOMAIN}_saved_log_level"
 REGISTRY_LISTENER_KEY = f"{DOMAIN}_registry_listener"
 OWN_ENABLES_KEY = f"{DOMAIN}_own_enables"
 # Set in an entity's registry options once its enabled state has been changed by hand.
@@ -90,7 +87,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> bool:
     """Connect to the controller, build its entity set and start polling."""
-    _async_apply_log_level(hass, entry)
     _async_track_manual_changes(hass)
     _LOGGER.info("Setting up OptoV for %s", entry.title)
 
@@ -297,26 +293,6 @@ async def _async_options_updated(
             )
             return
     await hass.config_entries.async_reload(entry.entry_id)
-
-
-def _async_apply_log_level(hass: HomeAssistant, entry: OptolinkConfigEntry) -> None:
-    """Raise this integration's logger when the verbose option is on, and only then.
-
-    Everything said on a timer is debug, so a normal installation is quiet and the option is
-    how you get detail without editing Home Assistant's `logger:` configuration. Switching it
-    off restores whatever level was in force before, because a `logger:` entry naming this
-    integration is the user's own decision and must survive.
-    """
-    logger = logging.getLogger(__package__)
-    verbose = entry.options.get(CONF_DEBUG_LOGGING, DEFAULT_DEBUG_LOGGING)
-    saved = hass.data.get(LOG_LEVEL_KEY)
-    if verbose:
-        if saved is None:
-            hass.data[LOG_LEVEL_KEY] = logger.level
-        logger.setLevel(logging.DEBUG)
-    elif saved is not None:
-        logger.setLevel(saved)
-        hass.data.pop(LOG_LEVEL_KEY, None)
 
 
 @callback
