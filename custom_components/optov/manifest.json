@@ -2,6 +2,7 @@
   "domain": "optov",
   "name": "OptoV",
   "after_dependencies": [
+    "esphome",
     "lovelace"
   ],
   "codeowners": [
@@ -10,14 +11,12 @@
   "config_flow": true,
   "dependencies": [
     "file_upload",
-    "http"
+    "http",
+    "usb"
   ],
   "documentation": "https://github.com/gismo2004/optov",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/gismo2004/optov/issues",
-  "requirements": [
-    "aioesphomeapi>=44.6.0"
-  ],
   "version": "1.0.0"
 }

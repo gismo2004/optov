@@ -32,7 +32,7 @@ part of this repository; you build it yourself, see [The catalog](#the-catalog).
 | Controller | A Viessmann controller with an Optolink port (the round optical window on the front). Vitotronic 200/300 families, Vitocal heat pumps, Vitodens and Vitocrossal boilers among others. |
 | Optolink adapter | An IR read/write head for that port. Self-built adapters are common; anything that presents the port as a 4800 baud, 8 data bits, even parity, 2 stop bits serial line works. |
 | Bridge | An ESP32 running **stock ESPHome 2026.3 or newer** with the built-in `serial_proxy` component (still marked experimental by ESPHome). No custom firmware component is needed: the ESP relays raw bytes and nothing else, the whole protocol lives in Home Assistant. |
-| Home Assistant | **2026.5 or newer**, with the ESPHome integration set up for that node. Earlier releases ship an ESPHome client library without the serial proxy calls this integration uses. |
+| Home Assistant | **2026.9 or newer**, with the ESPHome integration set up for that node. OptoV opens the serial proxy through Home Assistant's own serial layer, which reports a node that went away only from 2026.9 on. |
 | Catalog | Built once for your controller with [VExtractor](https://github.com/gismo2004/VExtractor), see [The catalog](#the-catalog). |
 
 ## Installation
@@ -88,7 +88,9 @@ work without a code change, and it is why a wrong value is fixed in VExtractor r
 
 ## ESPHome configuration
 
-A minimal node. Adjust the pins to your adapter; the line settings are what the port expects.
+A minimal node. Adjust the pins to your adapter. The line settings below are what the
+Optolink port expects; OptoV sets the same values on the proxy itself whenever it opens the
+port, so they are what the node uses on its own rather than something you have to get right.
 
 ```yaml
 esphome:

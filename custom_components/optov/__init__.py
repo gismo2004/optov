@@ -4,11 +4,14 @@ import json
 import logging
 import os
 from typing import Any
+from urllib.parse import urlencode
 
+from homeassistant.components.esphome.serial_proxy import build_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.persistent_notification import (
     async_create as pn_async_create,
 )
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import (
     ConfigEntryError,
@@ -125,12 +128,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
             data={**entry.data, CONF_CATALOG: os.path.basename(coordinator_db_path)},
         )
 
-    client = OptolinkClient(
-        host=entry.data[CONF_HOST],
-        port=entry.data.get(CONF_PORT, DEFAULT_PORT),
-        encryption_key=entry.data[CONF_ENCRYPTION_KEY],
-        instance=entry.data.get(CONF_INSTANCE, 0),
-    )
+    client = OptolinkClient(_port_url(hass, entry), entry.data[CONF_HOST])
     scan_interval = entry.options.get(
         CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     )
@@ -221,6 +219,24 @@ async def async_remove_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
         pass
     except (OSError, ValueError) as err:
         _LOGGER.warning("Could not delete catalog %s of the removed entry: %s", name, err)
+
+
+def _port_url(hass: HomeAssistant, entry: OptolinkConfigEntry) -> str:
+    """The entry's serial port as a serialx URL.
+
+    A node Home Assistant's ESPHome integration has is reached over that integration's own
+    connection; any other node gets one of its own, with the stored key. Proxies are numbered
+    by their position in the node's list, both in the entry and in serialx.
+    """
+    host, instance = entry.data[CONF_HOST], entry.data.get(CONF_INSTANCE, 0)
+    for node in hass.config_entries.async_entries("esphome"):
+        if node.data.get("host") == host:
+            info = node.state is ConfigEntryState.LOADED and node.runtime_data.device_info
+            if not info or instance >= len(info.serial_proxies):
+                raise ConfigEntryNotReady(f"ESPHome at {host} has not listed its proxies yet")
+            return str(build_url(node.entry_id, info.serial_proxies[instance].name))
+    query = urlencode({"port_name": instance, "key": entry.data[CONF_ENCRYPTION_KEY]})
+    return f"esphome://{host}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}/?{query}"
 
 
 async def _async_options_updated(
