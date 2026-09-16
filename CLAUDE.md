@@ -208,6 +208,12 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
   again gives it a new id. `_port_url` resolves it from `CONF_HOST` and the proxy's position at
   every start and writes the result to `CONF_DEVICE`, the key Home Assistant reads to show who
   holds a port. A node it does not have keeps the `esphome://` URL it was set up with.
+- **The page a browser has is older than Home Assistant thinks.** Its service worker serves
+  the app shell from its own cache until Home Assistant's frontend is updated, so anything
+  written into that page -- `frontend.add_extra_js_url` among it -- reaches nobody whose shell
+  predates it, for weeks. The dashboard resource list does not travel that way: the frontend
+  fetches it over the websocket on every load. Hence the cards go into the resource list where
+  there is one, and into the page only for a YAML dashboard, which has no list.
 - **Who enabled an entity lives on the entity, not in the entry.** Home Assistant records no
   author for enabling or disabling, and restores a removed entity's enabled state and registry
   options when it is re-added, but not the config entry. `_async_track_manual_changes` marks an

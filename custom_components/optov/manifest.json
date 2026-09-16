@@ -11,6 +11,7 @@
   "config_flow": true,
   "dependencies": [
     "file_upload",
+    "frontend",
     "http",
     "usb"
   ],

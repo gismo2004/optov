@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from homeassistant.components.esphome.serial_proxy import build_url
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.persistent_notification import (
     async_create as pn_async_create,
@@ -216,6 +217,13 @@ async def async_remove_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
     left, so without this the catalog of the last controller could never be removed from within
     Home Assistant. Home Assistant still lists the entry being removed, hence the id check.
     """
+    if not [
+        other
+        for other in hass.config_entries.async_entries(DOMAIN)
+        if other.entry_id != entry.entry_id
+    ]:
+        await _async_remove_card_resource(hass)
+
     name = entry.data.get(CONF_CATALOG)
     if not name or any(
         other.data.get(CONF_CATALOG) == name
@@ -595,12 +603,17 @@ def _async_apply_enabled_states(
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
-    """Serve the dashboard cards and register them as a resource, once per Home Assistant.
+    """Serve the dashboard cards and make Home Assistant load them, once per Home Assistant.
 
-    The card file is served straight from the integration directory, so it is upgraded
-    together with the Python code. In storage mode the resource is created, or its
-    cache-busting version bumped; in YAML mode resources are the user's file and only a hint
-    is logged.
+    A dashboard kept in storage gets a resource entry, the way a card has always reached a
+    browser: the frontend asks for that list over the websocket every time it loads a
+    dashboard, so a new version of the card arrives by itself. The page around it does not --
+    Home Assistant's service worker serves the app shell from its own cache until Home
+    Assistant's frontend is updated -- so a module named in that page reaches nobody whose
+    shell predates it, which is why the list, not the page, carries the card here.
+
+    A dashboard kept in YAML has no such list to write to: there the module is added to the
+    page, which is the only way that works, and a card update then waits for the shell.
     """
     if hass.data.get(FRONTEND_KEY):
         return
@@ -615,22 +628,23 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
         [StaticPathConfig(CARD_URL, card_path, cache_headers=False)]
     )
     hass.data[FRONTEND_KEY] = True
+    # The stamp makes a browser fetch the file again after an update rather than keep its copy.
     url = f"{CARD_URL}?v={int(mtime)}"
 
-    lovelace = hass.data.get("lovelace")
-    if lovelace is None or getattr(lovelace, "resource_mode", None) != "storage":
-        _LOGGER.info(
-            "Dashboard resources are managed in YAML; add %s as a module resource", url
-        )
+    resources = _card_resources(hass)
+    if resources is None:
+        add_extra_js_url(hass, url)
         return
-    resources = lovelace.resources
     try:
         await resources.async_get_info()  # loads the collection from storage
-        ours = None
-        for item in resources.async_items():
-            item_url = str(item.get("url", ""))
-            if item_url.split("?")[0] == CARD_URL:
-                ours = item
+        ours = next(
+            (
+                item
+                for item in resources.async_items()
+                if str(item.get("url", "")).split("?")[0] == CARD_URL
+            ),
+            None,
+        )
         if ours is None:
             await resources.async_create_item({"res_type": "module", "url": url})
             _LOGGER.info("Registered the dashboard cards as a resource: %s", url)
@@ -640,6 +654,34 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
             )
     except Exception as err:
         _LOGGER.warning("Could not register the dashboard cards as a resource: %s", err)
+
+
+@callback
+def _card_resources(hass: HomeAssistant) -> Any | None:
+    """The dashboard resource list, if this installation keeps one that can be written to."""
+    lovelace = hass.data.get("lovelace")
+    if getattr(lovelace, "resource_mode", None) != "storage":
+        return None
+    return getattr(lovelace, "resources", None)
+
+
+async def _async_remove_card_resource(hass: HomeAssistant) -> None:
+    """Take the cards' resource entry out again when the last controller goes.
+
+    Without this the entry outlives the integration and points at a file that is no longer
+    served, which shows up on every dashboard as a card that cannot be loaded.
+    """
+    resources = _card_resources(hass)
+    if resources is None:
+        return
+    try:
+        await resources.async_get_info()
+        for item in list(resources.async_items()):
+            if str(item.get("url", "")).split("?")[0] == CARD_URL:
+                await resources.async_delete_item(item["id"])
+                _LOGGER.info("Removed the dashboard resource of the cards")
+    except Exception as err:
+        _LOGGER.warning("Could not remove the dashboard resource: %s", err)
 
 
 # ---------------------------------------------------------------------------------------
