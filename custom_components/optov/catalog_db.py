@@ -11,6 +11,7 @@ import os
 import re
 import sqlite3
 from contextlib import closing, suppress
+from dataclasses import dataclass, field
 from typing import Any
 
 try:
@@ -1101,6 +1102,499 @@ def _schedule_level_texts(
     }
 
 
+_ENTITY_PLATFORMS = ("sensors", "binary_sensors", "numbers", "selects", "switches")
+
+
+@dataclass
+class _ProfileInputs:
+    """Everything the placement of a datapoint needs to know besides the datapoint itself.
+
+    Loaded once per profile from the catalog and the rule evaluation, then read by every stage.
+    """
+
+    model: str
+    device_name: str
+    circuits: dict[str, str]
+    hidden_circuits: set[str]
+    groups: list[dict[str, Any]]
+    group_ids_by_et: dict[int, list[int]]
+    group_addrs_by_id: dict[int, str]
+    datapoints: list[dict[str, Any]]
+    enums_by_et: dict[int, dict[str, str]]
+    hidden_event_type_ids: set[int]
+    hidden_group_ids: set[int]
+    active_tiers: set[str]
+    unreachable_fc: set[str]
+    # Derived once the datapoints are known.
+    by_address: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    clock_settings: set[int] = field(default_factory=set)
+    clock_dst: dict[str, Any] = field(default_factory=dict)
+
+
+def _load_profile_inputs(
+    conn: sqlite3.Connection,
+    device_id: int,
+    culture: str,
+    hidden_event_type_ids: set[int],
+    hidden_group_ids: set[int],
+    active_tiers: set[str],
+    unreachable_fc: set[str],
+) -> _ProfileInputs:
+    """Read what the catalog says about one controller, in the culture asked for."""
+    # Get device info
+    dev_row = conn.execute(
+        "SELECT model, name_key FROM devices WHERE id = ?", (device_id,)
+    ).fetchone()
+    model = dev_row["model"] if dev_row else "Optolink"
+    device_name = _friendly_device_name(
+        dev_row["name_key"] if dev_row else None,
+        _text(conn, culture, dev_row["name_key"]) if dev_row else None,
+        model,
+    )
+
+    # Get circuits
+    circuits: dict[str, str] = {}
+    c_rows = conn.execute(
+        f"""SELECT c.circuit, COALESCE(t.s, c.name_key) as circuit_name
+           FROM circuits c
+           {_text_join(conn, culture, "t", "c.name_key")}
+           WHERE c.device_id = ?""",
+        (device_id,),
+    ).fetchall()
+    for r in c_rows:
+        circuits[r["circuit"]] = r["circuit_name"]
+
+    # Detect disabled circuits from hidden circuit groups in the circuit tree (ecnsysEventTypeGroupHC)
+    circuit_groups = conn.execute(
+        """SELECT g.id, g.address
+           FROM groups g
+           WHERE g.device_id = ? AND g.parent_id = (
+               SELECT id FROM groups WHERE device_id = ? AND address LIKE 'ecnsysEventTypeGroupHC%'
+           )""",
+        (device_id, device_id),
+    ).fetchall()
+    hidden_circuits: set[str] = set()
+    for cg in circuit_groups:
+        c_code = cg["address"].split("~")[-1]
+        if cg["id"] in hidden_group_ids:
+            hidden_circuits.add(c_code)
+
+    # Get datapoint to group links scoped to this device
+    dg_rows = conn.execute(
+        """SELECT dg.event_type_id, dg.group_id
+           FROM datapoint_groups dg
+           JOIN groups g ON dg.group_id = g.id AND g.device_id = ?""",
+        (device_id,),
+    ).fetchall()
+    group_ids_by_et: dict[int, list[int]] = {}
+    for r in dg_rows:
+        group_ids_by_et.setdefault(r["event_type_id"], []).append(r["group_id"])
+
+    # Query all datapoints with translated strings
+    dp_rows = conn.execute(
+        f"""SELECT dp.*,
+                  COALESCE(tn.s, dp.name) as pretty_name,
+                  td.s as description,
+                  tu.s as translated_unit
+           FROM datapoints dp
+           {_text_join(conn, culture, "tn", "dp.name_key")}
+           {_text_join(conn, culture, "td", "dp.description_key")}
+           {_text_join(conn, culture, "tu", "dp.unit")}
+           WHERE dp.device_id = ?""",
+        (device_id,),
+    ).fetchall()
+
+    # Query enums with translations
+    enum_rows = conn.execute(
+        f"""SELECT e.event_type_id, e.val_key, COALESCE(t.s, e.text_key) as enum_text
+           FROM enums e
+           JOIN datapoints dp ON e.event_type_id = dp.id AND dp.device_id = ?
+           {_text_join(conn, culture, "t", "e.text_key")}
+           ORDER BY e.event_type_id, e.val_key""",
+        (device_id,),
+    ).fetchall()
+    enums_by_et: dict[int, dict[str, str]] = {}
+    for r in enum_rows:
+        enums_by_et.setdefault(r["event_type_id"], {})[str(r["val_key"])] = r[
+            "enum_text"
+        ]
+
+    # Get groups
+    g_rows = conn.execute(
+        f"""SELECT g.id, g.parent_id, g.address, g.order_index, COALESCE(t.s, g.name_key) as name
+           FROM groups g
+           {_text_join(conn, culture, "t", "g.name_key")}
+           WHERE g.device_id = ?
+           ORDER BY g.order_index""",
+        (device_id,),
+    ).fetchall()
+
+    inputs = _ProfileInputs(
+        model=model,
+        device_name=device_name,
+        circuits=circuits,
+        hidden_circuits=hidden_circuits,
+        groups=[dict(r) for r in g_rows],
+        group_ids_by_et=group_ids_by_et,
+        group_addrs_by_id={r["id"]: (r["address"] or "") for r in g_rows},
+        datapoints=[dict(r) for r in dp_rows],
+        enums_by_et=enums_by_et,
+        hidden_event_type_ids=hidden_event_type_ids,
+        hidden_group_ids=hidden_group_ids,
+        active_tiers=active_tiers,
+        unreachable_fc=unreachable_fc,
+    )
+    # Group siblings by address for status-nibble pairing
+    for dp in inputs.datapoints:
+        inputs.by_address.setdefault(dp["address"], []).append(dp)
+    inputs.clock_settings, inputs.clock_dst = _clock_settings(
+        inputs.datapoints, inputs.group_ids_by_et, inputs.group_addrs_by_id
+    )
+    return inputs
+
+
+def _circuit_of(dp: dict[str, Any], inputs: _ProfileInputs) -> str | None:
+    """The circuit a datapoint belongs to: its own, or the one its menu branch says."""
+    c = dp.get("circuit")
+    if c:
+        return c
+    g_ids = inputs.group_ids_by_et.get(dp["id"], [])
+    g_addrs = [inputs.group_addrs_by_id.get(gid, "") for gid in g_ids]
+    if any(
+        "solaranlage" in a.lower() or a.lower().endswith("~solar")
+        for a in g_addrs
+    ):
+        return "Solar"
+    if any(
+        "warmwasser" in a.lower() or a.lower().endswith("~ww")
+        for a in g_addrs
+    ):
+        return "WW"
+    for n in ("1", "2", "3"):
+        if any(
+            f"~hk{n}" in a.lower()
+            or f"~heizkreis{n}" in a.lower()
+            or a.lower().endswith(f"~hc{n}")
+            for a in g_addrs
+        ):
+            return f"HC{n}"
+    return None
+
+
+def _place_datapoint(
+    dp: dict[str, Any], inputs: _ProfileInputs, profile: dict[str, Any]
+) -> None:
+    """Decide what one datapoint becomes -- which platform, enabled or not -- or nothing."""
+    tier = dp.get("tier")
+    if tier not in TIER_CLASSIFICATION:
+        return
+    if dp.get("entity_kind") == KIND_ACTION:
+        return
+    if (dp.get("fc_read") or "Virtual_READ") in inputs.unreachable_fc:
+        return
+
+    # Skip raw multi-byte array dumps (e.g. 168-byte EEPROM schedule arrays handled by schedule poller)
+    if (
+        dp.get("byte_length", 1) > 8
+        and (dp.get("parameter_type") or "").strip().lower() == "array"
+    ):
+        return
+
+    c = _circuit_of(dp, inputs)
+    if c and c in inputs.hidden_circuits:
+        return
+
+    et_id = dp["id"]
+    if et_id in inputs.hidden_event_type_ids:
+        return
+
+    g_ids = inputs.group_ids_by_et.get(et_id, [])
+    if g_ids and all(gid in inputs.hidden_group_ids for gid in g_ids):
+        return
+
+    bit_length = dp.get("bit_length", 0)
+    if bit_length > 0 and dp.get("entity_kind") == KIND_READONLY:
+        # Read-only bit-fields are the sensor-health nibbles, which ride along with the
+        # value they describe and are surfaced through its availability instead.
+        return
+    # Writable bit-fields are real controls and must be exposed -- operating mode, party
+    # and eco all live in bits of a shared register. Writing them needs the whole block
+    # read and patched, which async_write_item() handles.
+
+    entity_category = TIER_CLASSIFICATION[tier]
+    if et_id in inputs.clock_settings:
+        entity_category = "config"
+    enum_values = inputs.enums_by_et.get(et_id, {})
+    unit_str = dp.get("translated_unit") or dp.get("unit")
+
+    # What gets switched on out of the box: the controller's own overview page, minus the
+    # parameters on it.
+    #
+    # The catalog preserves the controller's menu tree, so the overview branch is literally
+    # the page the unit shows on its display -- Allgemein, WP, one section per heating
+    # circuit, Warmwasser, Solaranlage. Using that branch rather than the flat `tier` matters
+    # because the tier also sweeps in setpoints (room target, heating-curve slope) that are
+    # configuration, not readings. Restricting to read-only entries leaves temperatures and
+    # relay states, which is what the display actually shows.
+    #
+    # Sections for hardware that is not installed have already been dropped above, so on a
+    # single-circuit system the heating-circuit 2/3 sections never reach this point.
+    branches = {
+        seg.lower()
+        for gid in g_ids
+        for seg in inputs.group_addrs_by_id.get(gid, "").split("~")[1:2]
+    }
+    # Readings come from the overview page; the everyday controls (hot-water and room
+    # setpoints, heating curve, operating mode, holiday) live in the operation menu, which
+    # is the controller's own "Bedienung" branch. Both are what the unit puts in front of
+    # its user, so both are on by default -- everything deeper stays available but off.
+    #
+    # The trend tier belongs with them. It is the controller's own graphing set, the
+    # fast-moving process values it expects to be watched over time -- return and hot-gas
+    # temperatures, suction and condenser pressures -- and the poll scheduler already gives
+    # it the shortest interval of any tier. Leaving it out meant the cadence table had an
+    # entry for datapoints that could never be in the set, and that a heat pump's return
+    # temperature was hidden while its flow temperature was not.
+    in_overview = "overview" in branches or "plantoverview" in branches
+    in_operation = "operation" in branches
+    in_trend = (tier or "") == "Trending"
+    is_measurement = dp.get("entity_kind") == KIND_READONLY
+
+    # HA doesn't allow sensors to have entity_category=config, only writable
+    # entities (numbers, selects) may be 'config'. For sensors, downgrade to 'diagnostic'.
+    sensor_category = "diagnostic" if entity_category == "config" else entity_category
+
+    entry: dict[str, Any] = {
+        "id": _slug(dp["name"]),
+        "name": dp.get("pretty_name") or dp["name"],
+        "address": dp["address"],
+        "bytes": dp.get("byte_length", 1),
+        "block": dp.get("block_length", 1),
+        "byte_position": dp.get("byte_position", 0),
+        "bit_start": dp.get("bit_start", 0),
+        # Real geometry, not a placeholder. A writable bit-field is a control in its own
+        # right and both reading and writing it depend on knowing where it sits; read-only
+        # bit-fields never reach here, they are folded into their value's health status.
+        "bit_length": bit_length,
+        "conversion": dp.get("conversion") or "NoConversion",
+        "parameter_type": dp.get("parameter_type"),
+        # The wire operation is per-datapoint and is NOT always Virtual_READ -- the
+        # VScotHO1 boiler family uses GFA_READ for 94 of its datapoints.
+        "fc_read": dp.get("fc_read"),
+        "fc_write": dp.get("fc_write"),
+        # Only MultOffset consumes these (IntData * factor + offset); decode.py raises
+        # rather than substituting 1.0/0.0 when a MultOffset datapoint lacks them.
+        "conversion_factor": dp.get("conversion_factor"),
+        "conversion_offset": dp.get("conversion_offset"),
+        # The catalog's own urgency ranking (lower = more urgent). Drives poll cadence
+        # -- see OptolinkCoordinator._target_interval().
+        "priority": dp.get("priority"),
+        "tier": tier,
+        # Base set: what the controller itself puts in front of its user. Plus whichever
+        # optional tiers the options have switched on, so diagnostics or coding channels
+        # can be brought in for a debugging session and dropped again afterwards.
+        "enabled_by_default": (
+            ((in_overview or in_trend) and is_measurement)
+            or in_operation
+            or (tier in inputs.active_tiers)
+        ),
+        # The base set is what the controller itself puts in front of its user. It is kept
+        # separate from enabled_by_default because the poll scheduler treats it differently:
+        # base values are read every cycle, anything an optional tier added rotates through
+        # the leftover bus budget.
+        "base": ((in_overview or in_trend) and is_measurement) or in_operation,
+        "_entity_category": entity_category,
+        "_sensor_category": sensor_category,
+    }
+    if entity_category:
+        entry["entity_category"] = entity_category
+    if c:
+        entry["circuit"] = c
+
+    # Check for status nibble sibling on same address
+    siblings = inputs.by_address.get(dp["address"], [])
+    status_sibling = next(
+        (
+            s
+            for s in siblings
+            if s.get("bit_length", 0) > 0 and s["id"] in inputs.enums_by_et
+        ),
+        None,
+    )
+    if status_sibling is not None:
+        entry["status_bit_start"] = status_sibling.get("bit_start", 0)
+        entry["status_bit_length"] = status_sibling.get("bit_length", 0)
+        entry["status_options"] = inputs.enums_by_et.get(status_sibling["id"], {})
+
+    conv_lower = (dp.get("conversion") or "").strip().lower()
+    param_type = (dp.get("parameter_type") or "").strip().lower()
+    is_datetime_or_str = conv_lower in (
+        "datetimebcd",
+        "datetime_bcd",
+        "datebcd",
+        "daytodate",
+        "hexbyte2asciibyte",
+        "hexbyte2utf16byte",
+    ) or param_type in ("array", "string")
+
+    writable = dp.get("entity_kind") == KIND_WRITABLE and (
+        dp.get("fc_write") or "undefined"
+    ) not in inputs.unreachable_fc
+    if writable:
+        # A writable datapoint one bit wide has exactly two states, so it is a switch --
+        # whether or not the catalog bothered to name them. Party mode, eco mode and the
+        # one-off hot water run are all this. As a select they took two taps and read
+        # "Aus"/"Ein" where Home Assistant already draws a toggle; as a number, which is
+        # what the unnamed ones fell through to, they read 0 and 1.
+        if bit_length == 1:
+            profile["switches"].append(entry)
+        elif enum_values:
+            entry["options"] = enum_values
+            profile["selects"].append(entry)
+        elif is_datetime_or_str:
+            entry["conversion"] = dp.get("conversion") or "NoConversion"
+            profile["sensors"].append(_as_sensor(entry, sensor_category))
+        else:
+            entry["div_ratio"] = _div_ratio(dp.get("conversion"))
+            entry.update(_unit_meta(unit_str))
+            entry.update(_number_limits(dp, entry["div_ratio"]))
+            profile["numbers"].append(entry)
+        return
+
+    if enum_values:
+        entry["options"] = enum_values
+        profile["sensors"].append(_as_sensor(entry, sensor_category))
+    elif param_type == "bit":
+        profile["binary_sensors"].append(_as_sensor(entry, sensor_category))
+    else:
+        entry["div_ratio"] = _div_ratio(dp.get("conversion"))
+        entry.update(_unit_meta(unit_str))
+        # A reading that decodes to a number is a measurement to Home Assistant
+        # whether or not the catalog gives it a unit. Without a state class a
+        # unitless one -- a switching-cycle counter, a performance factor -- is
+        # treated as text: drawn as a timeline, never graphed, no statistics.
+        # Nothing in the catalog tells a counter from a gauge, so both get
+        # `measurement`, which graphs either correctly. Whole numbers are shown
+        # without the ".0" the scaling path leaves on them.
+        conversion = dp.get("conversion")
+        if not is_datetime_or_str and decodes_to_number(conversion):
+            entry.setdefault("state_class", "measurement")
+            if decodes_to_integer(conversion):
+                entry["display_precision"] = 0
+        profile["sensors"].append(_as_sensor(entry, sensor_category))
+
+
+def _dedupe_ids(profile: dict[str, Any]) -> None:
+    """Two datapoints with one name: both ids get their address appended."""
+    all_entries = [e for plat in _ENTITY_PLATFORMS for e in profile.get(plat, [])]
+    counts: dict[str, int] = {}
+    for entry in all_entries:
+        counts[entry["id"]] = counts.get(entry["id"], 0) + 1
+    for entry in all_entries:
+        if counts[entry["id"]] > 1:
+            entry["id"] = f"{entry['id']}_{entry['address'].lower().replace('0x', '')}"
+
+
+def _active_circuits(profile: dict[str, Any], inputs: _ProfileInputs) -> dict[str, str]:
+    """Only the circuits that have entities and are not hidden."""
+    active = {
+        e["circuit"]
+        for plat in _ENTITY_PLATFORMS
+        for e in profile.get(plat, [])
+        if e.get("circuit")
+    }
+    return {
+        k: v
+        for k, v in inputs.circuits.items()
+        if k in active and k not in inputs.hidden_circuits
+    }
+
+
+def _schedules(
+    conn: sqlite3.Connection,
+    culture: str,
+    inputs: _ProfileInputs,
+    circuits: dict[str, str],
+) -> dict[str, Any]:
+    """The weekly programmes the controller puts on its own menus.
+
+    The catalog marks them with a MappingType, which also fixes the wire layout, the levels and
+    where the level names live -- see conversions.SCHEDULE_TYPES. One programme is one channel:
+    a controller can hold several per circuit (hot water and circulation both belong to the
+    hot-water circuit), so they are keyed by the datapoint rather than by the circuit.
+
+    A level's name is catalog text like any other. Each programme datapoint carries the key stem
+    to look it up under -- one for the wording shared by its type and one for wording filed
+    under the datapoint itself, which a few programmes have -- and the level number completes
+    the key. Building those keys here instead would put the catalog's own naming into this
+    code, where a rebuilt catalog could not correct it.
+    """
+    level_texts = _schedule_level_texts(conn, culture, inputs.datapoints)
+    schedules: dict[str, Any] = {}
+    for dp in inputs.datapoints:
+        stype = schedule_type(dp.get("mapping_type"))
+        if stype is None:
+            continue
+        et_id = dp["id"]
+        if et_id in inputs.hidden_event_type_ids:
+            continue
+        # Only programmes the controller puts on its own menus. The catalog also carries
+        # alternative layouts of the same programme (a quarter-hour bitmap next to the
+        # window list) that no menu references; the controller does not answer for those.
+        g_ids = inputs.group_ids_by_et.get(et_id, [])
+        if not g_ids or all(gid in inputs.hidden_group_ids for gid in g_ids):
+            continue
+        circuit = dp.get("circuit")
+        if circuit and circuit in inputs.hidden_circuits:
+            continue
+        block_length = dp.get("block_length") or 0
+        block_factor = dp.get("block_factor") or 0
+        if block_length % 7:
+            _LOGGER.debug(
+                "Programme %s has %d bytes, not a whole week; skipped",
+                dp["name"],
+                block_length,
+            )
+            continue
+        # The bare datapoint name ("NKU_Tagesprogramm_HK1"), which is both the key and what
+        # the per-programme label texts are filed under.
+        dp_name = str(dp["name"]).rsplit(".", 1)[-1]
+        address = dp["address"]
+        # One entry per level the programme allows: its number, the catalog's name for it on
+        # this programme, and a colour. The colour is published because it is catalog data; a
+        # frontend is free to ignore it, and the bundled card does, so that it can follow the
+        # Home Assistant theme instead.
+        modes = []
+        for level, color in zip(stype["levels"], stype["colors"], strict=True):
+            label = next(
+                (
+                    level_texts[k]
+                    for k in _level_keys(dp, level)
+                    if level_texts.get(k)
+                ),
+                str(level),
+            )
+            modes.append({"value": level, "label": label, "color": color})
+        schedules[_slug(dp_name)] = {
+            "name": dp.get("pretty_name") or dp_name,
+            "circuit": circuit,
+            "circuit_name": circuits.get(circuit, circuit) if circuit else None,
+            "address": address,
+            "format": stype["format"],
+            "day_bytes": block_length // 7,
+            "windows_per_day": stype["windows"],
+            "minutes_per_step": stype["step"],
+            "default_level": stype["default"],
+            "levels": list(stype["levels"]),
+            "modes": modes,
+            "block_length": block_length,
+            "block_factor": block_factor,
+            "fc_read": dp.get("fc_read"),
+            "fc_write": dp.get("fc_write"),
+        }
+    return schedules
+
+
 def generate_profile(
     device_id: int,
     db_path: str,
@@ -1109,476 +1603,40 @@ def generate_profile(
     enabled_tiers: set[str] | None = None,
     unreachable_fc: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Dynamically generate entity configurations from SQLite database for an installation.
+    """The entity set for one installation: what the catalog says, minus what the rules hide.
 
     `unreachable_fc` are catalog FCRead/FCWrite values this link has no telegram for (see
     optolink.unreachable_function_codes). A datapoint that cannot be read is left out entirely,
     and one that cannot be written becomes a reading rather than a control that always fails.
     """
-    unreachable_fc = unreachable_fc or set()
     hidden_event_type_ids, hidden_group_ids = evaluate_rules(
         device_id, probed_values, db_path, culture
     )
-    # Tiers switched on in the options, on top of the always-on base set. Defaults to nothing
-    # extra rather than to DAILY_TIERS: the base set is chosen from the controller's own menu
-    # tree, not from tiers, so falling back to a tier list here would silently re-enable a
-    # couple of hundred entities the user did not ask for.
-    active_tiers = enabled_tiers if enabled_tiers is not None else set()
-
     with closing(get_db_connection(db_path)) as conn:
-        # Get device info
-        dev_row = conn.execute(
-            "SELECT model, name_key FROM devices WHERE id = ?", (device_id,)
-        ).fetchone()
-        model = dev_row["model"] if dev_row else "Optolink"
-        device_name = _friendly_device_name(
-            dev_row["name_key"] if dev_row else None,
-            _text(conn, culture, dev_row["name_key"]) if dev_row else None,
-            model,
+        inputs = _load_profile_inputs(
+            conn,
+            device_id,
+            culture,
+            hidden_event_type_ids,
+            hidden_group_ids,
+            # Tiers switched on in the options, on top of the always-on base set. Defaults to
+            # nothing extra rather than to DAILY_TIERS: the base set is chosen from the
+            # controller's own menu tree, not from tiers, so falling back to a tier list here
+            # would silently re-enable a couple of hundred entities the user did not ask for.
+            enabled_tiers if enabled_tiers is not None else set(),
+            unreachable_fc or set(),
         )
-
-        # Get circuits
-        circuits: dict[str, str] = {}
-        c_rows = conn.execute(
-            f"""SELECT c.circuit, COALESCE(t.s, c.name_key) as circuit_name
-               FROM circuits c
-               {_text_join(conn, culture, "t", "c.name_key")}
-               WHERE c.device_id = ?""",
-            (device_id,),
-        ).fetchall()
-        for r in c_rows:
-            circuits[r["circuit"]] = r["circuit_name"]
-
-        # Detect disabled circuits from hidden circuit groups in the circuit tree (ecnsysEventTypeGroupHC)
-        circuit_groups = conn.execute(
-            """SELECT g.id, g.address
-               FROM groups g
-               WHERE g.device_id = ? AND g.parent_id = (
-                   SELECT id FROM groups WHERE device_id = ? AND address LIKE 'ecnsysEventTypeGroupHC%'
-               )""",
-            (device_id, device_id),
-        ).fetchall()
-        hidden_circuits: set[str] = set()
-        for cg in circuit_groups:
-            c_code = cg["address"].split("~")[-1]
-            if cg["id"] in hidden_group_ids:
-                hidden_circuits.add(c_code)
-
-        # Get datapoint to group links scoped to this device
-        dg_rows = conn.execute(
-            """SELECT dg.event_type_id, dg.group_id
-               FROM datapoint_groups dg
-               JOIN groups g ON dg.group_id = g.id AND g.device_id = ?""",
-            (device_id,),
-        ).fetchall()
-        group_ids_by_et: dict[int, list[int]] = {}
-        for r in dg_rows:
-            group_ids_by_et.setdefault(r["event_type_id"], []).append(r["group_id"])
-
-        # Query all datapoints with translated strings
-        dp_rows = conn.execute(
-            f"""SELECT dp.*,
-                      COALESCE(tn.s, dp.name) as pretty_name,
-                      td.s as description,
-                      tu.s as translated_unit
-               FROM datapoints dp
-               {_text_join(conn, culture, "tn", "dp.name_key")}
-               {_text_join(conn, culture, "td", "dp.description_key")}
-               {_text_join(conn, culture, "tu", "dp.unit")}
-               WHERE dp.device_id = ?""",
-            (device_id,),
-        ).fetchall()
-
-        # Query enums with translations
-        enum_rows = conn.execute(
-            f"""SELECT e.event_type_id, e.val_key, COALESCE(t.s, e.text_key) as enum_text
-               FROM enums e
-               JOIN datapoints dp ON e.event_type_id = dp.id AND dp.device_id = ?
-               {_text_join(conn, culture, "t", "e.text_key")}
-               ORDER BY e.event_type_id, e.val_key""",
-            (device_id,),
-        ).fetchall()
-        enums_by_et: dict[int, dict[str, str]] = {}
-        for r in enum_rows:
-            enums_by_et.setdefault(r["event_type_id"], {})[str(r["val_key"])] = r[
-                "enum_text"
-            ]
-
-        # Get groups
-        g_rows = conn.execute(
-            f"""SELECT g.id, g.parent_id, g.address, g.order_index, COALESCE(t.s, g.name_key) as name
-               FROM groups g
-               {_text_join(conn, culture, "t", "g.name_key")}
-               WHERE g.device_id = ?
-               ORDER BY g.order_index""",
-            (device_id,),
-        ).fetchall()
-        groups = [dict(r) for r in g_rows]
-        group_addrs_by_id = {r["id"]: (r["address"] or "") for r in g_rows}
-
         profile: dict[str, Any] = {
-            "sensors": [],
-            "binary_sensors": [],
-            "numbers": [],
-            "selects": [],
-            "switches": [],
-            "device_name": device_name,
-            "model": model,
-            "circuits": circuits,
-            "groups": groups,
-            "clock_dst": {},
+            **{platform: [] for platform in _ENTITY_PLATFORMS},
+            "device_name": inputs.device_name,
+            "model": inputs.model,
+            "circuits": inputs.circuits,
+            "groups": inputs.groups,
+            "clock_dst": inputs.clock_dst,
         }
-
-        # Group siblings by address for status-nibble pairing
-        by_address: dict[str, list[dict[str, Any]]] = {}
-        datapoints = [dict(r) for r in dp_rows]
-
-        clock_settings, clock_dst = _clock_settings(
-            datapoints, group_ids_by_et, group_addrs_by_id
-        )
-        profile["clock_dst"] = clock_dst
-        for dp in datapoints:
-            by_address.setdefault(dp["address"], []).append(dp)
-
-        for dp in datapoints:
-            tier = dp.get("tier")
-            if tier not in TIER_CLASSIFICATION:
-                continue
-            if dp.get("entity_kind") == KIND_ACTION:
-                continue
-            if (dp.get("fc_read") or "Virtual_READ") in unreachable_fc:
-                continue
-
-            # Skip raw multi-byte array dumps (e.g. 168-byte EEPROM schedule arrays handled by schedule poller)
-            if (
-                dp.get("byte_length", 1) > 8
-                and (dp.get("parameter_type") or "").strip().lower() == "array"
-            ):
-                continue
-
-            c = dp.get("circuit")
-            if not c:
-                g_ids = group_ids_by_et.get(dp["id"], [])
-                g_addrs = [group_addrs_by_id.get(gid, "") for gid in g_ids]
-                if any(
-                    "solaranlage" in a.lower() or a.lower().endswith("~solar")
-                    for a in g_addrs
-                ):
-                    c = "Solar"
-                elif any(
-                    "warmwasser" in a.lower() or a.lower().endswith("~ww")
-                    for a in g_addrs
-                ):
-                    c = "WW"
-                elif any(
-                    "~hk1" in a.lower()
-                    or "~heizkreis1" in a.lower()
-                    or a.lower().endswith("~hc1")
-                    for a in g_addrs
-                ):
-                    c = "HC1"
-                elif any(
-                    "~hk2" in a.lower()
-                    or "~heizkreis2" in a.lower()
-                    or a.lower().endswith("~hc2")
-                    for a in g_addrs
-                ):
-                    c = "HC2"
-                elif any(
-                    "~hk3" in a.lower()
-                    or "~heizkreis3" in a.lower()
-                    or a.lower().endswith("~hc3")
-                    for a in g_addrs
-                ):
-                    c = "HC3"
-
-            if c and c in hidden_circuits:
-                continue
-
-            et_id = dp["id"]
-            if et_id in hidden_event_type_ids:
-                continue
-
-            g_ids = group_ids_by_et.get(et_id, [])
-            if g_ids and all(gid in hidden_group_ids for gid in g_ids):
-                continue
-
-            bit_length = dp.get("bit_length", 0)
-            if bit_length > 0 and dp.get("entity_kind") == KIND_READONLY:
-                # Read-only bit-fields are the sensor-health nibbles, which ride along with the
-                # value they describe and are surfaced through its availability instead.
-                continue
-            # Writable bit-fields are real controls and must be exposed -- operating mode, party
-            # and eco all live in bits of a shared register. Writing them needs the whole block
-            # read and patched, which async_write_item() handles.
-
-            entity_category = TIER_CLASSIFICATION[tier]
-            if et_id in clock_settings:
-                entity_category = "config"
-            enum_values = enums_by_et.get(et_id, {})
-            unit_str = dp.get("translated_unit") or dp.get("unit")
-
-            # What gets switched on out of the box: the controller's own overview page, minus the
-            # parameters on it.
-            #
-            # The catalog preserves the controller's menu tree, so the overview branch is literally
-            # the page the unit shows on its display -- Allgemein, WP, one section per heating
-            # circuit, Warmwasser, Solaranlage. Using that branch rather than the flat `tier` matters
-            # because the tier also sweeps in setpoints (room target, heating-curve slope) that are
-            # configuration, not readings. Restricting to read-only entries leaves temperatures and
-            # relay states, which is what the display actually shows.
-            #
-            # Sections for hardware that is not installed have already been dropped above, so on a
-            # single-circuit system the heating-circuit 2/3 sections never reach this point.
-            branches = {
-                seg.lower()
-                for gid in g_ids
-                for seg in group_addrs_by_id.get(gid, "").split("~")[1:2]
-            }
-            # Readings come from the overview page; the everyday controls (hot-water and room
-            # setpoints, heating curve, operating mode, holiday) live in the operation menu, which
-            # is the controller's own "Bedienung" branch. Both are what the unit puts in front of
-            # its user, so both are on by default -- everything deeper stays available but off.
-            #
-            # The trend tier belongs with them. It is the controller's own graphing set, the
-            # fast-moving process values it expects to be watched over time -- return and hot-gas
-            # temperatures, suction and condenser pressures -- and the poll scheduler already gives
-            # it the shortest interval of any tier. Leaving it out meant the cadence table had an
-            # entry for datapoints that could never be in the set, and that a heat pump's return
-            # temperature was hidden while its flow temperature was not.
-            in_overview = "overview" in branches or "plantoverview" in branches
-            in_operation = "operation" in branches
-            in_trend = (tier or "") == "Trending"
-            is_measurement = dp.get("entity_kind") == KIND_READONLY
-
-            # HA doesn't allow sensors to have entity_category=config, only writable
-            # entities (numbers, selects) may be 'config'. For sensors, downgrade to 'diagnostic'.
-            sensor_category = (
-                "diagnostic" if entity_category == "config" else entity_category
-            )
-
-            entry: dict[str, Any] = {
-                "id": _slug(dp["name"]),
-                "name": dp.get("pretty_name") or dp["name"],
-                "address": dp["address"],
-                "bytes": dp.get("byte_length", 1),
-                "block": dp.get("block_length", 1),
-                "byte_position": dp.get("byte_position", 0),
-                "bit_start": dp.get("bit_start", 0),
-                # Real geometry, not a placeholder. A writable bit-field is a control in its own
-                # right and both reading and writing it depend on knowing where it sits; read-only
-                # bit-fields never reach here, they are folded into their value's health status.
-                "bit_length": bit_length,
-                "conversion": dp.get("conversion") or "NoConversion",
-                "parameter_type": dp.get("parameter_type"),
-                # The wire operation is per-datapoint and is NOT always Virtual_READ -- the
-                # VScotHO1 boiler family uses GFA_READ for 94 of its datapoints.
-                "fc_read": dp.get("fc_read"),
-                "fc_write": dp.get("fc_write"),
-                # Only MultOffset consumes these (IntData * factor + offset); decode.py raises
-                # rather than substituting 1.0/0.0 when a MultOffset datapoint lacks them.
-                "conversion_factor": dp.get("conversion_factor"),
-                "conversion_offset": dp.get("conversion_offset"),
-                # The catalog's own urgency ranking (lower = more urgent). Drives poll cadence
-                # -- see OptolinkCoordinator._target_interval().
-                "priority": dp.get("priority"),
-                "tier": tier,
-                # Base set: what the controller itself puts in front of its user. Plus whichever
-                # optional tiers the options have switched on, so diagnostics or coding channels
-                # can be brought in for a debugging session and dropped again afterwards.
-                "enabled_by_default": (
-                    ((in_overview or in_trend) and is_measurement)
-                    or in_operation
-                    or (tier in active_tiers)
-                ),
-                # The base set is what the controller itself puts in front of its user. It is kept
-                # separate from enabled_by_default because the poll scheduler treats it differently:
-                # base values are read every cycle, anything an optional tier added rotates through
-                # the leftover bus budget.
-                "base": ((in_overview or in_trend) and is_measurement) or in_operation,
-                "_entity_category": entity_category,
-                "_sensor_category": sensor_category,
-            }
-            if entity_category:
-                entry["entity_category"] = entity_category
-            if c:
-                entry["circuit"] = c
-
-            # Check for status nibble sibling on same address
-            siblings = by_address.get(dp["address"], [])
-            status_sibling = next(
-                (
-                    s
-                    for s in siblings
-                    if s.get("bit_length", 0) > 0 and s["id"] in enums_by_et
-                ),
-                None,
-            )
-            if status_sibling is not None:
-                entry["status_bit_start"] = status_sibling.get("bit_start", 0)
-                entry["status_bit_length"] = status_sibling.get("bit_length", 0)
-                entry["status_options"] = enums_by_et.get(status_sibling["id"], {})
-
-            conv_lower = (dp.get("conversion") or "").strip().lower()
-            param_type = (dp.get("parameter_type") or "").strip().lower()
-            is_datetime_or_str = conv_lower in (
-                "datetimebcd",
-                "datetime_bcd",
-                "datebcd",
-                "daytodate",
-                "hexbyte2asciibyte",
-                "hexbyte2utf16byte",
-            ) or param_type in ("array", "string")
-
-            writable = dp.get("entity_kind") == KIND_WRITABLE and (
-                dp.get("fc_write") or "undefined"
-            ) not in unreachable_fc
-            if writable:
-                # A writable datapoint one bit wide has exactly two states, so it is a switch --
-                # whether or not the catalog bothered to name them. Party mode, eco mode and the
-                # one-off hot water run are all this. As a select they took two taps and read
-                # "Aus"/"Ein" where Home Assistant already draws a toggle; as a number, which is
-                # what the unnamed ones fell through to, they read 0 and 1.
-                if bit_length == 1:
-                    profile["switches"].append(entry)
-                elif enum_values:
-                    entry["options"] = enum_values
-                    profile["selects"].append(entry)
-                elif is_datetime_or_str:
-                    entry["conversion"] = dp.get("conversion") or "NoConversion"
-                    profile["sensors"].append(_as_sensor(entry, sensor_category))
-                else:
-                    entry["div_ratio"] = _div_ratio(dp.get("conversion"))
-                    entry.update(_unit_meta(unit_str))
-                    entry.update(_number_limits(dp, entry["div_ratio"]))
-                    profile["numbers"].append(entry)
-            else:
-                if enum_values:
-                    entry["options"] = enum_values
-                    profile["sensors"].append(_as_sensor(entry, sensor_category))
-                else:
-                    ptype = (dp.get("parameter_type") or "").strip().lower()
-                    if ptype == "bit":
-                        profile["binary_sensors"].append(_as_sensor(entry, sensor_category))
-                    else:
-                        entry["div_ratio"] = _div_ratio(dp.get("conversion"))
-                        entry.update(_unit_meta(unit_str))
-                        # A reading that decodes to a number is a measurement to Home Assistant
-                        # whether or not the catalog gives it a unit. Without a state class a
-                        # unitless one -- a switching-cycle counter, a performance factor -- is
-                        # treated as text: drawn as a timeline, never graphed, no statistics.
-                        # Nothing in the catalog tells a counter from a gauge, so both get
-                        # `measurement`, which graphs either correctly. Whole numbers are shown
-                        # without the ".0" the scaling path leaves on them.
-                        conversion = dp.get("conversion")
-                        if not is_datetime_or_str and decodes_to_number(conversion):
-                            entry.setdefault("state_class", "measurement")
-                            if decodes_to_integer(conversion):
-                                entry["display_precision"] = 0
-                        profile["sensors"].append(_as_sensor(entry, sensor_category))
-
-        # Deduplicate IDs
-        platforms = ("sensors", "binary_sensors", "numbers", "selects", "switches")
-        all_entries = [e for plat in platforms for e in profile.get(plat, [])]
-        counts: dict[str, int] = {}
-        for entry in all_entries:
-            counts[entry["id"]] = counts.get(entry["id"], 0) + 1
-        for entry in all_entries:
-            if counts[entry["id"]] > 1:
-                entry["id"] = (
-                    f"{entry['id']}_{entry['address'].lower().replace('0x', '')}"
-                )
-
-        # Filter circuits to only those that have active entities and are not hidden
-        active_circuits = {
-            e["circuit"]
-            for plat in platforms
-            for e in profile.get(plat, [])
-            if e.get("circuit")
-        }
-        profile["circuits"] = {
-            k: v
-            for k, v in circuits.items()
-            if k in active_circuits and k not in hidden_circuits
-        }
-
-        # Weekly programmes. The catalog marks them with a MappingType, which also fixes the wire
-        # layout, the levels and where the level names live -- see conversions.SCHEDULE_TYPES.
-        # One programme is one channel: a controller can hold several per circuit (hot water and
-        # circulation both belong to the hot-water circuit), so they are keyed by the datapoint
-        # rather than by the circuit.
-        #
-        # A level's name is catalog text like any other. Each programme datapoint carries the
-        # key stem to look it up under -- one for the wording shared by its type and one for
-        # wording filed under the datapoint itself, which a few programmes have -- and the
-        # level number completes the key. Building those keys here instead would put the
-        # catalog's own naming into this code, where a rebuilt catalog could not correct it.
-        level_texts = _schedule_level_texts(conn, culture, datapoints)
-        schedules: dict[str, Any] = {}
-        for dp in datapoints:
-            stype = schedule_type(dp.get("mapping_type"))
-            if stype is None:
-                continue
-            et_id = dp["id"]
-            if et_id in hidden_event_type_ids:
-                continue
-            # Only programmes the controller puts on its own menus. The catalog also carries
-            # alternative layouts of the same programme (a quarter-hour bitmap next to the
-            # window list) that no menu references; the controller does not answer for those.
-            g_ids = group_ids_by_et.get(et_id, [])
-            if not g_ids or all(gid in hidden_group_ids for gid in g_ids):
-                continue
-            circuit = dp.get("circuit")
-            if circuit and circuit in hidden_circuits:
-                continue
-            block_length = dp.get("block_length") or 0
-            block_factor = dp.get("block_factor") or 0
-            if block_length % 7:
-                _LOGGER.debug(
-                    "Programme %s has %d bytes, not a whole week; skipped",
-                    dp["name"],
-                    block_length,
-                )
-                continue
-            # The bare datapoint name ("NKU_Tagesprogramm_HK1"), which is both the key and what
-            # the per-programme label texts are filed under.
-            dp_name = str(dp["name"]).rsplit(".", 1)[-1]
-            address = dp["address"]
-            # One entry per level the programme allows: its number, the catalog's name for it on
-            # this programme, and a colour. The colour is published because it is catalog data; a
-            # frontend is free to ignore it, and the bundled card does, so that it can follow the
-            # Home Assistant theme instead.
-            modes = []
-            for level, color in zip(stype["levels"], stype["colors"], strict=True):
-                label = next(
-                    (
-                        level_texts[k]
-                        for k in _level_keys(dp, level)
-                        if level_texts.get(k)
-                    ),
-                    str(level),
-                )
-                modes.append({"value": level, "label": label, "color": color})
-            schedules[_slug(dp_name)] = {
-                "name": dp.get("pretty_name") or dp_name,
-                "circuit": circuit,
-                "circuit_name": profile["circuits"].get(circuit, circuit)
-                if circuit
-                else None,
-                "address": address,
-                "format": stype["format"],
-                "day_bytes": block_length // 7,
-                "windows_per_day": stype["windows"],
-                "minutes_per_step": stype["step"],
-                "default_level": stype["default"],
-                "levels": list(stype["levels"]),
-                "modes": modes,
-                "block_length": block_length,
-                "block_factor": block_factor,
-                "fc_read": dp.get("fc_read"),
-                "fc_write": dp.get("fc_write"),
-            }
-
-        profile["schedules"] = schedules
-
+        for dp in inputs.datapoints:
+            _place_datapoint(dp, inputs, profile)
+        _dedupe_ids(profile)
+        profile["circuits"] = _active_circuits(profile, inputs)
+        profile["schedules"] = _schedules(conn, culture, inputs, profile["circuits"])
         return profile
