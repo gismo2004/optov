@@ -1,0 +1,25 @@
+name: Release
+
+# A tag is pushed by hand; this makes sure it was pushed at the right moment. The manifest
+# version has to equal the tag, or HACS shows one number and installs another, and the
+# changelog has to have a section for it, or the release notes are written from memory.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  consistent:
+    name: Tag, manifest and changelog agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(python3 -c 'import json; print(json.load(open("custom_components/optov/manifest.json"))["version"])')"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::tag is v$tag but manifest.json says $manifest"; exit 1
+          fi
+          if ! grep -q "^## \[$tag\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section for $tag"; exit 1
+          fi
+          echo "v$tag: manifest and changelog agree"

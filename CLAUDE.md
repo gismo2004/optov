@@ -247,6 +247,24 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
   used to reload twice. Everything else (a tier off, language, interval, catalog) reloads at
   once, because disabling triggers no reload of Home Assistant's.
 
+## Releasing
+
+A release is made by hand, on GitHub, never by a workflow: **Releases → Draft a new release →
+tag `vX.Y.Z` on `main`**, "pre-release" unticked (HACS hides pre-releases from anyone who has
+not opted into betas, and the `0.` says beta already). Before that click, in one commit:
+
+1. `CHANGELOG.md`: give the **Unreleased** section the version and the date, start a new empty
+   Unreleased above it, and update the two comparison links at the bottom.
+2. `manifest.json`: set `version` to the same number.
+
+Paste the changelog section into the release body. The `Release` workflow runs on the tag and
+fails if the manifest or the changelog disagree with it, which is the reminder for a forgotten
+step -- it cannot undo a release, so look at it.
+
+The changelog is written **as the changes are made**: any commit that changes what a user
+sees, gets or has to do adds a line under Unreleased in the same commit. Internal work does not
+go in. That is what keeps a release from being an archaeology of the commits between two tags.
+
 ## Working on the integration
 
 `tests/` holds what can be checked without hardware, and CI runs it on every push: the decoder,
