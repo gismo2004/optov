@@ -47,7 +47,9 @@ attempt, and the entities come back on their own once the controller answers aga
 **Controller clock.** The controller has no time source of its own and drifts by minutes a
 month, and every weekly programme runs against its clock. The integration corrects it when it
 is more than a minute out, at most once an hour, and checks the controller's daylight-saving
-settings against your time zone. Both can be switched off in the options.
+settings against your time zone. Both can be switched off in the options. The clock's own
+entity shows the **drift in seconds** rather than the time: the time would be a new state
+every poll, and the drift is what you would look at. The controller's time is now plus drift.
 
 **Fault history.** The controller's own fault buffer, decoded with the fault texts of your
 exact controller family. The fault history is read on startup and refreshed in the background

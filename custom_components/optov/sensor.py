@@ -16,7 +16,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import catalog_db
-from .conversions import DAYS
+from .conversions import DAYS, snap
 from .coordinator import OptolinkConfigEntry, OptolinkCoordinator
 from .entity import OptolinkEntity
 from .profiles import parse_address
@@ -87,6 +87,20 @@ class OptolinkSensor(OptolinkEntity, SensorEntity):
         if "options" in definition:
             self._attr_device_class = SensorDeviceClass.ENUM
             self._attr_options = list(definition["options"].values())
+        # The controller's clock is published as its drift from Home Assistant, not as the
+        # time it shows. The time is a new state every poll -- thousands of recorder rows a
+        # day that all say "one poll later" -- while the drift is what anyone acts on, and it
+        # only changes when the clock does. Snapped to five seconds, so the second the poll
+        # happens to land on does not count as a change either. The time itself is
+        # now + drift; the sync service and the DST check read it directly.
+        clock = coordinator.clock_datapoint()
+        self._is_clock = clock is not None and clock["id"] == definition["id"]
+        if self._is_clock:
+            self._attr_native_unit_of_measurement = "s"
+            self._attr_device_class = None
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_suggested_display_precision = 0
+            self._attr_icon = "mdi:clock-check-outline"
 
     @property
     def native_value(self) -> Any:
@@ -98,6 +112,8 @@ class OptolinkSensor(OptolinkEntity, SensorEntity):
         raises on every poll, so the unknown code is added to the options instead and shown
         as itself.
         """
+        if self._is_clock:
+            return snap(self.coordinator.clock_drift, 5)
         value = self.raw_value
         options = getattr(self, "_attr_options", None)
         if options is None or value is None:
@@ -136,12 +152,10 @@ class OptolinkSensor(OptolinkEntity, SensorEntity):
         status = self.coordinator.sensor_status.get(self._def["id"])
         if status is not None:
             attrs["sensor_status"] = status
-        clock = self.coordinator.clock_datapoint()
-        if clock is not None and clock["id"] == self._def["id"]:
-            # How far the controller's own clock is ahead of Home Assistant, whether its
-            # daylight-saving settings agree with this time zone, and when it was last set.
-            # Worth seeing on the reading itself: every weekly programme is timed against it.
-            attrs["drift_seconds"] = self.coordinator.clock_drift
+        if self._is_clock:
+            # Whether the controller's daylight-saving settings agree with this time zone,
+            # and when its clock was last set. Both change rarely, so neither costs a recorder
+            # row per poll; the controller's own time deliberately is not here, see __init__.
             if self.coordinator.dst_status:
                 attrs["daylight_saving"] = self.coordinator.dst_status
             attrs["last_corrected"] = self.coordinator.clock_corrected
@@ -238,7 +252,14 @@ class OptolinkScheduleSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntit
 
 
 class OptolinkBusLoadSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity):
-    """Representation of the Optolink IR bus duty cycle."""
+    """The share of each poll interval spent talking to the controller.
+
+    The bus sensors below publish on a coarse grid (whole percent, half a second, five
+    milliseconds) rather than what the coordinator measured. A sweep never takes exactly as
+    long twice, and Home Assistant writes a recorder row for every change, so full precision
+    turned five diagnostics into a fifth of the integration's database writes while telling
+    nobody anything. The exact figures are in the diagnostics download.
+    """
 
     _attr_has_entity_name = True
     _attr_translation_key = "bus_load"
@@ -259,22 +280,20 @@ class OptolinkBusLoadSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
 
     @property
     def native_value(self) -> Any:
-        """Return bus duty cycle percentage of polling interval."""
-        return self.coordinator.bus_load
+        """Duty cycle in whole percent."""
+        return snap(self.coordinator.bus_load, 1)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return detailed bus communication metrics."""
+        """What the load is made of, limited to figures that hold still between polls.
+
+        Attributes count as state: a changed attribute is a recorder row just like a changed
+        value, so the per-sweep counters (bytes, telegrams, wire share) are not here. They are
+        in the diagnostics download, exact.
+        """
         return {
-            "cycle_duration_seconds": self.coordinator.poll_duration,
             "scan_interval_seconds": self.coordinator.scan_interval_seconds,
             "active_channels_count": self.coordinator.active_channels,
-            "avg_response_time_ms": self.coordinator.avg_response_time_ms,
-            "telegram_rate_msg_s": self.coordinator.telegram_rate,
-            "datapoint_rate_dp_s": self.coordinator.datapoint_rate,
-            "datapoints_read": self.coordinator.datapoints_read,
-            "bytes_transferred_total": self.coordinator.bytes_transferred,
-            "active_wire_utilization_pct": self.coordinator.active_wire_load,
             "telegrams_failed": self.coordinator.telegrams_failed,
         }
 
@@ -302,8 +321,8 @@ class OptolinkPollDurationSensor(CoordinatorEntity[OptolinkCoordinator], SensorE
 
     @property
     def native_value(self) -> Any:
-        """Return total cycle duration in seconds."""
-        return self.coordinator.poll_duration
+        """Sweep duration on a half-second grid, see OptolinkBusLoadSensor."""
+        return snap(self.coordinator.poll_duration, 0.5)
 
 
 class OptolinkActiveChannelsSensor(
@@ -361,8 +380,8 @@ class OptolinkLatencySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
 
     @property
     def native_value(self) -> Any:
-        """Return average response time in ms."""
-        return self.coordinator.avg_response_time_ms
+        """Average round trip on a five-millisecond grid, see OptolinkBusLoadSensor."""
+        return snap(self.coordinator.avg_response_time_ms, 5)
 
 
 class OptolinkCatalogSensor(SensorEntity):
@@ -435,8 +454,8 @@ class OptolinkDatapointRateSensor(CoordinatorEntity[OptolinkCoordinator], Sensor
 
     @property
     def native_value(self) -> Any:
-        """Return datapoints read per second during polling."""
-        return self.coordinator.datapoint_rate
+        """Datapoints a second, whole numbers, see OptolinkBusLoadSensor."""
+        return snap(self.coordinator.datapoint_rate, 1)
 
 
 class OptolinkErrorHistorySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity):

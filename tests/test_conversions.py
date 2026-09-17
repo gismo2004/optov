@@ -60,3 +60,17 @@ def test_the_timestamp_is_binary_coded_decimal():
 
 def test_a_short_timestamp_is_not_guessed_at():
     assert decode_datetime_bcd(b"\x20\x26") is None
+
+
+def test_snap_rounds_onto_grid_and_keeps_none():
+    from conversions import snap
+
+    assert snap(None, 5) is None
+    assert snap(-11, 5) == -10
+    assert snap(-13, 5) == -15
+    assert snap(81.2, 1) == 81
+    assert snap(6.78, 0.5) == 7.0
+    assert snap(6.24, 0.5) == 6.0
+    assert snap(65.5, 5) == 65
+    # A whole-number step gives an int, so the state has no stray ".0".
+    assert isinstance(snap(3.4, 1), int)

@@ -326,3 +326,16 @@ def decode_datetime_bcd(raw_bytes: bytes) -> str | None:
         return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
     except Exception:
         return raw_bytes.hex(" ")
+
+
+def snap(value: float | None, step: float) -> float | int | None:
+    """Round a value onto a grid of `step`, as an int when the step is whole.
+
+    Used for readings whose last digits are noise: a diagnostic that jitters between 6.78 and
+    6.81 seconds is a new state to Home Assistant every poll, and each of those is a recorder
+    row that says nothing. Snapped to half a second it changes when the sweep really changed.
+    """
+    if value is None:
+        return None
+    snapped = round(value / step) * step
+    return int(snapped) if float(step).is_integer() else round(snapped, 6)

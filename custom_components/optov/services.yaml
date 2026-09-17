@@ -228,3 +228,27 @@ set_schedule_window:
         number:
           min: 0
           max: 4
+
+clear_orphaned_statistics:
+  name: Delete statistics of disabled entities
+  description: >-
+    Delete the long-term statistics of entities this integration has switched off, for
+    example after lowering a tier. Home Assistant keeps such statistics and lists each of
+    them on its statistics page until deleted by hand; this does it in one go. The same
+    operation is offered as a repair whenever there is something to delete. Entities you
+    disabled yourself are left alone unless asked for.
+  fields:
+    config_entry_id:
+      name: Controller
+      description: Which controller, when more than one is set up. Optional otherwise.
+      required: false
+      selector:
+        config_entry:
+          integration: optov
+    include_user_disabled:
+      name: Include entities disabled by hand
+      description: Also delete the statistics of entities you disabled yourself.
+      required: false
+      default: false
+      selector:
+        boolean:

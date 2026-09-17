@@ -3,7 +3,8 @@
   "name": "OptoV",
   "after_dependencies": [
     "esphome",
-    "lovelace"
+    "lovelace",
+    "recorder"
   ],
   "codeowners": [
     "@gismo2004"

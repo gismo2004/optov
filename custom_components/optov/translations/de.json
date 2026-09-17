@@ -207,6 +207,18 @@
     "dst_mismatch": {
       "title": "Regelung: Zeitumstellung",
       "description": "Die Regelung stellt um auf {configured}, {zone} stellt jedoch um auf {expected}. Die Angaben lauten Monat/Woche/Wochentag, wobei Woche 5 die letzte des Monats bedeutet und Wochentag 7 der Sonntag ist.\n\nDie Uhrzeit selbst wird bei jeder Abfrage korrigiert, die Auswirkung beschränkt sich also auf ein Abfrageintervall zweimal im Jahr. Dauerhaft behebbar, indem die Umstellwerte an der Regelung gesetzt werden oder ihre eigene Zeitumstellung abgeschaltet und die Uhrzeit Home Assistant überlassen wird."
+    },
+    "orphaned_statistics": {
+      "title": "Statistiken abgeschalteter Entitäten",
+      "description": "{count} Entitäten von {name}, die diese Integration abgeschaltet hat, etwa durch eine niedrigere Stufe, haben noch Langzeitstatistiken. Home Assistant behält sie, damit eine wieder eingeschaltete Entität ihre Historie fortsetzt, und führt jede einzelne auf seiner Statistikseite auf, bis sie gelöscht wird.\n\nHier lassen sie sich auf einmal löschen. Wer die Stufe wieder einschalten will, lässt sie stehen. Selbst deaktivierte Entitäten sind nicht enthalten.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Statistiken abgeschalteter Entitäten löschen",
+            "description": "Löscht die Langzeitstatistiken von {count} derzeit abgeschalteten Entitäten. Die Historie ist damit endgültig weg; wird eine davon später wieder eingeschaltet, beginnt sie neu."
+          }
+        }
+      }
     }
   }
 }

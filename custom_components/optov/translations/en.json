@@ -207,6 +207,18 @@
     "dst_mismatch": {
       "title": "Controller: daylight-saving settings",
       "description": "The controller changes over at {configured}, but {zone} changes at {expected}. Each entry reads month/week/weekday, where week 5 means the last one of the month and weekday 7 is Sunday.\n\nThe clock itself is corrected on every poll, so the effect is limited to one poll interval twice a year. To fix it at the source, set the changeover values on the controller, or switch its own changeover off and let Home Assistant keep the time."
+    },
+    "orphaned_statistics": {
+      "title": "Statistics of switched-off entities",
+      "description": "{count} entities of {name} that this integration switched off, for example by lowering a tier, still have long-term statistics. Home Assistant keeps them so that an entity switched on again continues its history, and lists each of them on its statistics page until deleted.\n\nDelete them here in one go, or leave them if you expect to switch the tier back on. Entities you disabled yourself are not included.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Delete statistics of switched-off entities",
+            "description": "This deletes the long-term statistics of {count} entities that are currently switched off. Their history is gone for good; if one of them is switched on again later, it starts a new history."
+          }
+        }
+      }
     }
   }
 }

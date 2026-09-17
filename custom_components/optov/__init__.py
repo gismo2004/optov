@@ -33,7 +33,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.setup import async_when_setup
 
-from . import catalog_db
+from . import catalog_db, orphaned_statistics
 from .const import (
     CONF_CATALOG,
     CONF_DEVICE,
@@ -206,6 +206,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
         # Entities Home Assistant restored from an earlier installation of this controller
         # only reach the registry while the platforms set up; see _async_apply_enabled_states.
         _async_apply_enabled_states(hass, entry, coordinator)
+        # Whatever that switched off may have left statistics behind; offer to delete them.
+        entry.async_create_background_task(
+            hass,
+            orphaned_statistics.async_update_issue(hass, entry),
+            f"{DOMAIN}_orphaned_statistics",
+        )
     except Exception:
         # Home Assistant does not unload an entry whose setup failed, so async_unload_entry
         # never runs for it. Without closing the connection here its socket would stay open,
@@ -734,11 +740,11 @@ async def _async_remove_card_resource(hass: HomeAssistant) -> None:
 # ---------------------------------------------------------------------------------------
 
 
-def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[OptolinkCoordinator]:
-    """The controllers a call addresses: one by id, or every loaded one."""
+def _entries(hass: HomeAssistant, call: ServiceCall) -> list[OptolinkConfigEntry]:
+    """The entries a call addresses: one by id, or every loaded one."""
     wanted = call.data.get("config_entry_id")
     found = [
-        entry.runtime_data.coordinator
+        entry
         for entry in hass.config_entries.async_loaded_entries(DOMAIN)
         if not wanted or entry.entry_id == wanted
     ]
@@ -747,6 +753,11 @@ def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[OptolinkCoordi
             translation_domain=DOMAIN, translation_key="no_controller"
         )
     return found
+
+
+def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[OptolinkCoordinator]:
+    """The controllers a call addresses, see _entries."""
+    return [entry.runtime_data.coordinator for entry in _entries(hass, call)]
 
 
 def _one_coordinator(hass: HomeAssistant, call: ServiceCall) -> OptolinkCoordinator:
@@ -903,6 +914,19 @@ def _async_register_services(hass: HomeAssistant) -> None:
             call.data.get("mode"),
         )
 
+    async def clear_orphaned_statistics(call: ServiceCall) -> ServiceResponse:
+        """The repair's operation, callable any time and for hand-disabled entities too."""
+        cleared: list[str] = []
+        include_user = bool(call.data.get("include_user_disabled", False))
+        for entry in _entries(hass, call):
+            orphans = await orphaned_statistics.async_orphaned_ids(
+                hass, entry, include_user
+            )
+            await orphaned_statistics.async_clear(hass, orphans)
+            cleared.extend(orphans)
+            await orphaned_statistics.async_update_issue(hass, entry)
+        return {"cleared": cleared}
+
     # The two reading services answer their caller as well as posting the notification, so a
     # script can use the value without going through an entity.
     answers = SupportsResponse.OPTIONAL
@@ -914,5 +938,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         ("read_schedule", read_schedule, answers),
         ("set_schedule_day", set_schedule_day, SupportsResponse.NONE),
         ("set_schedule_window", set_schedule_window, SupportsResponse.NONE),
+        ("clear_orphaned_statistics", clear_orphaned_statistics, answers),
     ):
         hass.services.async_register(DOMAIN, name, handler, supports_response=response)
