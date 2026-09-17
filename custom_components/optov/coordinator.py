@@ -1050,187 +1050,41 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         full_sweep, self._force_full_sweep = self._force_full_sweep, False
         self._last_publish = time.monotonic()
 
-        # 1. Read sensors
-        for s in self.profile.sensors:
-            if not self._should_poll(s, "sensor"):
-                continue
-            if s["id"] not in due:
-                self._carry_forward(data, s["id"])
-                if self.sensor_status and s["id"] in self.sensor_status:
-                    sensor_status[s["id"]] = self.sensor_status[s["id"]]
-                continue
-            try:
-                block = s.get("block") or s["bytes"]
-                raw = await self._read_reg(s["address"], block, s.get("fc_read"))
-                conv = (s.get("conversion") or "").strip().lower()
-                # Sec2Hour/DayToDate/hex-string conversions need decode.py's real logic even when
-                # the field isn't block-sliced (most are plain same-size counters) -- a bare
-                # div_ratio can't express them: Sec2Hour would silently report seconds
-                # labelled as hours otherwise.
-                if (
-                    s.get("bit_length")
-                    or block != s["bytes"]
-                    or conv in EXOTIC_CONVERSIONS
-                ):
-                    # Block-addressed datapoint: request the whole telegram the controller
-                    # expects at this address, then slice the field out via decode.py.
-                    field = (
-                        raw
-                        if s.get("bit_length")
-                        else raw[
-                            s.get("byte_position", 0) : s.get("byte_position", 0)
-                            + s["bytes"]
-                        ]
+        # One pass per platform, in this order. They differ only in how the bytes become a
+        # value; a sensor's decoder also fills in the health status that rides along in its block.
+        decoders = (
+            ("sensors", "sensor", lambda item, raw: self._decode_sensor(
+                item, raw, sensor_status, sensor_status_raw)),
+            ("binary_sensors", "binary_sensor", self._decode_binary),
+            ("numbers", "number", self._decode_number),
+            ("selects", "select", self._decode_select),
+            ("switches", "switch", lambda item, raw: self._raw_int(item, raw, False)),
+        )
+        for platform, domain, decode in decoders:
+            for item in getattr(self.profile, platform):
+                if not self._should_poll(item, domain):
+                    continue
+                if item["id"] not in due:
+                    self._carry_forward(data, item["id"])
+                    if self.sensor_status and item["id"] in self.sensor_status:
+                        sensor_status[item["id"]] = self.sensor_status[item["id"]]
+                    continue
+                try:
+                    block = item.get("block") or item["bytes"]
+                    raw = await self._read_reg(item["address"], block, item.get("fc_read"))
+                    data[item["id"]] = decode(item, raw)
+                except Exception as err:
+                    self._current_failed += 1
+                    _LOGGER.debug(
+                        "Failed reading %s %s (0x%04X): %s",
+                        domain,
+                        item["id"],
+                        item["address"],
+                        err,
                     )
-                    data[s["id"]] = decode_value(
-                        field,
-                        s.get("conversion"),
-                        parameter_type=s.get("parameter_type", "SInt"),
-                        bit_start=s.get("bit_start", 0),
-                        bit_length=s.get("bit_length", 0),
-                        enum=s.get("options"),
-                        factor=s.get("conversion_factor"),
-                        offset=s.get("conversion_offset"),
-                    )
-                    # WPR3_SensorStatus_* rides along in the same block as the value (one read,
-                    # not a second one) -- exposed via the entity's `available` flag/attributes
-                    # in sensor.py, not as a separate diagnostic entity.
-                    if s.get("status_bit_length"):
-                        raw_status = decode_value(
-                            raw,
-                            bit_start=s.get("status_bit_start", 0),
-                            bit_length=s["status_bit_length"],
-                        )
-                        sensor_status[s["id"]] = decode_value(
-                            raw,
-                            bit_start=s.get("status_bit_start", 0),
-                            bit_length=s["status_bit_length"],
-                            enum=s.get("status_options"),
-                        )
-                        if raw_status is not None:
-                            with contextlib.suppress(ValueError, TypeError):
-                                sensor_status_raw[s["id"]] = int(raw_status)
-                elif s.get("format") == "datetime_bcd":
-                    data[s["id"]] = decode_datetime_bcd(raw)
-                elif "options" in s:
-                    int_val = int.from_bytes(raw, "little", signed=False)
-                    options = s["options"]
-                    data[s["id"]] = options.get(
-                        str(int_val), options.get(int_val, str(int_val))
-                    )
-                else:
-                    # Signed only when the declared parameter type is: a one-byte state code
-                    # of 200 is 200, and a 32-bit counter never wraps negative.
-                    int_val = decode_int(raw, s.get("parameter_type"))
-                    div = s.get("div_ratio") or 1.0
-                    data[s["id"]] = round(int_val / div, 3)
-            except Exception as err:
-                self._current_failed += 1
-                _LOGGER.debug(
-                    "Failed reading sensor %s (0x%04X): %s", s["id"], s["address"], err
-                )
-                if self.data and s["id"] in self.data:
-                    data[s["id"]] = self.data[s["id"]]
-            self._publish_partial(data, sensor_status, sensor_status_raw)
-
-        # 2. Read binary sensors
-        for bs in self.profile.binary_sensors:
-            if not self._should_poll(bs, "binary_sensor"):
-                continue
-            if bs["id"] not in due:
-                self._carry_forward(data, bs["id"])
-                continue
-            try:
-                block = bs.get("block") or bs["bytes"]
-                raw = await self._read_reg(bs["address"], block, bs.get("fc_read"))
-                byte_position = bs.get("byte_position", 0)
-                field = (
-                    raw[byte_position : byte_position + bs["bytes"]]
-                    if block != bs["bytes"]
-                    else raw
-                )
-                int_val = int.from_bytes(field, "little", signed=False)
-                data[bs["id"]] = bool(int_val > 0)
-            except Exception as err:
-                self._current_failed += 1
-                _LOGGER.debug(
-                    "Failed reading binary sensor %s (0x%04X): %s",
-                    bs["id"],
-                    bs["address"],
-                    err,
-                )
-                if self.data and bs["id"] in self.data:
-                    data[bs["id"]] = self.data[bs["id"]]
-            self._publish_partial(data, sensor_status, sensor_status_raw)
-
-        # 3. Read numbers (setpoints)
-        for num in self.profile.numbers:
-            if not self._should_poll(num, "number"):
-                continue
-            if num["id"] not in due:
-                self._carry_forward(data, num["id"])
-                continue
-            try:
-                block = num.get("block") or num["bytes"]
-                raw = await self._read_reg(num["address"], block, num.get("fc_read"))
-                data[num["id"]] = self._decode_number(num, raw)
-            except Exception as err:
-                self._current_failed += 1
-                _LOGGER.debug(
-                    "Failed reading number %s (0x%04X): %s",
-                    num["id"],
-                    num["address"],
-                    err,
-                )
-                if self.data and num["id"] in self.data:
-                    data[num["id"]] = self.data[num["id"]]
-            self._publish_partial(data, sensor_status, sensor_status_raw)
-
-        # 4. Read selects (operating modes)
-        for sel in self.profile.selects:
-            if not self._should_poll(sel, "select"):
-                continue
-            if sel["id"] not in due:
-                self._carry_forward(data, sel["id"])
-                continue
-            try:
-                block = sel.get("block") or sel["bytes"]
-                raw = await self._read_reg(sel["address"], block, sel.get("fc_read"))
-                data[sel["id"]] = self._decode_select(sel, raw)
-            except Exception as err:
-                self._current_failed += 1
-                _LOGGER.debug(
-                    "Failed reading select %s (0x%04X): %s",
-                    sel["id"],
-                    sel["address"],
-                    err,
-                )
-                if self.data and sel["id"] in self.data:
-                    data[sel["id"]] = self.data[sel["id"]]
-            self._publish_partial(data, sensor_status, sensor_status_raw)
-
-        # 5. Read switches (writable single bits)
-        for sw in self.profile.switches:
-            if not self._should_poll(sw, "switch"):
-                continue
-            if sw["id"] not in due:
-                self._carry_forward(data, sw["id"])
-                continue
-            try:
-                block = sw.get("block") or sw["bytes"]
-                raw = await self._read_reg(sw["address"], block, sw.get("fc_read"))
-                data[sw["id"]] = self._raw_int(sw, raw, False)
-            except Exception as err:
-                self._current_failed += 1
-                _LOGGER.debug(
-                    "Failed reading switch %s (0x%04X): %s",
-                    sw["id"],
-                    sw["address"],
-                    err,
-                )
-                if self.data and sw["id"] in self.data:
-                    data[sw["id"]] = self.data[sw["id"]]
-            self._publish_partial(data, sensor_status, sensor_status_raw)
+                    if self.data and item["id"] in self.data:
+                        data[item["id"]] = self.data[item["id"]]
+                self._publish_partial(data, sensor_status, sensor_status_raw)
 
         # The cached bytes describe this cycle only. Anything reading outside it -- a write
         # and its read-back above all -- must go to the controller, not to a snapshot that is
@@ -1372,6 +1226,76 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._disable_unsupported_entities(sensor_status_raw)
 
         return data
+
+    def _decode_sensor(
+        self,
+        s: dict[str, Any],
+        raw: bytes,
+        sensor_status: dict[str, str],
+        sensor_status_raw: dict[str, int],
+    ) -> Any:
+        """A sensor's value from the bytes read for it, filling in its health status on the way."""
+        block = s.get("block") or s["bytes"]
+        conv = (s.get("conversion") or "").strip().lower()
+        # Sec2Hour/DayToDate/hex-string conversions need decode.py's real logic even when
+        # the field isn't block-sliced (most are plain same-size counters) -- a bare
+        # div_ratio can't express them: Sec2Hour would silently report seconds
+        # labelled as hours otherwise.
+        if s.get("bit_length") or block != s["bytes"] or conv in EXOTIC_CONVERSIONS:
+            # Block-addressed datapoint: request the whole telegram the controller
+            # expects at this address, then slice the field out via decode.py.
+            field = (
+                raw
+                if s.get("bit_length")
+                else raw[s.get("byte_position", 0) : s.get("byte_position", 0) + s["bytes"]]
+            )
+            value = decode_value(
+                field,
+                s.get("conversion"),
+                parameter_type=s.get("parameter_type", "SInt"),
+                bit_start=s.get("bit_start", 0),
+                bit_length=s.get("bit_length", 0),
+                enum=s.get("options"),
+                factor=s.get("conversion_factor"),
+                offset=s.get("conversion_offset"),
+            )
+            # WPR3_SensorStatus_* rides along in the same block as the value (one read,
+            # not a second one) -- exposed via the entity's `available` flag/attributes
+            # in sensor.py, not as a separate diagnostic entity.
+            if s.get("status_bit_length"):
+                raw_status = decode_value(
+                    raw,
+                    bit_start=s.get("status_bit_start", 0),
+                    bit_length=s["status_bit_length"],
+                )
+                sensor_status[s["id"]] = decode_value(
+                    raw,
+                    bit_start=s.get("status_bit_start", 0),
+                    bit_length=s["status_bit_length"],
+                    enum=s.get("status_options"),
+                )
+                if raw_status is not None:
+                    with contextlib.suppress(ValueError, TypeError):
+                        sensor_status_raw[s["id"]] = int(raw_status)
+            return value
+        if s.get("format") == "datetime_bcd":
+            return decode_datetime_bcd(raw)
+        if "options" in s:
+            int_val = int.from_bytes(raw, "little", signed=False)
+            options = s["options"]
+            return options.get(str(int_val), options.get(int_val, str(int_val)))
+        # Signed only when the declared parameter type is: a one-byte state code
+        # of 200 is 200, and a 32-bit counter never wraps negative.
+        int_val = decode_int(raw, s.get("parameter_type"))
+        div = s.get("div_ratio") or 1.0
+        return round(int_val / div, 3)
+
+    def _decode_binary(self, bs: dict[str, Any], raw: bytes) -> bool:
+        """A binary sensor is on when its field holds anything but zero."""
+        block = bs.get("block") or bs["bytes"]
+        byte_position = bs.get("byte_position", 0)
+        field = raw[byte_position : byte_position + bs["bytes"]] if block != bs["bytes"] else raw
+        return bool(int.from_bytes(field, "little", signed=False) > 0)
 
     def _start_job(
         self, name: str, job: Callable[[], Coroutine[Any, Any, Any]]
