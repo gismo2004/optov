@@ -216,6 +216,14 @@
           "confirm": {
             "title": "Statistiken abgeschalteter Entitäten löschen",
             "description": "Löscht die Langzeitstatistiken von {count} derzeit abgeschalteten Entitäten. Die Historie ist damit endgültig weg; wird eine davon später wieder eingeschaltet, beginnt sie neu."
+          },
+          "init": {
+            "title": "Statistiken abgeschalteter Entitäten",
+            "description": "{count} abgeschaltete Entitäten haben noch Langzeitstatistiken. Jetzt löschen, oder behalten und diese Reparatur ausblenden.",
+            "menu_options": {
+              "confirm": "Statistiken löschen",
+              "ignore": "Behalten und diese Reparatur ausblenden"
+            }
           }
         }
       }

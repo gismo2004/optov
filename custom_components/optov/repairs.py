@@ -23,7 +23,32 @@ class OrphanedStatisticsFlow(RepairsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> data_entry_flow.FlowResult:
-        return await self.async_step_confirm()
+        # A fixable issue opens straight into its flow, and Home Assistant offers no Ignore
+        # there, so the flow has to: otherwise deleting is the only way to make it go away.
+        orphans = (
+            await orphaned_statistics.async_orphaned_ids(self.hass, self._entry)
+            if self._entry
+            else []
+        )
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["confirm", "ignore"],
+            description_placeholders={"count": str(len(orphans))},
+        )
+
+    async def async_step_ignore(
+        self, user_input: dict[str, Any] | None = None
+    ) -> data_entry_flow.FlowResult:
+        """Keep the statistics and hide the repair.
+
+        Hidden for as long as this issue exists: it is withdrawn once nothing is left to
+        delete, and a later tier switch raises it afresh, which un-hides it.
+        """
+        if self._entry:
+            ir.async_ignore_issue(
+                self.hass, DOMAIN, orphaned_statistics.issue_id(self._entry), True
+            )
+        return self.async_create_entry(title="", data={})
 
     async def async_step_confirm(
         self, user_input: dict[str, Any] | None = None

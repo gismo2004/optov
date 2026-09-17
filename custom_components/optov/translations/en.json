@@ -216,6 +216,14 @@
           "confirm": {
             "title": "Delete statistics of switched-off entities",
             "description": "This deletes the long-term statistics of {count} entities that are currently switched off. Their history is gone for good; if one of them is switched on again later, it starts a new history."
+          },
+          "init": {
+            "title": "Statistics of switched-off entities",
+            "description": "{count} switched-off entities still have long-term statistics. Delete them now, or keep them and hide this repair.",
+            "menu_options": {
+              "confirm": "Delete the statistics",
+              "ignore": "Keep them and hide this repair"
+            }
           }
         }
       }

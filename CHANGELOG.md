@@ -12,7 +12,8 @@ commits.
 
 ### Added
 - A repair that offers to delete the long-term statistics of entities a tier switch turned
-  off, which Home Assistant otherwise lists one by one on its statistics page. The same
+  off, which Home Assistant otherwise lists one by one on its statistics page, or to keep
+  them and hide the repair. The same
   operation is the service `optov.clear_orphaned_statistics`, which can also take entities
   disabled by hand.
 

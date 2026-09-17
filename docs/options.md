@@ -20,8 +20,8 @@ the integration again.
 **Statistics of switched-off entities.** Home Assistant keeps the long-term statistics of an
 entity a tier switch turned off, so that switching it on again continues its history, and lists
 each of them on *Developer tools → Statistics* until deleted. When there is something to delete,
-the integration raises a repair under *Settings → Repairs* that deletes them all at once after
-you confirm; ignore it if you expect to switch the tier back on. The same operation is the
+the integration raises a repair under *Settings → Repairs* that offers to delete them all at
+once, or to keep them and hide the repair if you expect to switch the tier back on. The same operation is the
 service `optov.clear_orphaned_statistics`, see [Services](services.md).
 
 The integration's own text, this options page, entity names it invents and the dashboard cards,
