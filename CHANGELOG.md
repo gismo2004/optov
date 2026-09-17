@@ -10,6 +10,10 @@ commits.
 
 ## [Unreleased]
 
+### Changed
+- KW is no longer marked experimental: a user confirmed it on a Vitotronic 200 KW2 (0x2098) with
+  the full entity set (#1). The code is unchanged; the README and `docs/protocols.md` say so.
+
 ## [0.1.0] - 2026-09-17
 
 The first tagged release. Verified end to end on one controller, a Vitocal heat pump with a

@@ -3,18 +3,19 @@
 Controllers speak one of two protocols over the Optolink port, and OptoV works out which one
 yours is: it says hello, and what comes back decides. Nothing to configure.
 
-**P300** is what the verified controller speaks and what everything here is built around.
+**P300** is what the development controller speaks and what everything here was built around
+first.
 
 **KW** is the older protocol, the only one the earliest Vitotronic controllers have -- among
 others the Vitotronic 200 KW1/KW2 and 300 KW3. The [openv wiki](https://github.com/openv/openv/wiki/Ger%C3%A4te)
 lists which controllers those are.
 
-> **KW support is highly experimental and has never touched a physical controller.** No unit
-> that speaks it was available to test against: the telegrams are covered by unit tests and the
-> protocol is chosen automatically, but nobody has yet seen a single real reading come back over
-> it. If you have such a controller, please try it and
-> [open an issue](https://github.com/gismo2004/optov/issues) with the log either way -- that is
-> the only way it stops being experimental.
+> **KW is confirmed on one controller.** It was written without a KW-only unit to test against
+> and shipped as experimental; a user then ran it on a Vitotronic 200 KW2 (System ID 0x2098) and
+> reported the full entity set working, including the optional tiers
+> ([issue #1](https://github.com/gismo2004/optov/issues/1)). One controller is one controller:
+> if you have another KW unit, please try it and
+> [open an issue](https://github.com/gismo2004/optov/issues) with the log either way.
 
 Two things the KW protocol cannot do, which you may notice if you have one of these controllers:
 

@@ -20,11 +20,11 @@ actually talking to, and builds the entity set for that one: names, units, scali
 enumerations, fault texts and weekly programmes all come from the catalog. The catalog is not
 part of this repository; you build it yourself, once, in a few minutes.
 
-> **Status: beta.** One controller, a Vitocal heat pump with a Vitotronic 200 WO1A, has been
-> verified end to end on real hardware, with Home Assistant 2026.9 and ESPHome 2026.8. Others
-> are described by the same definitions and should work the same way, but none has been
-> confirmed on a physical unit. Controllers that speak only the older KW protocol are supported
-> **experimentally and untested on hardware**, see
+> **Status: beta.** Two controllers have been confirmed on real hardware: a Vitocal heat pump
+> with a Vitotronic 200 WO1A over P300 (the development unit, with Home Assistant 2026.9 and
+> ESPHome 2026.8), and a Vitotronic 200 KW2 over the older KW protocol, reported working by a
+> user with the full entity set. Other controllers are described by the same definitions and
+> should work the same way, but have not been seen on a physical unit yet; see
 > [Protocols](https://github.com/gismo2004/optov/blob/main/docs/protocols.md). Reports are
 > welcome, whether they work or not.
 
@@ -135,14 +135,14 @@ through HACS afterwards and restart once more.
 | [Options](https://github.com/gismo2004/optov/blob/main/docs/options.md) | every option, what a tier switch does to your own changes, entity ids |
 | [Dashboard cards](https://github.com/gismo2004/optov/blob/main/docs/cards.md) | both cards with their YAML, names in your own cards |
 | [Services](https://github.com/gismo2004/optov/blob/main/docs/services.md) | the actions and how to address a programme |
-| [Protocols](https://github.com/gismo2004/optov/blob/main/docs/protocols.md) | P300, the experimental KW support and its limits, GWG |
+| [Protocols](https://github.com/gismo2004/optov/blob/main/docs/protocols.md) | P300, KW and its limits, GWG |
 | [Troubleshooting](https://github.com/gismo2004/optov/blob/main/docs/troubleshooting.md) | the messages you may see and what they mean |
 
 ## Contributing
 
 Bug reports with the log lines around the problem and the entity's `address` attribute are the
 most useful thing; the integration entry has a *Download diagnostics* item that gathers the rest
-without your addresses or keys. Reports from controllers other than the one verified so far are
+without your addresses or keys. Reports from controllers other than the two confirmed so far are
 especially welcome, whether they work or not:
 [open an issue](https://github.com/gismo2004/optov/issues).
 

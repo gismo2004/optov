@@ -191,13 +191,16 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
   (`decode.raw_bounds`, `catalog_db._number_limits`). Falling back to a made-up range instead
   refused values the controller holds happily -- more than a third of a family's settings carry
   no limits at all -- and a whole-number step hides the tenths a scaled datapoint is set in.
-- **Only P300 is spoken, and a controller that speaks only the older KW protocol identifies
-  itself.** It beacons ENQ (0x05) and never acknowledges the `16 00 00` init, so an unanswered
-  init is a diagnosis rather than just a failure. The openv wiki documents which controllers are
-  KW-only and the protocol itself. KW is a second transport, not a second catalog: its telegram is
-  a bare `<FC> <addr_hi> <addr_lo> <len>` with no framing and no way to refuse a read, so the
-  display conditions are the only filter on what a unit has, and a silent timeout has to mean
-  "unavailable" rather than a zero.
+- **Both P300 and KW are spoken; P300 is tried first and a KW-only controller identifies
+  itself.** It beacons ENQ (0x05) and never acknowledges the `16 00 00` init, so the client
+  switches to KW (`optolink._sync_p300` -> `_sync_kw`). The openv wiki documents which
+  controllers are KW-only and the protocol itself. KW is a second transport, not a second
+  catalog: its telegram is a bare `<FC> <addr_hi> <addr_lo> <len>` with no framing and no way to
+  refuse a read, so the display conditions are the only filter on what a unit has, and a silent
+  timeout or an all-`ff` answer means "unavailable" rather than a zero. Confirmed on real
+  hardware by a user on a Vitotronic 200 KW2 (0x2098, issue #1) on 2026-09-17; the development
+  WO1A answers KW too, but with `ff ff` filler for unknown addresses, which is where the filler
+  rule came from.
 - **Bit-field numbering is MSB-first within each byte**, across the whole block, not a
   little-endian shift-and-mask.
 - **Signedness follows the declared parameter type width**, not the datapoint's byte count, and
