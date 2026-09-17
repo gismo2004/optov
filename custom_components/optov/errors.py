@@ -3,7 +3,8 @@
 Binary buffer layouts, as used by the controller families this integration supports:
 1. Heat Pump WO1A / WO1H (Buffer 0xA801 'WPRError', 240 bytes = 30 entries x 8 bytes):
    - Entry Byte 0: Status / index flags
-   - Entry Bytes 1..4: 32-bit unsigned little-endian integer -> Unix epoch timestamp (seconds since 1970-01-01 00:00:00 UTC)
+   - Entry Bytes 1..4: 32-bit unsigned little-endian integer -> Unix epoch timestamp
+     (seconds since 1970-01-01 00:00:00 UTC)
    - Entry Byte 5: Error code byte in Hex (0x00 = empty slot; non-zero = active/historical fault)
    - Entry Bytes 6..7: Parameters / status flags
 

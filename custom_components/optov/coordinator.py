@@ -659,7 +659,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, dev: dict[str, Any], sys_id: int, sw_version: str
     ) -> DeviceProfile:
         """Probe the controller and generate the entity set dynamically from catalog.db.
-        No per-device hardcoding: every field comes from the SQLite catalog plus this one-time probe.
+        No per-device hardcoding: every field comes from the SQLite catalog plus this one-time
+        probe.
         """
         probed_values: dict[int, int] = {}
         targets = await self.hass.async_add_executor_job(
@@ -1981,10 +1982,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @staticmethod
     def _day_index(day: Any) -> int:
-        if isinstance(day, int):
-            idx = day
-        else:
-            idx = DAY_INDEX.get(str(day).lower().strip())
+        idx = day if isinstance(day, int) else DAY_INDEX.get(str(day).lower().strip())
         if idx is None or not 0 <= idx <= 6:
             raise ValueError(f"Invalid day specifier: {day}")
         return idx

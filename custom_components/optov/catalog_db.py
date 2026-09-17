@@ -674,7 +674,8 @@ def get_probe_targets(device_id: int, db_path: str) -> list[dict[str, Any]]:
                       dp.byte_position, dp.bit_start, dp.bit_length, dp.parameter_type,
                       dp.name, dp.fc_read
                FROM display_conditions dc
-               JOIN datapoints dp ON dc.condition_event_type_id = dp.id AND dp.device_id = dc.device_id
+               JOIN datapoints dp
+                 ON dc.condition_event_type_id = dp.id AND dp.device_id = dc.device_id
                WHERE dc.device_id = ?
                  AND dp.name NOT LIKE '%SensorStatus%'
                  AND dp.name NOT LIKE '%SensorDruckStatus%'""",
@@ -1164,7 +1165,8 @@ def _load_profile_inputs(
     for r in c_rows:
         circuits[r["circuit"]] = r["circuit_name"]
 
-    # Detect disabled circuits from hidden circuit groups in the circuit tree (ecnsysEventTypeGroupHC)
+    # Detect disabled circuits from hidden circuit groups in the circuit tree
+    # (ecnsysEventTypeGroupHC)
     circuit_groups = conn.execute(
         """SELECT g.id, g.address
            FROM groups g
@@ -1293,7 +1295,8 @@ def _place_datapoint(
     if (dp.get("fc_read") or "Virtual_READ") in inputs.unreachable_fc:
         return
 
-    # Skip raw multi-byte array dumps (e.g. 168-byte EEPROM schedule arrays handled by schedule poller)
+    # Skip raw multi-byte array dumps (e.g. 168-byte EEPROM schedule arrays handled by the
+    # schedule poller)
     if (
         dp.get("byte_length", 1) > 8
         and (dp.get("parameter_type") or "").strip().lower() == "array"

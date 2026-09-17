@@ -1,0 +1,7 @@
+# The rules this code is held to; CI runs `ruff check`. Lines are 100 wide, which is what the
+# tree is written at.
+line-length = 100
+target-version = "py313"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]

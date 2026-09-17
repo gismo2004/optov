@@ -264,5 +264,7 @@ nothing in any log.
 Home Assistant does not re-import Python on a config-entry reload; a full restart is required to
 pick up code changes.
 
-Before finishing, run `python3 -m pyflakes custom_components/optov/*.py`. It catches the
-undefined name left behind by an edit that removed too much, which nothing else here would.
+Before finishing, run `python3 -m pyflakes custom_components/optov/*.py` and
+`ruff check custom_components/optov tests`. The first catches the undefined name left behind by
+an edit that removed too much; the second holds the tree to the rules in `ruff.toml`, which CI
+applies as well. Neither reformats anything.

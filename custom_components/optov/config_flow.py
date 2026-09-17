@@ -1,9 +1,10 @@
 """Setup and options.
 
 Setup offers the serial ports Home Assistant knows, which include the proxies of every
-ESPHome node, falling back to typing the connection of a node it does not have. Nothing is read from the controller during
-setup: the first poll identifies it and builds the entity set, so setup stays fast and does not
-touch a serial link that a previous instance may still be releasing.
+ESPHome node, falling back to typing the connection of a node it does not have. Nothing is
+read from the controller during setup: the first poll identifies it and builds the entity
+set, so setup stays fast and does not touch a serial link that a previous instance may still
+be releasing.
 """
 
 import os
