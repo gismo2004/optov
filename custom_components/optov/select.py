@@ -3,16 +3,20 @@
 from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import async_generate_entity_id
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import OptolinkConfigEntry
 from .entity import OptolinkEntity
+
+# Writes go one at a time: the controller sits on a serial line and the client queues
+# telegrams anyway, so more than one in flight would only wait on the other.
+PARALLEL_UPDATES = 1
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: OptolinkConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator = entry.runtime_data.coordinator
     entities = [
