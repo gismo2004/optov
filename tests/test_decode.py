@@ -60,7 +60,10 @@ def test_a_bit_field_that_does_not_fit_is_refused():
 
 def test_divisors_and_enums():
     assert decode_value(b"\x8a\x00", "Div10", parameter_type="SInt") == 13.8
-    assert decode_value(b"\x02", None, parameter_type="Byte", enum={2: "Normal"}) == "Normal"
+    assert (
+        decode_value(b"\x02", None, parameter_type="Byte", enum={2: "Normal"})
+        == "Normal"
+    )
 
 
 def test_what_counts_as_a_number():

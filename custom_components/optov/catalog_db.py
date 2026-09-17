@@ -60,7 +60,11 @@ class UnknownControllerError(ValueError):
     """
 
     def __init__(
-        self, sys_id: int, hw_index: int | None, sw_index: int | None, variants: list[str]
+        self,
+        sys_id: int,
+        hw_index: int | None,
+        sw_index: int | None,
+        variants: list[str],
     ) -> None:
         self.sys_id = sys_id
         self.hw_index = hw_index
@@ -160,13 +164,17 @@ _DIV_RATIOS = {"div2": 2.0, "div10": 10.0, "div100": 100.0, "div1000": 1000.0}
 def _culture_column(conn: sqlite3.Connection, culture: str | None) -> str:
     """A quoted `translations_p` column for a language, validated against the table itself."""
     columns = {
-        r[1] for r in conn.execute("PRAGMA table_info(translations_p)") if r[1] != "text_key"
+        r[1]
+        for r in conn.execute("PRAGMA table_info(translations_p)")
+        if r[1] != "text_key"
     }
     wanted = (culture or "en").strip().lower()
     if wanted not in columns:
         # English, then German, then whatever the catalog was built with: a catalog built for
         # a single other language has neither.
-        wanted = next((c for c in ("en", "de") if c in columns), min(columns, default="en"))
+        wanted = next(
+            (c for c in ("en", "de") if c in columns), min(columns, default="en")
+        )
     return f'"{wanted}"'
 
 
@@ -560,7 +568,10 @@ def _select_variant(
     # follows the software index, which is what the model suffixes name ("Softwarestand 4").
     # Where the hardware indices do differ -- the GWG families, where the byte names the board
     # -- nothing is assumed and the lookup is left to fail.
-    if sw_index is not None and len({(c["ident_ext"] or "")[:2] for c in candidates}) == 1:
+    if (
+        sw_index is not None
+        and len({(c["ident_ext"] or "")[:2] for c in candidates}) == 1
+    ):
         for c in candidates:
             ext, till = _bytes(c["ident_ext"]), _bytes(c["ident_ext_till"])
             if ext and (ext[1] == sw_index or (till and ext[1] <= sw_index <= till[1])):
@@ -1262,15 +1273,9 @@ def _circuit_of(dp: dict[str, Any], inputs: _ProfileInputs) -> str | None:
         return c
     g_ids = inputs.group_ids_by_et.get(dp["id"], [])
     g_addrs = [inputs.group_addrs_by_id.get(gid, "") for gid in g_ids]
-    if any(
-        "solaranlage" in a.lower() or a.lower().endswith("~solar")
-        for a in g_addrs
-    ):
+    if any("solaranlage" in a.lower() or a.lower().endswith("~solar") for a in g_addrs):
         return "Solar"
-    if any(
-        "warmwasser" in a.lower() or a.lower().endswith("~ww")
-        for a in g_addrs
-    ):
+    if any("warmwasser" in a.lower() or a.lower().endswith("~ww") for a in g_addrs):
         return "WW"
     for n in ("1", "2", "3"):
         if any(
@@ -1440,9 +1445,10 @@ def _place_datapoint(
         "hexbyte2utf16byte",
     ) or param_type in ("array", "string")
 
-    writable = dp.get("entity_kind") == KIND_WRITABLE and (
-        dp.get("fc_write") or "undefined"
-    ) not in inputs.unreachable_fc
+    writable = (
+        dp.get("entity_kind") == KIND_WRITABLE
+        and (dp.get("fc_write") or "undefined") not in inputs.unreachable_fc
+    )
     if writable:
         # A writable datapoint one bit wide has exactly two states, so it is a switch --
         # whether or not the catalog bothered to name them. Party mode, eco mode and the
@@ -1570,11 +1576,7 @@ def _schedules(
         modes = []
         for level, color in zip(stype["levels"], stype["colors"], strict=True):
             label = next(
-                (
-                    level_texts[k]
-                    for k in _level_keys(dp, level)
-                    if level_texts.get(k)
-                ),
+                (level_texts[k] for k in _level_keys(dp, level) if level_texts.get(k)),
                 str(level),
             )
             modes.append({"value": level, "label": label, "color": color})

@@ -142,10 +142,12 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(CONF_DEVICE): SerialPortSelector(),
-                vol.Optional(CONF_LANGUAGE, default=DEFAULT_LANGUAGE): vol.In(languages),
-                vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
-                    int, vol.Range(min=5, max=600)
+                vol.Optional(CONF_LANGUAGE, default=DEFAULT_LANGUAGE): vol.In(
+                    languages
                 ),
+                vol.Optional(
+                    CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
+                ): vol.All(int, vol.Range(min=5, max=600)),
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
@@ -253,7 +255,9 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         if not to_delete:
             return None
         holders = {name: set(titles) for name, titles in users.items()}
-        if not user_input.get(CONF_CATALOG_FILE) and (kept := user_input.get(CONF_CATALOG)):
+        if not user_input.get(CONF_CATALOG_FILE) and (
+            kept := user_input.get(CONF_CATALOG)
+        ):
             # The catalog being picked for this entry is about to be in use as well.
             holders.setdefault(kept, set()).add(self._get_reconfigure_entry().title)
         if in_use := [name for name in to_delete if name in holders]:
@@ -275,7 +279,10 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         if file_id := user_input.get(CONF_CATALOG_FILE):
             try:
                 self._catalog = await self.hass.async_add_executor_job(
-                    _install_uploaded_catalog, self.hass, file_id, self.hass.config.path(DOMAIN)
+                    _install_uploaded_catalog,
+                    self.hass,
+                    file_id,
+                    self.hass.config.path(DOMAIN),
                 )
             except catalog_db.CatalogSchemaError as err:
                 return "catalog_outdated" if err.outdated else "catalog_too_new"
@@ -315,7 +322,9 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
                 else None
             )
             options = [
-                SelectOptionDict(value=c["name"], label=await self._async_catalog_label(c))
+                SelectOptionDict(
+                    value=c["name"], label=await self._async_catalog_label(c)
+                )
                 for c in catalogs
             ]
             default = current if current in names else names[0]
@@ -407,7 +416,9 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         self.hass.config_entries.async_update_entry(
             entry, data={**entry.data, CONF_CATALOG: self._catalog}, options=options
         )
-        if entry.state is not ConfigEntryState.LOADED or (self._uploaded and not changed):
+        if entry.state is not ConfigEntryState.LOADED or (
+            self._uploaded and not changed
+        ):
             self.hass.config_entries.async_schedule_reload(entry.entry_id)
         if self._deleted:
             return self.async_abort(
@@ -427,7 +438,9 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         because of the file just replaced. Disabled and unloaded entries are left alone. The
         entry being reconfigured is left to _async_catalog_settled().
         """
-        current = self._get_reconfigure_entry().entry_id if self._reconfiguring else None
+        current = (
+            self._get_reconfigure_entry().entry_id if self._reconfiguring else None
+        )
         active = (
             ConfigEntryState.LOADED,
             ConfigEntryState.SETUP_IN_PROGRESS,
@@ -461,7 +474,12 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             device = f"esphome://{host}:{user_input[CONF_PORT]}/?{query}"
             return await self._async_create(
-                device, host, int(user_input[CONF_PORT]), instance, proxy_name, user_input
+                device,
+                host,
+                int(user_input[CONF_PORT]),
+                instance,
+                proxy_name,
+                user_input,
             )
 
         given = user_input or {}

@@ -577,11 +577,15 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # One file per controller, named after the identity its entities carry.
         self._store = Store(self.hass, STORAGE_VERSION, f"{DOMAIN}.{self.stable_id}")
         stored = await self._store.async_load()
-        self._learned = stored if stored is not None else {
-            key: value
-            for key in LEARNED
-            if (value := self.config_entry.data.get(key)) is not None
-        }
+        self._learned = (
+            stored
+            if stored is not None
+            else {
+                key: value
+                for key in LEARNED
+                if (value := self.config_entry.data.get(key)) is not None
+            }
+        )
         if stored is None and self._learned:
             # Taken over from the entry: write it out before the entry stops carrying it, or a
             # restart in between would lose it and every unfitted datapoint would come back.
@@ -594,7 +598,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         learned = self._learned
         self._retired_item_ids = set(learned.get("retired_items") or [])
-        self._retired_addresses = {int(a) for a in learned.get("retired_addresses") or []}
+        self._retired_addresses = {
+            int(a) for a in learned.get("retired_addresses") or []
+        }
         self._unsupported_addresses |= self._retired_addresses
 
     @callback
@@ -917,7 +923,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         the same handful of absent datapoints is re-asked every cycle forever, each costing a
         full telegram round trip and a failure in the statistics.
         """
-        if address in self._unsupported_addresses or address in self._skipped_this_session:
+        if (
+            address in self._unsupported_addresses
+            or address in self._skipped_this_session
+        ):
             raise optolink.OptolinkDeviceError(
                 f"0x{address:04X} is not implemented on this controller",
                 address=address,
@@ -952,7 +961,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raw = await self.client.read_raw(
                 address, length, optolink.function_code(fc_read)
             )
-        except (optolink.OptolinkNotConnected, optolink.OptolinkControllerSilent) as err:
+        except (
+            optolink.OptolinkNotConnected,
+            optolink.OptolinkControllerSilent,
+        ) as err:
             self._cycle_unreachable = str(err)
             raise
         except optolink.OptolinkDeviceError as err:
@@ -1054,8 +1066,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # One pass per platform, in this order. They differ only in how the bytes become a
         # value; a sensor's decoder also fills in the health status that rides along in its block.
         decoders = (
-            ("sensors", "sensor", lambda item, raw: self._decode_sensor(
-                item, raw, sensor_status, sensor_status_raw)),
+            (
+                "sensors",
+                "sensor",
+                lambda item, raw: self._decode_sensor(
+                    item, raw, sensor_status, sensor_status_raw
+                ),
+            ),
             ("binary_sensors", "binary_sensor", self._decode_binary),
             ("numbers", "number", self._decode_number),
             ("selects", "select", self._decode_select),
@@ -1072,7 +1089,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     continue
                 try:
                     block = item.get("block") or item["bytes"]
-                    raw = await self._read_reg(item["address"], block, item.get("fc_read"))
+                    raw = await self._read_reg(
+                        item["address"], block, item.get("fc_read")
+                    )
                     data[item["id"]] = decode(item, raw)
                 except Exception as err:
                     self._current_failed += 1
@@ -1134,7 +1153,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for item_id in due:
                 self._last_read.pop(item_id, None)
             self._force_full_sweep = self._force_full_sweep or full_sweep
-            raise UpdateFailed(f"The controller does not answer: {self._cycle_unreachable}")
+            raise UpdateFailed(
+                f"The controller does not answer: {self._cycle_unreachable}"
+            )
         if not data:
             raise UpdateFailed("Failed to communicate with OptoV controller")
 
@@ -1248,7 +1269,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             field = (
                 raw
                 if s.get("bit_length")
-                else raw[s.get("byte_position", 0) : s.get("byte_position", 0) + s["bytes"]]
+                else raw[
+                    s.get("byte_position", 0) : s.get("byte_position", 0) + s["bytes"]
+                ]
             )
             value = decode_value(
                 field,
@@ -1295,7 +1318,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """A binary sensor is on when its field holds anything but zero."""
         block = bs.get("block") or bs["bytes"]
         byte_position = bs.get("byte_position", 0)
-        field = raw[byte_position : byte_position + bs["bytes"]] if block != bs["bytes"] else raw
+        field = (
+            raw[byte_position : byte_position + bs["bytes"]]
+            if block != bs["bytes"]
+            else raw
+        )
         return bool(int.from_bytes(field, "little", signed=False) > 0)
 
     def _start_job(
@@ -1310,7 +1337,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         running = self._jobs.get(name)
         if running is not None and not running.done():
-            _LOGGER.debug("Background job %s is still running; not starting another", name)
+            _LOGGER.debug(
+                "Background job %s is still running; not starting another", name
+            )
             return
         self._jobs[name] = self.config_entry.async_create_background_task(
             self.hass, job(), f"optov_{name}"

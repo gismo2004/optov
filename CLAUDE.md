@@ -265,6 +265,8 @@ Home Assistant does not re-import Python on a config-entry reload; a full restar
 pick up code changes.
 
 Before finishing, run `python3 -m pyflakes custom_components/optov/*.py` and
-`ruff check custom_components/optov tests`. The first catches the undefined name left behind by
-an edit that removed too much; the second holds the tree to the rules in `ruff.toml`, which CI
-applies as well. Neither reformats anything.
+`ruff check custom_components/optov tests`, and `ruff format` the files you touched. pyflakes
+catches the undefined name left behind by an edit that removed too much; `ruff.toml` holds the
+rules, and CI applies both the check and `ruff format --check`. Line width is the formatter's,
+at the default 88, as in Home Assistant core; E501 is off, so comments and docstrings are wrapped
+by judgement.

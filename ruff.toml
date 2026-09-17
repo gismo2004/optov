@@ -1,7 +1,8 @@
-# The rules this code is held to; CI runs `ruff check`. Lines are 100 wide, which is what the
-# tree is written at.
-line-length = 100
+# The rules this code is held to; CI runs `ruff check` and `ruff format --check`. Line width is
+# the formatter's business at the default 88 -- the same arrangement Home Assistant core uses --
+# so E501 is off and comments and docstrings are left to judgement.
 target-version = "py313"
 
 [lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]

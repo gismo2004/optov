@@ -266,7 +266,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
     except FileNotFoundError:
         pass
     except (OSError, ValueError) as err:
-        _LOGGER.warning("Could not delete catalog %s of the removed entry: %s", name, err)
+        _LOGGER.warning(
+            "Could not delete catalog %s of the removed entry: %s", name, err
+        )
 
 
 def _port_url(hass: HomeAssistant, entry: OptolinkConfigEntry) -> str:
@@ -282,9 +284,13 @@ def _port_url(hass: HomeAssistant, entry: OptolinkConfigEntry) -> str:
     url = entry.data.get(CONF_DEVICE, "")
     for node in hass.config_entries.async_entries("esphome"):
         if node.data.get("host") == host:
-            info = node.state is ConfigEntryState.LOADED and node.runtime_data.device_info
+            info = (
+                node.state is ConfigEntryState.LOADED and node.runtime_data.device_info
+            )
             if not info or instance >= len(info.serial_proxies):
-                raise ConfigEntryNotReady(f"ESPHome at {host} has not listed its proxies yet")
+                raise ConfigEntryNotReady(
+                    f"ESPHome at {host} has not listed its proxies yet"
+                )
             url = str(build_url(node.entry_id, info.serial_proxies[instance].name))
             break
     else:
@@ -295,7 +301,9 @@ def _port_url(hass: HomeAssistant, entry: OptolinkConfigEntry) -> str:
             )
             url = f"esphome://{host}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}/?{query}"
     if url != entry.data.get(CONF_DEVICE):
-        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_DEVICE: url})
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_DEVICE: url}
+        )
     return url
 
 
@@ -554,7 +562,9 @@ def _async_track_manual_changes(hass: HomeAssistant) -> None:
 
     @callback
     def _is_enabled_state_change(event_data: er.EventEntityRegistryUpdatedData) -> bool:
-        return event_data["action"] == "update" and "disabled_by" in event_data["changes"]
+        return (
+            event_data["action"] == "update" and "disabled_by" in event_data["changes"]
+        )
 
     @callback
     def _async_changed(event: Event[er.EventEntityRegistryUpdatedData]) -> None:
@@ -574,7 +584,9 @@ def _async_track_manual_changes(hass: HomeAssistant) -> None:
             and event.data["changes"]["disabled_by"] in from_hand_or_us
         ):
             entity_reg.async_update_entity_options(
-                entity_id, DOMAIN, {**reg_entry.options.get(DOMAIN, {}), MANUAL_OPTION: True}
+                entity_id,
+                DOMAIN,
+                {**reg_entry.options.get(DOMAIN, {}), MANUAL_OPTION: True},
             )
 
     hass.bus.async_listen(
@@ -681,7 +693,9 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
                     ours["id"], {"res_type": "module", "url": url}
                 )
         except Exception as err:
-            _LOGGER.warning("Could not register the dashboard cards as a resource: %s", err)
+            _LOGGER.warning(
+                "Could not register the dashboard cards as a resource: %s", err
+            )
 
     async_when_setup(hass, "lovelace", _register)
 

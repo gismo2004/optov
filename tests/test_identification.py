@@ -60,7 +60,10 @@ def test_the_extensionless_variant_is_the_catch_all():
 
 def test_f0_only_counts_for_the_devices_that_carry_it():
     # Device byte 0xC2 and software index >= 200 -- the only case where F0 is read.
-    candidates = [variant("A", "01C8", f0=3, f0_till=3), variant("B", "01C8", f0=7, f0_till=9)]
+    candidates = [
+        variant("A", "01C8", f0=3, f0_till=3),
+        variant("B", "01C8", f0=7, f0_till=9),
+    ]
     assert _select_variant(candidates, 0x01, 0xC8, 8, 0xC2)["model"] == "B"
     # Same rows, an ordinary device byte: F0 is ignored and the extension decides, first row.
     assert _select_variant(candidates, 0x01, 0xC8, 8, 0x98)["model"] == "A"

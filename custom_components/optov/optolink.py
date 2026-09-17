@@ -72,6 +72,8 @@ class UnsupportedProtocol(Exception):
         super().__init__(
             f"System ID 0x{sys_id:04X} is not driven over Optolink by this integration"
         )
+
+
 # Wire bytes a read of `length` costs, as the bus-load figures count them: P300 sends a framed
 # telegram and an acknowledgement in each direction, KW four bytes and the bare answer.
 PROTO_OVERHEAD = {PROTO_P300: 18, PROTO_KW: 4}
@@ -284,7 +286,9 @@ class _Link(asyncio.Protocol):
         # replaced or closed on purpose has already been let go.
         client = self._client
         if client._link is self:
-            _LOGGER.warning("%s ended the connection%s", client.name, f": {exc}" if exc else "")
+            _LOGGER.warning(
+                "%s ended the connection%s", client.name, f": {exc}" if exc else ""
+            )
             client._link = None
             client._synced = False
 
@@ -330,7 +334,9 @@ class OptolinkClient:
             return
         # Left over from an opening that has since ended; it would stay subscribed otherwise.
         self._close_locked()
-        _LOGGER.info("Opening the serial port of %s over %s", self.name, self.url.split(":")[0])
+        _LOGGER.info(
+            "Opening the serial port of %s over %s", self.name, self.url.split(":")[0]
+        )
         link = _Link(self)
         transport, _ = await serialx.create_serial_connection(
             asyncio.get_running_loop(),
@@ -344,7 +350,9 @@ class OptolinkClient:
         try:
             # The node's name is part of every unique id (OptolinkCoordinator.stable_id), so a
             # port whose node does not describe itself is not used rather than renamed.
-            self.esphome_info = await transport.get_extra_info("serial")._api.device_info()
+            self.esphome_info = await transport.get_extra_info(
+                "serial"
+            )._api.device_info()
         except Exception:
             self._close_locked()
             raise
@@ -466,7 +474,11 @@ class OptolinkClient:
                 self._synced = True
                 _LOGGER.debug("Optolink P300 protocol synchronized.")
                 return
-            if len(window) == 1 and window[0] in (ENQ, ACK, NACK) and init_sent_at is None:
+            if (
+                len(window) == 1
+                and window[0] in (ENQ, ACK, NACK)
+                and init_sent_at is None
+            ):
                 # ENQ is the controller offering; ACK or NACK straight after our EOT means it is
                 # listening already. Either way the init goes out now, and only now.
                 self._transport.write(bytes([0x16, 0x00, 0x00]))
@@ -760,7 +772,9 @@ class OptolinkClient:
                 except (OSError, serialx.SerialException) as err:
                     # After the clause above: timeouts and ConnectionError are OSErrors too.
                     if self._link is not None:
-                        _LOGGER.warning("Lost the connection to %s: %s", self.name, _reason(err))
+                        _LOGGER.warning(
+                            "Lost the connection to %s: %s", self.name, _reason(err)
+                        )
                     self._close_locked()
                     if attempt == 1:
                         raise
