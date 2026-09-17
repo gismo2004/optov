@@ -41,7 +41,7 @@ custom_components/optov/
   brand/           the mark and wordmark, SVG sources and PNG renders
 hacs.json          HACS metadata
 tests/             what runs without hardware: decoder, conversions, faults, the card
-docs/              README images of the dashboard cards
+docs/              the documentation pages the README links to, and its images
 work/              git-ignored playground: deployment scripts, scratch data, throwaway probes
 ```
 
