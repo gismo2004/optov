@@ -39,15 +39,15 @@ class OrphanedStatisticsFlow(RepairsFlow):
     async def async_step_ignore(
         self, user_input: dict[str, Any] | None = None
     ) -> data_entry_flow.FlowResult:
-        """Keep the statistics and hide the repair.
+        """Keep the statistics and stop asking about these ones.
 
-        Hidden for as long as this issue exists: it is withdrawn once nothing is left to
-        delete, and a later tier switch raises it afresh, which un-hides it.
+        The question returns only when a later tier switch adds series that were not part of
+        this set; see orphaned_statistics.async_remember_ignored.
         """
         if self._entry:
-            ir.async_ignore_issue(
-                self.hass, DOMAIN, orphaned_statistics.issue_id(self._entry), True
-            )
+            await orphaned_statistics.async_remember_ignored(self.hass, self._entry)
+        # Finishing a flow makes Home Assistant delete the issue, flags and all, which is why
+        # the choice is remembered in the integration's own store rather than as its Ignore.
         return self.async_create_entry(title="", data={})
 
     async def async_step_confirm(

@@ -210,7 +210,7 @@
     },
     "orphaned_statistics": {
       "title": "Statistiken abgeschalteter Entitäten",
-      "description": "{count} Entitäten von {name}, die diese Integration abgeschaltet hat, etwa durch eine niedrigere Stufe, haben noch Langzeitstatistiken. Home Assistant behält sie, damit eine wieder eingeschaltete Entität ihre Historie fortsetzt, und führt jede einzelne auf seiner Statistikseite auf, bis sie gelöscht wird.\n\nHier lassen sie sich auf einmal löschen. Wer die Stufe wieder einschalten will, lässt sie stehen. Selbst deaktivierte Entitäten sind nicht enthalten.",
+      "description": "{count} Entitäten von {name}, die diese Integration abgeschaltet hat, etwa durch eine niedrigere Stufe, haben noch Langzeitstatistiken ({new} davon seit der letzten Nachfrage). Home Assistant behält sie, damit eine wieder eingeschaltete Entität ihre Historie fortsetzt, und führt jede einzelne auf seiner Statistikseite auf, bis sie gelöscht wird.\n\nHier lassen sie sich auf einmal löschen, oder behalten: dann kommt die Frage erst wieder, wenn eine spätere Stufenänderung weitere hinzufügt. Selbst deaktivierte Entitäten sind nicht enthalten.",
       "fix_flow": {
         "step": {
           "confirm": {
@@ -219,10 +219,10 @@
           },
           "init": {
             "title": "Statistiken abgeschalteter Entitäten",
-            "description": "{count} abgeschaltete Entitäten haben noch Langzeitstatistiken. Jetzt löschen, oder behalten und diese Reparatur ausblenden.",
+            "description": "{count} abgeschaltete Entitäten haben noch Langzeitstatistiken, {new} davon neu seit der letzten Nachfrage. Jetzt löschen, oder behalten und erst wieder gefragt werden, wenn weitere hinzukommen.",
             "menu_options": {
               "confirm": "Statistiken löschen",
-              "ignore": "Behalten und diese Reparatur ausblenden"
+              "ignore": "Behalten; erst bei weiteren wieder fragen"
             }
           }
         }

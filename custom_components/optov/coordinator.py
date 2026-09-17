@@ -610,6 +610,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._store is not None:
             self._store.async_delay_save(lambda: self._learned, _SAVE_DELAY)
 
+    def save_learned(self, **values: Any) -> None:
+        """The same, for facts other modules learn about this controller (see orphaned_statistics)."""
+        self._save_learned(**values)
+
     @property
     def learned(self) -> dict[str, Any]:
         """What this controller taught us, as it sits in its store. For diagnostics."""

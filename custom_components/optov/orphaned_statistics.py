@@ -74,8 +74,30 @@ async def async_clear(hass: HomeAssistant, statistic_ids: list[str]) -> None:
         )
 
 
+LEARNED_KEY = "ignored_statistics"
+
+
+def _ignored(entry: OptolinkConfigEntry) -> set[str]:
+    """The series the user chose to keep, remembered with the controller's other learned facts."""
+    return set(entry.runtime_data.coordinator.learned.get(LEARNED_KEY) or [])
+
+
+async def async_remember_ignored(
+    hass: HomeAssistant, entry: OptolinkConfigEntry
+) -> None:
+    """Keep the current orphans and stop asking about them.
+
+    Remembered by id, not as a flag: the question comes back only when a later tier switch
+    adds series that were not in the set, and switching a tier on again, which only shrinks
+    the set, keeps quiet. Kept in the controller's own store, so a reload or a restart of
+    Home Assistant does not ask again either.
+    """
+    orphans = await async_orphaned_ids(hass, entry)
+    entry.runtime_data.coordinator.save_learned(**{LEARNED_KEY: orphans})
+
+
 async def async_update_issue(hass: HomeAssistant, entry: OptolinkConfigEntry) -> None:
-    """Raise the repair when there is something to delete, withdraw it when there is not.
+    """Raise the repair when there is something new to delete, withdraw it otherwise.
 
     Called after every setup, which is also where a tier switch ends up: switching entities
     off reloads the entry, and so does switching them on, thirty seconds later. Statistics
@@ -84,11 +106,18 @@ async def async_update_issue(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
     """
     # The recorder may be missing or still starting; a repair is not worth failing setup for.
     try:
-        orphans = await async_orphaned_ids(hass, entry)
+        orphans = set(await async_orphaned_ids(hass, entry))
     except Exception as err:
         _LOGGER.debug("Could not look for orphaned statistics: %s", err)
         return
+    ignored = _ignored(entry)
     if not orphans:
+        ir.async_delete_issue(hass, DOMAIN, issue_id(entry))
+        if ignored:
+            # Nothing left to keep quiet about; the next batch is a new question.
+            entry.runtime_data.coordinator.save_learned(**{LEARNED_KEY: []})
+        return
+    if orphans <= ignored:
         ir.async_delete_issue(hass, DOMAIN, issue_id(entry))
         return
     ir.async_create_issue(
@@ -99,6 +128,10 @@ async def async_update_issue(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
         is_persistent=False,
         severity=ir.IssueSeverity.WARNING,
         translation_key=ISSUE_KEY,
-        translation_placeholders={"count": str(len(orphans)), "name": entry.title},
+        translation_placeholders={
+            "count": str(len(orphans)),
+            "new": str(len(orphans - ignored)),
+            "name": entry.title,
+        },
         data={"entry_id": entry.entry_id},
     )

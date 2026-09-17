@@ -210,7 +210,7 @@
     },
     "orphaned_statistics": {
       "title": "Statistics of switched-off entities",
-      "description": "{count} entities of {name} that this integration switched off, for example by lowering a tier, still have long-term statistics. Home Assistant keeps them so that an entity switched on again continues its history, and lists each of them on its statistics page until deleted.\n\nDelete them here in one go, or leave them if you expect to switch the tier back on. Entities you disabled yourself are not included.",
+      "description": "{count} entities of {name} that this integration switched off, for example by lowering a tier, still have long-term statistics ({new} of them since you were last asked). Home Assistant keeps them so that an entity switched on again continues its history, and lists each of them on its statistics page until deleted.\n\nDelete them here in one go, or keep them: then you are asked again only when a later tier switch adds more. Entities you disabled yourself are not included.",
       "fix_flow": {
         "step": {
           "confirm": {
@@ -219,10 +219,10 @@
           },
           "init": {
             "title": "Statistics of switched-off entities",
-            "description": "{count} switched-off entities still have long-term statistics. Delete them now, or keep them and hide this repair.",
+            "description": "{count} switched-off entities still have long-term statistics, {new} of them new since you were last asked. Delete them now, or keep them and be asked again only when more are added.",
             "menu_options": {
               "confirm": "Delete the statistics",
-              "ignore": "Keep them and hide this repair"
+              "ignore": "Keep them; ask again only when more are added"
             }
           }
         }
