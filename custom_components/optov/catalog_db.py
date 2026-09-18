@@ -1519,14 +1519,20 @@ def _place_datapoint(
     if c:
         entry["circuit"] = c
 
-    # Check for status nibble sibling on same address
-    status_sibling = next(
-        (
-            s
-            for s in siblings
-            if s.get("bit_length", 0) > 0 and s["id"] in inputs.enums_by_et
-        ),
-        None,
+    # A full-width value takes the health nibble that shares its address. A bit-field takes
+    # none: it would only find itself, or a neighbouring flag in the same register, and read
+    # its own 1 as a fault.
+    status_sibling = (
+        None
+        if bit_length
+        else next(
+            (
+                s
+                for s in siblings
+                if s.get("bit_length", 0) > 0 and s["id"] in inputs.enums_by_et
+            ),
+            None,
+        )
     )
     if status_sibling is not None:
         entry["status_bit_start"] = status_sibling.get("bit_start", 0)
