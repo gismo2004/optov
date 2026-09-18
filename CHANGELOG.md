@@ -12,9 +12,13 @@ commits.
 
 ### Added
 - A second fault-history sensor on boilers with a burner automat: the automat's own fault
-  records, with the texts of the automat that is fitted. Needs a catalog built with
-  VExtractor 0.1.3 or newer for the texts; older catalogs show the bare codes. Untested on
-  hardware so far.
+  records, with the texts of the automat that is fitted. The texts need a catalog of structure
+  version 2, built with VExtractor 0.1.3 or newer; an older catalog shows the bare codes.
+  Untested on hardware so far.
+- A repair that says when the catalog an entry runs on is older than the structure this
+  version is written for. Such a catalog keeps working, minus what was added since; the
+  repair names the version and goes away once the entry starts on a rebuilt one. A catalog
+  the integration cannot read at all still fails setup with the message it always had.
 - A repair that offers to delete the long-term statistics of entities a tier switch turned
   off, which Home Assistant otherwise lists one by one on its statistics page, or to keep
   them and hide the repair. The same

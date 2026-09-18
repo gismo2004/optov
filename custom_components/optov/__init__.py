@@ -30,6 +30,7 @@ from homeassistant.exceptions import (
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.setup import async_when_setup
 
@@ -130,7 +131,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
     # update to this integration can need a catalog newer than the one already in place, and a
     # catalog can be copied in by hand without ever passing through the upload.
     try:
-        await hass.async_add_executor_job(catalog_db.check_catalog, coordinator_db_path)
+        schema_version = await hass.async_add_executor_job(
+            catalog_db.check_catalog, coordinator_db_path
+        )
     except catalog_db.CatalogSchemaError as err:
         raise ConfigEntryError(
             translation_domain=DOMAIN,
@@ -147,6 +150,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
             translation_key="catalog_unreadable",
             translation_placeholders={"name": os.path.basename(coordinator_db_path)},
         ) from err
+    _async_update_catalog_issue(hass, entry, coordinator_db_path, schema_version)
 
     if not chosen:
         # Settle it now, so that adding a second catalog later cannot change what this
@@ -242,6 +246,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
             await entry.runtime_data.client.disconnect()
         except Exception as err:
             _LOGGER.debug("Disconnect on unload: %s", err)
+        await entry.runtime_data.coordinator.async_flush_learned()
     return unload_ok
 
 
@@ -252,6 +257,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
     left, so without this the catalog of the last controller could never be removed from within
     Home Assistant. Home Assistant still lists the entry being removed, hence the id check.
     """
+    ir.async_delete_issue(hass, DOMAIN, _catalog_issue_id(entry))
+    ir.async_delete_issue(hass, DOMAIN, orphaned_statistics.issue_id(entry))
     if not [
         other
         for other in hass.config_entries.async_entries(DOMAIN)
@@ -276,6 +283,42 @@ async def async_remove_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
         _LOGGER.warning(
             "Could not delete catalog %s of the removed entry: %s", name, err
         )
+
+
+def _catalog_issue_id(entry: OptolinkConfigEntry) -> str:
+    return f"catalog_behind_{entry.entry_id}"
+
+
+@callback
+def _async_update_catalog_issue(
+    hass: HomeAssistant, entry: OptolinkConfigEntry, path: str, version: int
+) -> None:
+    """Say so when the catalog is readable but older than what this code is written for.
+
+    Such a catalog works, minus whatever the catalog gained since it was built, and nothing
+    else would tell the user that a rebuild is due: the missing parts simply stay absent. Not
+    fixable from here, since the rebuild happens outside Home Assistant; withdrawn as soon as
+    an entry starts on a current catalog.
+    """
+    if not catalog_db.schema_behind(version):
+        ir.async_delete_issue(hass, DOMAIN, _catalog_issue_id(entry))
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _catalog_issue_id(entry),
+        is_fixable=False,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        learn_more_url="https://github.com/gismo2004/VExtractor",
+        translation_key="catalog_behind",
+        translation_placeholders={
+            "name": os.path.basename(path),
+            "found": str(version),
+            "needed": str(catalog_db.CATALOG_SCHEMA_VERSION),
+            "title": entry.title,
+        },
+    )
 
 
 def _port_url(hass: HomeAssistant, entry: OptolinkConfigEntry) -> str:

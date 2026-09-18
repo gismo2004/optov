@@ -203,10 +203,15 @@
     "catalog_option": "{name} (version {version}, {controllers} controllers, {languages})",
     "catalog_option_one": "{name} (version {version}, 1 controller, {languages})",
     "catalog_option_outdated": "built for an older version, rebuild it",
+    "catalog_option_behind": "works, but older than this integration; rebuild it to get everything",
     "catalog_option_too_new": "newer than this integration, update the integration",
     "catalog_option_in_use": "in use by {entries}"
   },
   "issues": {
+    "catalog_behind": {
+      "title": "Catalog built for an older structure",
+      "description": "The catalog \"{name}\" that {title} runs on has structure version {found}; this version of the integration is written for {needed}. It still works, but everything the catalog gained since then is missing until it is rebuilt.\n\nRebuild it with the current VExtractor and upload it with Reconfigure on this entry. This message goes away by itself once the entry starts on a current catalog."
+    },
     "dst_mismatch": {
       "title": "Controller: daylight-saving settings",
       "description": "The controller changes over at {configured}, but {zone} changes at {expected}. Each entry reads month/week/weekday, where week 5 means the last one of the month and weekday 7 is Sunday.\n\nThe clock itself is corrected on every poll, so the effect is limited to one poll interval twice a year. To fix it at the source, set the changeover values on the controller, or switch its own changeover off and let Home Assistant keep the time."

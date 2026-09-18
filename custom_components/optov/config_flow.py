@@ -383,8 +383,13 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             languages="/".join(catalog["languages"]),
         )
         if catalog["usable"]:
-            return label
-        note = await async_ui_text(self.hass, f"catalog_option_{self._behind(catalog)}")
+            if not catalog["behind"]:
+                return label
+            note = await async_ui_text(self.hass, "catalog_option_behind")
+        else:
+            note = await async_ui_text(
+                self.hass, f"catalog_option_{self._behind(catalog)}"
+            )
         return f"{label} – {note}"
 
     async def _async_catalog_settled(self) -> ConfigFlowResult:

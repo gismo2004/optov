@@ -37,12 +37,20 @@ CATALOG_FILENAME = "catalog.db"
 # one. Both are checked, because both produce nonsense otherwise -- a missing column raises
 # somewhere deep in a query, and a changed meaning does not raise at all.
 #
-# The compiler writes its own number into `catalog_meta`. Raise this one only together with the
-# compiler's, and only when an older catalog would actually be wrong: a table or column that is
-# now required, a changed meaning, a different key format.
+# The compiler writes its own number into `catalog_meta`; this is the structure this code is
+# written for. Raise it together with the compiler's whenever the catalog gains something this
+# code reads, so that a catalog built before that is reported as behind and the user knows a
+# rebuild is due.
 #
 #   1  level-name key stems on datapoint_defs, catalog_meta itself
-CATALOG_SCHEMA_VERSION = 1
+#   2  fa_error_codes: the fault texts of the burner automats
+CATALOG_SCHEMA_VERSION = 2
+
+# The oldest structure this code still reads. A catalog between the two works, minus what was
+# added since, and raises a repair saying so; one below this fails setup, because a query would
+# be wrong or would not run. Raise it only when an older catalog would actually be wrong: a
+# table or column that is now required, a changed meaning, a different key format.
+CATALOG_SCHEMA_MIN = 1
 
 
 def _ext_label(hw_index: int | None, sw_index: int | None) -> str:
@@ -86,11 +94,23 @@ class CatalogSchemaError(ValueError):
     def __init__(self, found: int | None) -> None:
         self.found = found
         self.needed = CATALOG_SCHEMA_VERSION
-        self.outdated = found is None or found < CATALOG_SCHEMA_VERSION
+        self.outdated = found is None or found < CATALOG_SCHEMA_MIN
         super().__init__(
             f"catalog schema version {found if found is not None else 'absent'}, "
-            f"this integration needs {CATALOG_SCHEMA_VERSION}"
+            f"this integration needs {CATALOG_SCHEMA_MIN} to {CATALOG_SCHEMA_VERSION}"
         )
+
+
+def schema_readable(version: int | None) -> bool:
+    """Whether this code reads a catalog of that structure version at all."""
+    return (
+        version is not None and CATALOG_SCHEMA_MIN <= version <= CATALOG_SCHEMA_VERSION
+    )
+
+
+def schema_behind(version: int | None) -> bool:
+    """Whether a readable catalog was built before the structure this code is written for."""
+    return schema_readable(version) and version < CATALOG_SCHEMA_VERSION
 
 
 # Tab-tree root branch -> entity_category (for organization only).
@@ -259,7 +279,6 @@ def list_catalogs(config_dir: str) -> list[dict[str, Any]]:
         # An unusable one is still listed, so that it is visible and can be replaced. How a
         # catalog is described to a person is translated text and is composed by the setup
         # flow from these facts.
-        usable = version == CATALOG_SCHEMA_VERSION
         found.append(
             {
                 "name": name,
@@ -267,7 +286,8 @@ def list_catalogs(config_dir: str) -> list[dict[str, Any]]:
                 "devices": devices,
                 "languages": languages,
                 "schema_version": version,
-                "usable": usable,
+                "usable": schema_readable(version),
+                "behind": schema_behind(version),
             }
         )
     return found
@@ -364,8 +384,8 @@ def _catalog_name(filename: str) -> str:
     return name
 
 
-def _verify(path: str) -> None:
-    """Raise unless this is a controller catalog this code can read.
+def _verify(path: str) -> int:
+    """Raise unless this is a controller catalog this code can read; else its structure version.
 
     ValueError for something that is not a catalog at all, CatalogSchemaError for one that is
     but was built to a different structure. The caller tells them apart to say something
@@ -394,10 +414,11 @@ def _verify(path: str) -> None:
             if not conn.execute("SELECT 1 FROM devices LIMIT 1").fetchone():
                 raise ValueError("the catalog describes no controllers")
             version = _schema_version(conn)
-            if version != CATALOG_SCHEMA_VERSION:
+            if not schema_readable(version):
                 raise CatalogSchemaError(version)
     except sqlite3.DatabaseError as err:
         raise ValueError(f"not a readable database: {err}") from err
+    return version
 
 
 def _schema_version(conn: sqlite3.Connection) -> int | None:
@@ -441,14 +462,15 @@ def catalog_info(path: str) -> dict[str, Any]:
     }
 
 
-def check_catalog(path: str) -> None:
-    """Raise if this catalog cannot be read by this code. Blocking I/O; use an executor.
+def check_catalog(path: str) -> int:
+    """Raise if this catalog cannot be read by this code; else return its structure version.
 
-    Installing verifies too, but a catalog can also be copied in by hand and an integration
-    update can move the goalposts under one that was fine yesterday, so it is checked again
-    every time an entry starts.
+    Blocking I/O; use an executor. Installing verifies too, but a catalog can also be copied in
+    by hand and an integration update can move the goalposts under one that was fine yesterday,
+    so it is checked again every time an entry starts. The version comes back so the caller can
+    say when a readable catalog is behind.
     """
-    _verify(path)
+    return _verify(path)
 
 
 def _settle_journal(path: str) -> None:

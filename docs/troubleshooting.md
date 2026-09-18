@@ -38,7 +38,9 @@ controller can have its own.
 **"Rebuild the catalog" or "update the integration" at startup.** The catalog and the
 integration are versioned against each other and these two are out of step. Rebuild with the
 current VExtractor and upload the new catalog with **Reconfigure** on the entry, or update the
-integration, whichever the message asks for.
+integration, whichever the message asks for. A repair *Catalog built for an older structure*
+is the mild form of the same thing: the entry runs, but a rebuild would add what the catalog
+has gained since, and the repair goes away by itself once it does.
 
 **The poll cycle is long.** The bus runs at 4800 baud and one datapoint is one round trip of
 about 65 ms. Several hundred enabled datapoints take a couple of cycles per full pass; the

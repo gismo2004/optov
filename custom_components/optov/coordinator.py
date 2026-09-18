@@ -639,6 +639,26 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """The same, for facts other modules learn about this controller (see orphaned_statistics)."""
         self._save_learned(**values)
 
+    async def async_save_learned_now(self, **values: Any) -> None:
+        """Record and write out at once.
+
+        For a fact a person just decided in a dialog: they may reload the entry seconds later,
+        and a reload reads the file while the delayed write is still pending, so the decision
+        would be lost and the question asked again.
+        """
+        self._learned.update(values)
+        if self._store is not None:
+            await self._store.async_save(self._learned)
+
+    async def async_flush_learned(self) -> None:
+        """Write out whatever is still waiting; called when the entry unloads.
+
+        A tier change reloads the entry at once, and anything learned in the ten seconds before
+        it would otherwise be found out again after the reload.
+        """
+        if self._store is not None:
+            await self._store.async_save(self._learned)
+
     @property
     def learned(self) -> dict[str, Any]:
         """What this controller taught us, as it sits in its store. For diagnostics."""

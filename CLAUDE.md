@@ -112,9 +112,12 @@ ones.
 
 `catalog_db.CATALOG_SCHEMA_VERSION` is the structure this code is written against, and the
 compiler writes its own number into the catalog's `catalog_meta` table. They are checked on
-upload and on every setup, in both directions, so an old catalog under a new integration and a
-new catalog under an old one each get a message naming the side that is behind. Raise it only
-together with the compiler's constant, and only when an older catalog would actually be wrong.
+upload and on every setup. A catalog newer than the code fails with a message saying to update
+the integration. A catalog older than the code but not older than `CATALOG_SCHEMA_MIN` runs,
+minus what the catalog gained since, and raises the `catalog_behind` repair saying a rebuild
+is due; one older than the minimum fails setup. Raise the version together with the compiler's
+constant whenever the catalog gains something this code reads; raise the minimum only when an
+older catalog would actually be wrong or unreadable.
 
 The *Catalog* diagnostic sensor on the gateway device shows that structure version as its state,
 with the file name, controller count and languages as attributes (`catalog_db.catalog_info`).

@@ -93,7 +93,11 @@ async def async_remember_ignored(
     Home Assistant does not ask again either.
     """
     orphans = await async_orphaned_ids(hass, entry)
-    entry.runtime_data.coordinator.save_learned(**{LEARNED_KEY: orphans})
+    # Written at once, not after the usual delay: a reload right after the dialog would
+    # otherwise read the file before the choice reached it.
+    await entry.runtime_data.coordinator.async_save_learned_now(
+        **{LEARNED_KEY: orphans}
+    )
 
 
 async def async_update_issue(hass: HomeAssistant, entry: OptolinkConfigEntry) -> None:

@@ -26,9 +26,11 @@ it, so keep your copy of the file. The *Catalog* sensor on the Optical interface
 which file and version an entry runs on.
 
 A catalog records the structure it was built to, and the integration checks it on every start.
-If an update needs a newer one you are told to rebuild; if a catalog is newer than the
-integration you are told to update instead. Neither happens silently and there is nothing to
-migrate.
+A catalog older than the integration keeps working, minus whatever the catalog gained since it
+was built, and a repair under *Settings → Repairs* says so until the entry starts on a rebuilt
+one. Only a catalog too old to be read at all stops the entry, with a message to rebuild; a
+catalog newer than the integration asks you to update instead. Neither happens silently and
+there is nothing to migrate.
 
 Addresses, byte order, signedness, bit positions, scaling, enumerations, units, fault texts and
 menu structure are all rows in the catalog, not code. That is what lets a whole controller family

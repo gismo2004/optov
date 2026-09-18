@@ -203,10 +203,15 @@
     "catalog_option": "{name} (Version {version}, {controllers} Regelungen, {languages})",
     "catalog_option_one": "{name} (Version {version}, 1 Regelung, {languages})",
     "catalog_option_outdated": "für eine ältere Version erzeugt, neu erzeugen",
+    "catalog_option_behind": "funktioniert, aber älter als diese Integration; neu erzeugen, um alles zu bekommen",
     "catalog_option_too_new": "neuer als diese Integration, Integration aktualisieren",
     "catalog_option_in_use": "verwendet von {entries}"
   },
   "issues": {
+    "catalog_behind": {
+      "title": "Katalog mit älterer Struktur",
+      "description": "Der Katalog \"{name}\", mit dem {title} läuft, hat Strukturversion {found}; diese Version der Integration ist für {needed} geschrieben. Er funktioniert weiterhin, aber alles, was seither in den Katalog aufgenommen wurde, fehlt, bis er neu erzeugt wird.\n\nMit dem aktuellen VExtractor neu erzeugen und über \"Neu konfigurieren\" an diesem Eintrag hochladen. Die Meldung verschwindet von selbst, sobald der Eintrag mit einem aktuellen Katalog startet."
+    },
     "dst_mismatch": {
       "title": "Regelung: Zeitumstellung",
       "description": "Die Regelung stellt um auf {configured}, {zone} stellt jedoch um auf {expected}. Die Angaben lauten Monat/Woche/Wochentag, wobei Woche 5 die letzte des Monats bedeutet und Wochentag 7 der Sonntag ist.\n\nDie Uhrzeit selbst wird bei jeder Abfrage korrigiert, die Auswirkung beschränkt sich also auf ein Abfrageintervall zweimal im Jahr. Dauerhaft behebbar, indem die Umstellwerte an der Regelung gesetzt werden oder ihre eigene Zeitumstellung abgeschaltet und die Uhrzeit Home Assistant überlassen wird."
