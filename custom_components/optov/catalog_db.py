@@ -786,6 +786,75 @@ def get_error_codes(
         return {r["code"].upper(): r["value"] for r in rows}
 
 
+def _address_int(raw: Any) -> int:
+    text = str(raw)
+    return int(text, 16) if text.lower().startswith("0x") else int(text)
+
+
+def get_gfa_error_history(device_id: int, db_path: str) -> dict[str, Any] | None:
+    """The burner automat's own fault records, and the datapoint that says which automat it is.
+
+    Boilers with a burner automat (Feuerungsautomat) keep its faults apart from the
+    controller's: twenty records of nine bytes, one datapoint each (`FehlerHisFA01` to `20`),
+    in the same layout as the controller's boiler buffer, plus a one-byte `GFA_Kennung` with
+    the automat's chip code. The texts belong to the chip, not to the controller family, so
+    the code is read first and the texts looked up under it (see get_fa_error_codes). Both
+    parts are required; a controller without them has no burner history.
+    """
+    with closing(get_db_connection(db_path)) as conn:
+        records = conn.execute(
+            """SELECT address, byte_length, fc_read FROM datapoints
+               WHERE device_id = ? AND name LIKE '%FehlerHisFA__'
+               ORDER BY address""",
+            (device_id,),
+        ).fetchall()
+        chip = conn.execute(
+            """SELECT address, byte_length, fc_read FROM datapoints
+               WHERE device_id = ? AND name LIKE '%GFA_Kennung' LIMIT 1""",
+            (device_id,),
+        ).fetchone()
+    if not records or not chip:
+        return None
+    entry_bytes = int(records[0]["byte_length"] or 0)
+    if entry_bytes < 1 or any(
+        int(r["byte_length"] or 0) != entry_bytes for r in records
+    ):
+        _LOGGER.debug(
+            "Burner fault records of device %s differ in size; skipped", device_id
+        )
+        return None
+    return {
+        "name": "FehlerHisFA",
+        "addresses": [_address_int(r["address"]) for r in records],
+        "entry_bytes": entry_bytes,
+        "fc_read": records[0]["fc_read"] or "Virtual_READ",
+        "chip_address": _address_int(chip["address"]),
+        "chip_bytes": int(chip["byte_length"] or 1),
+        "chip_fc_read": chip["fc_read"] or "Virtual_READ",
+    }
+
+
+def get_fa_error_codes(chip: str, db_path: str, culture: str = "de") -> dict[str, str]:
+    """{CODE_HEX: text} of the burner automat with this chip code.
+
+    Empty for a catalog built before the table existed: the history is then shown with bare
+    codes, which is still better than nothing, and a rebuilt catalog fills the texts in.
+    """
+    with closing(get_db_connection(db_path)) as conn:
+        try:
+            rows = conn.execute(
+                """SELECT f.code AS code, COALESCE(t.value, f.text_key) AS value
+                   FROM fa_error_codes f
+                   LEFT JOIN translations t
+                          ON t.text_key = f.text_key AND t.culture = ?
+                   WHERE f.chip = ?""",
+                (culture.lower(), chip.upper()),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+        return {r["code"].upper(): r["value"] for r in rows}
+
+
 def _condition_holds(probed_value: int | None, op: str, compare: int) -> bool:
     if probed_value is None:
         return False

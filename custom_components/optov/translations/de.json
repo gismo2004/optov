@@ -96,6 +96,9 @@
       },
       "catalog": {
         "name": "Katalog"
+      },
+      "gfa_error_history": {
+        "name": "Fehlerhistorie Feuerungsautomat"
       }
     }
   },

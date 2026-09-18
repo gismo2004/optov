@@ -96,6 +96,9 @@
       },
       "catalog": {
         "name": "Catalog"
+      },
+      "gfa_error_history": {
+        "name": "Burner fault history"
       }
     }
   },

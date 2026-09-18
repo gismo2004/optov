@@ -29,3 +29,18 @@ def test_the_first_empty_slot_ends_the_history():
 
 def test_nothing_written_yet_is_an_empty_history():
     assert decode_wp_error_history(bytes(24), 8, {}) == []
+
+
+def test_a_burner_automat_record_reads_like_a_boiler_record():
+    # The automat's records share the boiler layout: code, then a BCD timestamp whose fifth
+    # byte is the weekday. Texts come from the automat's own table, keyed by its chip code.
+    from errors import decode_boiler_error_history
+
+    record = bytes([0x04, 0x20, 0x24, 0x09, 0x18, 0x03, 0x07, 0x30, 0x00])
+    history = decode_boiler_error_history(
+        record + bytes(9), 9, {"04": "4: Keine Flammenbildung"}
+    )
+    assert len(history) == 1
+    assert history[0]["code"] == "04"
+    assert history[0]["description"] == "4: Keine Flammenbildung"
+    assert history[0]["timestamp_str"] == "2024-09-18 07:30:00"

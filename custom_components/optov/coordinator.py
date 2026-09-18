@@ -271,6 +271,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # history is a valid answer -- a controller that never had a fault -- so emptiness
         # cannot stand in for "not fetched yet".
         self._error_history_loaded = False
+        # The burner automat's separate fault buffer, on boilers that have one. Its texts
+        # depend on which automat is fitted, so the chip code is read once before the records.
+        self.gfa_error_history: list[dict[str, Any]] = []
+        self._gfa_dp: dict[str, Any] | None = None
+        self._gfa_chip: str | None = None
+        self._fa_codes: dict[str, str] = {}
+        self._gfa_loaded = False
+        self._gfa_poll_ticks = 0
         # The latest run of each periodic background job, so a run that is still going is not
         # joined by another. See _start_job().
         self._jobs: dict[str, asyncio.Task] = {}
@@ -452,6 +460,23 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning(
                     "Could not resolve error-history catalog entry: %s", err
                 )
+
+        self._gfa_dp = None
+        if device_id is not None:
+            try:
+                self._gfa_dp = await self.hass.async_add_executor_job(
+                    catalog_db.get_gfa_error_history, device_id, self.db_path
+                )
+            except Exception as err:
+                _LOGGER.warning("Could not resolve burner fault history: %s", err)
+        if self._gfa_dp:
+            _LOGGER.info(
+                "Burner fault history: %d records of %d bytes from 0x%04X, chip code at 0x%04X",
+                len(self._gfa_dp["addresses"]),
+                self._gfa_dp["entry_bytes"],
+                self._gfa_dp["addresses"][0],
+                self._gfa_dp["chip_address"],
+            )
 
         if self._error_history_dp:
             _LOGGER.info(
@@ -1184,6 +1209,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not self._error_history_loaded or (self._error_poll_ticks % 60 == 0):
                 self._start_job("faults", self.async_refresh_error_history)
             self._error_poll_ticks += 1
+        if self._gfa_dp:
+            if not self._gfa_loaded or (self._gfa_poll_ticks % 60 == 0):
+                self._start_job("burner_faults", self.async_refresh_gfa_error_history)
+            self._gfa_poll_ticks += 1
 
         # Learn what a read actually costs on this link, so the next cycle's slice is sized
         # from measurement rather than the compiled-in estimate. Smoothed, because a single
@@ -1956,6 +1985,53 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("Could not refresh programme %s: %s", key, err)
 
         self.async_update_listeners()
+
+    async def async_refresh_gfa_error_history(self) -> None:
+        """Fetch and decode the burner automat's fault records.
+
+        The records share the boiler buffer's layout (fault code, then a BCD timestamp), but
+        the texts are the automat's, keyed by its chip code, so that one byte is read first
+        and the texts loaded for it once. The records are separate datapoints and are read one
+        by one at the addresses the catalog gives; nothing assumes they sit back to back.
+        """
+        dp = self._gfa_dp
+        if not dp:
+            return
+        try:
+            if self._gfa_chip is None:
+                raw = await self.client.read_raw(
+                    dp["chip_address"],
+                    dp["chip_bytes"],
+                    optolink.function_code(dp["chip_fc_read"]),
+                )
+                self._gfa_chip = raw.hex().upper()
+                self._fa_codes = await self.hass.async_add_executor_job(
+                    catalog_db.get_fa_error_codes,
+                    self._gfa_chip,
+                    self.db_path,
+                    self._language,
+                )
+                _LOGGER.info(
+                    "Burner automat chip %s: %d fault texts",
+                    self._gfa_chip,
+                    len(self._fa_codes),
+                )
+            fc = optolink.function_code(dp["fc_read"])
+            records = [
+                await self.client.read_raw(address, dp["entry_bytes"], fc)
+                for address in dp["addresses"]
+            ]
+            entries = decode_boiler_error_history(
+                b"".join(records),
+                entry_bytes=dp["entry_bytes"],
+                error_codes=self._fa_codes,
+            )
+            self.gfa_error_history = entries
+            self._gfa_loaded = True
+            _LOGGER.debug("Refreshed burner fault history: %d entries", len(entries))
+            self.async_update_listeners()
+        except Exception as err:
+            _LOGGER.warning("Could not refresh the burner fault history: %s", err)
 
     async def async_refresh_error_history(self) -> None:
         """Fetch and decode the controller's error-history buffer.

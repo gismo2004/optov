@@ -59,12 +59,12 @@ async def async_setup_entry(
         )
     )
 
-    # Error history sensor under main heating controller
-    entities.append(
-        OptolinkErrorHistorySensor(
-            coordinator, entry, await async_ui_text(hass, "no_faults")
-        )
-    )
+    # Fault history sensors under the main heating controller: the controller's own buffer,
+    # and on boilers with a burner automat that automat's separate one.
+    empty_text = await async_ui_text(hass, "no_faults")
+    entities.append(OptolinkErrorHistorySensor(coordinator, entry, empty_text))
+    if coordinator._gfa_dp:
+        entities.append(OptolinkGfaErrorHistorySensor(coordinator, entry, empty_text))
 
     # A stable entity id, so a reinstall lands on the same ids and keeps its history.
     for entity in entities:
@@ -470,12 +470,16 @@ class OptolinkErrorHistorySensor(CoordinatorEntity[OptolinkCoordinator], SensorE
     _attr_has_entity_name = True
     _attr_translation_key = "error_history"
     _attr_icon = "mdi:history"
+    # What distinguishes the two fault histories: where the entries come from and how the
+    # entity is named. The burner variant below overrides these and nothing else.
+    _unique_suffix = "fehlerhistorie"
+    _object_id_words = "fault history"
 
     def __init__(
         self, coordinator: OptolinkCoordinator, entry: ConfigEntry, empty_text: str
     ) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.stable_id}_fehlerhistorie"
+        self._attr_unique_id = f"{coordinator.stable_id}_{self._unique_suffix}"
         self._attr_device_info = coordinator.get_device_info(None)
         # The one state this integration words itself; every other state is catalog text.
         # Taken from the integration's translations in the user's Home Assistant language.
@@ -484,7 +488,20 @@ class OptolinkErrorHistorySensor(CoordinatorEntity[OptolinkCoordinator], SensorE
     @property
     def object_id_hint(self) -> str:
         """Entity id built from the model rather than the device's display name."""
-        return self.coordinator.object_id(None, "fault history")
+        return self.coordinator.object_id(None, self._object_id_words)
+
+    @property
+    def _entries(self) -> list[dict[str, Any]]:
+        return self.coordinator.error_history
+
+    @property
+    def _definition(self) -> dict[str, Any]:
+        """The buffer as read: name, address, size, element count, function code."""
+        return self.coordinator._error_history_dp or {}
+
+    @property
+    def _known_codes(self) -> int:
+        return len(self.coordinator._error_codes)
 
     @property
     def native_value(self) -> str:
@@ -494,9 +511,9 @@ class OptolinkErrorHistorySensor(CoordinatorEntity[OptolinkCoordinator], SensorE
         and is not necessarily an active fault. Without the date the state reads like a
         current alarm. HA truncates states at 255 chars; the full list is in `entries`.
         """
-        if not self.coordinator.error_history:
+        if not self._entries:
             return self._empty_text
-        latest = self.coordinator.error_history[0]
+        latest = self._entries[0]
         desc = latest.get("description") or latest.get("code", "")
         stamp = (latest.get("timestamp_str") or "").split(" ")[0]
         return (f"{stamp} - {desc}" if stamp else desc)[:255]
@@ -504,8 +521,8 @@ class OptolinkErrorHistorySensor(CoordinatorEntity[OptolinkCoordinator], SensorE
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the decoded history plus the catalog metadata it was read with."""
-        dp = self.coordinator._error_history_dp or {}
-        entries = self.coordinator.error_history
+        dp = self._definition
+        entries = self._entries
         return {
             # The controller this belongs to, so a card can head its list with it.
             "device_name": self.coordinator.profile.device_name
@@ -524,5 +541,49 @@ class OptolinkErrorHistorySensor(CoordinatorEntity[OptolinkCoordinator], SensorE
             "buffer_entries": dp.get("block_factor"),
             "entry_bytes": dp.get("entry_bytes"),
             "read_function": dp.get("fc_read"),
-            "known_codes": len(self.coordinator._error_codes),
+            "known_codes": self._known_codes,
+        }
+
+
+class OptolinkGfaErrorHistorySensor(OptolinkErrorHistorySensor):
+    """The burner automat's fault records, on boilers that have one.
+
+    A second history next to the controller's own, in the same shape, so the fault-history
+    card lists it like the first. Its texts are the automat's, chosen by the chip code the
+    boiler reports, which is published as an attribute.
+    """
+
+    _attr_translation_key = "gfa_error_history"
+    _attr_icon = "mdi:fire-alert"
+    _unique_suffix = "fehlerhistorie_fa"
+    _object_id_words = "burner fault history"
+
+    @property
+    def _entries(self) -> list[dict[str, Any]]:
+        return self.coordinator.gfa_error_history
+
+    @property
+    def _definition(self) -> dict[str, Any]:
+        dp = self.coordinator._gfa_dp or {}
+        if not dp:
+            return {}
+        count = len(dp["addresses"])
+        return {
+            "name": dp["name"],
+            "address": dp["addresses"][0],
+            "total_bytes": count * dp["entry_bytes"],
+            "block_factor": count,
+            "entry_bytes": dp["entry_bytes"],
+            "fc_read": dp["fc_read"],
+        }
+
+    @property
+    def _known_codes(self) -> int:
+        return len(self.coordinator._fa_codes)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            **super().extra_state_attributes,
+            "burner_chip": self.coordinator._gfa_chip,
         }

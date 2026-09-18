@@ -72,6 +72,7 @@ GATEWAY_SENSORS = (
     "catalog",
 )
 FAULT_HISTORY_SENSOR = "fehlerhistorie"
+GFA_FAULT_HISTORY_SENSOR = "fehlerhistorie_fa"
 
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -538,7 +539,7 @@ def _expected_entities(
             expected[(domain, f"{prefix}{item['id']}")] = item
     for key in profile.schedules:
         expected[("sensor", f"{prefix}schaltzeiten_{key}")] = None
-    for suffix in (*GATEWAY_SENSORS, FAULT_HISTORY_SENSOR):
+    for suffix in (*GATEWAY_SENSORS, FAULT_HISTORY_SENSOR, GFA_FAULT_HISTORY_SENSOR):
         expected[("sensor", f"{prefix}{suffix}")] = None
     return expected
 

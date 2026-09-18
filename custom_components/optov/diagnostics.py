@@ -75,4 +75,10 @@ async def async_get_config_entry_diagnostics(
             "entries": len(coordinator.error_history),
             "latest": coordinator.last_error,
         },
+        "burner_faults": {
+            "present": coordinator._gfa_dp is not None,
+            "chip": coordinator._gfa_chip,
+            "known_codes": len(coordinator._fa_codes),
+            "entries": len(coordinator.gfa_error_history),
+        },
     }

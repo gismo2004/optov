@@ -14,11 +14,20 @@ Binary buffer layouts, as used by the controller families this integration suppo
 3. Classic Boiler (Buffer 0x7507 'Error', 90 bytes = 10 entries x 9 bytes):
    - Entry Byte 0: Error code byte in Hex (0x00 = empty slot)
    - Entry Bytes 1..8: BCD-encoded timestamp (YYYY MM DD hh mm ss)
+
+4. Burner automat on a boiler ('FehlerHisFA01'..'20', twenty 9-byte datapoints):
+   - Same layout as 3, decoded by the same function; the texts are the automat's own,
+     keyed by the chip code the boiler reports (catalog table fa_error_codes).
 """
 
 import logging
 from datetime import UTC, datetime
 from typing import Any
+
+try:
+    from .conversions import decode_datetime_bcd
+except ImportError:  # imported directly by the tests, without a parent package
+    from conversions import decode_datetime_bcd
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -118,8 +127,6 @@ def decode_boiler_error_history(
     - bytes 1..8: BCD timestamp, where byte 5 is the weekday and is skipped
       (year = bytes 1+2, month = 3, day = 4, hour = 6, minute = 7, second = 8)
     """
-    from .conversions import decode_datetime_bcd
-
     entries: list[dict[str, Any]] = []
     total_entries = len(raw_bytes) // entry_bytes
 
