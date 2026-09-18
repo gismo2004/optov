@@ -25,6 +25,14 @@ commits.
   operation is the service `optov.clear_orphaned_statistics`, which can also take entities
   disabled by hand.
 
+### Fixed
+- Read-only single-bit readings are entities again: relay states (the electric heater's
+  stages, the heating/hot-water valve), the device status flags (heating period, party, eco,
+  holiday, frost protection) and the digital inputs of the diagnosis page. They were dropped
+  by the rule that folds a value's sensor-health nibble into the value, which now only applies
+  to a bit-field that shares its address with a full-width value. On a Vitotronic 200 WO1A this
+  adds 52 sensors, 13 of them on by default because they sit on the controller's overview page.
+
 ### Changed
 - KW is no longer marked experimental: a user confirmed it on a Vitotronic 200 KW2 (0x2098) with
   the full entity set (#1). The code is unchanged; the README and `docs/protocols.md` say so.

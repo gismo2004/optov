@@ -1412,9 +1412,18 @@ def _place_datapoint(
         return
 
     bit_length = dp.get("bit_length", 0)
-    if bit_length > 0 and dp.get("entity_kind") == KIND_READONLY:
-        # Read-only bit-fields are the sensor-health nibbles, which ride along with the
-        # value they describe and are surfaced through its availability instead.
+    siblings = inputs.by_address.get(dp["address"], [])
+    if (
+        bit_length > 0
+        and dp.get("entity_kind") == KIND_READONLY
+        and any(not s.get("bit_length") for s in siblings)
+    ):
+        # A read-only bit-field beside a full-width value at the same address is that
+        # value's sensor-health nibble; it rides along with the value and is surfaced
+        # through its availability instead (see status_sibling below). A read-only
+        # bit-field on its own is a reading in its own right: relay states, the device
+        # status flags, the digital inputs of the diagnosis page all live in single bits
+        # of a register that holds nothing else.
         return
     # Writable bit-fields are real controls and must be exposed -- operating mode, party
     # and eco all live in bits of a shared register. Writing them needs the whole block
@@ -1511,7 +1520,6 @@ def _place_datapoint(
         entry["circuit"] = c
 
     # Check for status nibble sibling on same address
-    siblings = inputs.by_address.get(dp["address"], [])
     status_sibling = next(
         (
             s
