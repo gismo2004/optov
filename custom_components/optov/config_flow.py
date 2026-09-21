@@ -245,6 +245,17 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         finally:
             with contextlib.suppress(Exception):
                 await client.disconnect()
+        # Also in the log, because the catalog it is needed for is built on a computer with the
+        # service software on it. Someone setting up from a phone reads the id here, cannot
+        # upload anything, and leaves; without this the id would leave with the dialog.
+        _LOGGER.info(
+            "Controller on %s reports system id 0x%04X (hardware 0x%02X, software 0x%02X%s)",
+            host,
+            sys_id,
+            hw_index,
+            sw_index,
+            f", identification extension {f0}" if f0 is not None else "",
+        )
         key = "identify_found_f0" if f0 is not None else "identify_found"
         return await async_ui_text(
             self.hass,
@@ -314,8 +325,9 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             "entries": "",
             "needed": str(catalog_db.CATALOG_SCHEMA_VERSION),
             "oldest": str(catalog_db.CATALOG_SCHEMA_MIN),
-            # A blank one must leave no gap in front of the text that follows it.
-            "identified": f"{self._ident} " if self._ident else "",
+            # What the controller said stands on its own, above the text that follows it; a
+            # blank one must leave no gap at all.
+            "identified": f"{self._ident}\n\n" if self._ident else "",
         }
 
         if user_input is not None:

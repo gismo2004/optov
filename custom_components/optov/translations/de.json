@@ -213,8 +213,8 @@
     "catalog_option_behind": "funktioniert, aber älter als diese Integration; neu erzeugen, um alles zu bekommen",
     "catalog_option_too_new": "neuer als diese Integration, Integration aktualisieren",
     "catalog_option_in_use": "verwendet von {entries}",
-    "identify_found": "Diese Regelung meldet System-ID {system_id} (Hardware {hardware}, Software {software}). Den Katalog für diese ID erzeugen.",
-    "identify_found_f0": "Diese Regelung meldet System-ID {system_id} (Hardware {hardware}, Software {software}, Erweiterung {f0}). Den Katalog für diese ID erzeugen.",
+    "identify_found": "### System-ID {system_id}\nHardware {hardware}, Software {software}. Den Katalog für diese ID erzeugen.",
+    "identify_found_f0": "### System-ID {system_id}\nHardware {hardware}, Software {software}, Kennungserweiterung {f0}. Den Katalog für diese ID erzeugen.",
     "identify_failed": "Die Regelung konnte nicht nach ihrer Kennung gefragt werden. Port und Verkabelung prüfen, oder weitergehen und einen Katalog für alle Regelungen erzeugen."
   },
   "issues": {
