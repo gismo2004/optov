@@ -25,7 +25,7 @@
       },
       "catalog": {
         "title": "Controller catalog",
-        "description": "OptoV needs a controller catalog. It is not shipped with the integration: you build it from your own copy of the controller service software with VExtractor, as described in the README under \"The catalog\". Choose one that is already here, or upload a new one.",
+        "description": "OptoV needs a controller catalog. It is not shipped with the integration: you build it from your own copy of the controller service software with VExtractor, as described in the README under \"The catalog\". Choose one that is already here, or upload a new one. This integration needs catalog structure version {needed}; it can still read from version {oldest} on, but an older one leaves parts of the controller out. The version of each catalog is shown beside its name.",
         "data": {
           "catalog": "Use this catalog",
           "catalog_file": "Upload a catalog"
@@ -33,7 +33,7 @@
       },
       "reconfigure": {
         "title": "Controller catalog",
-        "description": "Choose another catalog for this controller, or upload a new build; the integration reloads with it. An upload with the name of a catalog already here replaces that file for every controller using it. Catalogs no controller uses can be ticked for deletion below.",
+        "description": "Choose another catalog for this controller, or upload a new build; the integration reloads with it. An upload with the name of a catalog already here replaces that file for every controller using it. Catalogs no controller uses can be ticked for deletion below. This integration needs catalog structure version {needed}, and reads from version {oldest} on. The version of each catalog is shown beside its name.",
         "data": {
           "catalog": "Use this catalog",
           "catalog_file": "Upload a catalog",

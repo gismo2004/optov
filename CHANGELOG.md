@@ -11,6 +11,9 @@ commits.
 ## [Unreleased]
 
 ### Added
+- The catalog step of the setup and reconfigure flows now names the catalog structure version
+  the integration wants, and the oldest it still reads. The version of each catalog was already
+  shown beside its name, but there was nothing to compare it against without leaving the form.
 - A second fault-history sensor on boilers with a burner automat: the automat's own fault
   records, with the texts of the automat that is fitted. The texts need a catalog of structure
   version 2, built with VExtractor 0.1.3 or newer; an older catalog shows the bare codes.

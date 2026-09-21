@@ -25,7 +25,7 @@
       },
       "catalog": {
         "title": "Regelungs-Katalog",
-        "description": "OptoV benötigt einen Katalog der Regelungen. Er wird nicht mitgeliefert, sondern mit VExtractor aus der eigenen Kopie der Regelungs-Servicesoftware erzeugt; siehe README, Abschnitt \"The catalog\". Einen vorhandenen auswählen oder einen neuen hochladen.",
+        "description": "OptoV benötigt einen Katalog der Regelungen. Er wird nicht mitgeliefert, sondern mit VExtractor aus der eigenen Kopie der Regelungs-Servicesoftware erzeugt; siehe README, Abschnitt \"The catalog\". Einen vorhandenen auswählen oder einen neuen hochladen. Diese Integration benötigt Katalog-Strukturversion {needed}; ab Version {oldest} ist ein Katalog noch lesbar, lässt aber Teile der Regelung aus. Die Version steht neben jedem Katalognamen.",
         "data": {
           "catalog": "Diesen Katalog verwenden",
           "catalog_file": "Katalog hochladen"
@@ -33,7 +33,7 @@
       },
       "reconfigure": {
         "title": "Regelungs-Katalog",
-        "description": "Einen anderen Katalog für diese Regelung wählen oder einen neu erzeugten hochladen; die Integration wird damit neu geladen. Ein hochgeladener Katalog mit dem Namen eines vorhandenen ersetzt diese Datei für alle Regelungen, die sie verwenden. Kataloge, die keine Regelung verwendet, können unten zum Löschen angehakt werden.",
+        "description": "Einen anderen Katalog für diese Regelung wählen oder einen neu erzeugten hochladen; die Integration wird damit neu geladen. Ein hochgeladener Katalog mit dem Namen eines vorhandenen ersetzt diese Datei für alle Regelungen, die sie verwenden. Kataloge, die keine Regelung verwendet, können unten zum Löschen angehakt werden. Diese Integration benötigt Katalog-Strukturversion {needed} und liest ab Version {oldest}. Die Version steht neben jedem Katalognamen.",
         "data": {
           "catalog": "Diesen Katalog verwenden",
           "catalog_file": "Katalog hochladen",

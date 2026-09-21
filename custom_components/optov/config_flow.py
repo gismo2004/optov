@@ -225,7 +225,14 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         users = self._catalog_users() if self._reconfiguring else {}
         errors: dict[str, str] = {}
-        placeholders = {"entries": ""}
+        # The structure version this integration was built against, so that the version shown
+        # against each catalog can be compared with what is wanted without leaving the form.
+        # It is a property of the integration alone, known before any controller is reachable.
+        placeholders = {
+            "entries": "",
+            "needed": str(catalog_db.CATALOG_SCHEMA_VERSION),
+            "oldest": str(catalog_db.CATALOG_SCHEMA_MIN),
+        }
 
         if user_input is not None:
             # Deletions first, so that a catalog picked from the list is one still there, and
