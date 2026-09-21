@@ -11,6 +11,12 @@ commits.
 ## [Unreleased]
 
 ### Added
+- The setup flow can ask the controller which controller it is. When no usable catalog is
+  present -- the position every new user starts from -- it offers to read DeviceIdent over the
+  chosen port and reports the system id, which is what a catalog is built for, before asking for
+  the catalog. The read also consults register 0x00F0 where the identification extension calls
+  for it, so a catalog is not built for the wrong variant. Skippable throughout; nothing about
+  an existing setup changes. Closes #2. Untested on hardware so far.
 - The catalog step of the setup and reconfigure flows now names the catalog structure version
   the integration wants, and the oldest it still reads. The version of each catalog was already
   shown beside its name, but there was nothing to compare it against without leaving the form.

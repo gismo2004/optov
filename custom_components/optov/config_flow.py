@@ -7,6 +7,8 @@ set, so setup stays fast and does not touch a serial link that a previous instan
 be releasing.
 """
 
+import contextlib
+import logging
 import os
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -60,7 +62,10 @@ from .const import (
     DOMAIN,
     option,
 )
+from .optolink import OptolinkClient
 from .translate import async_ui_text
+
+_LOGGER = logging.getLogger(__name__)
 
 CONF_CATALOG_FILE = "catalog_file"
 CONF_DELETE = "delete"
@@ -90,6 +95,10 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         # whether it arrived as an upload, which may have replaced a file of the same name.
         self._catalog: str | None = None
         self._uploaded = False
+        # What the controller said it is, ready to be shown where a catalog is asked for, and
+        # the port it said it on, so it does not have to be picked twice.
+        self._ident: str = ""
+        self._device: str = ""
         # Catalogs deleted on the way, so the closing message can name them.
         self._deleted: list[str] = []
 
@@ -128,9 +137,13 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             if len(catalogs) == 1 and catalogs[0]["usable"]:
                 self._catalog = catalogs[0]["name"]
-            else:
-                # None to use, one that cannot be read, or several with no way to guess which.
+            elif any(c["usable"] for c in catalogs):
+                # Several to choose from: the choice is the user's, and the catalogs are here.
                 return await self.async_step_catalog()
+            else:
+                # Nothing usable is here, so a catalog has to be built -- and it is built for a
+                # system id the controller itself can be asked for. Offer to ask it first.
+                return await self.async_step_identify()
 
         if user_input is not None:
             device = str(user_input[CONF_DEVICE]).strip()
@@ -139,9 +152,16 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self._async_create(device, *self._proxy_of(device), user_input)
 
         languages = await self._async_languages()
+        # A port already picked to ask the controller its identity is offered again here, so
+        # nobody has to find it twice.
+        device_key = (
+            vol.Required(CONF_DEVICE, description={"suggested_value": self._device})
+            if self._device
+            else vol.Required(CONF_DEVICE)
+        )
         schema = vol.Schema(
             {
-                vol.Required(CONF_DEVICE): SerialPortSelector(),
+                device_key: SerialPortSelector(),
                 vol.Optional(CONF_LANGUAGE, default=DEFAULT_LANGUAGE): vol.In(
                     languages
                 ),
@@ -171,6 +191,68 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             node.data.get(CONF_PORT, DEFAULT_PORT),
             names.index(name) if name in names else 0,
             name,
+        )
+
+    async def async_step_identify(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask the controller which controller it is, so a catalog can be built for it.
+
+        A catalog is built for a system id, and without a catalog there is no way to learn that
+        id from the integration -- the one thing a new user needs before anything else works.
+        The read needs no catalog, only the port, so it happens here: four bytes of DeviceIdent
+        and, where the identification extension calls for it, one more register.
+
+        Skipping is allowed throughout. Someone who already knows their id, or whose node is not
+        one Home Assistant holds, goes straight on to the catalog.
+        """
+        if user_input is not None:
+            device = str(user_input.get(CONF_DEVICE) or "").strip()
+            if device and "://" in device:
+                self._device = device
+                self._ident = await self._async_read_ident(device)
+            return await self.async_step_catalog()
+
+        return self.async_show_form(
+            step_id="identify",
+            data_schema=vol.Schema({vol.Optional(CONF_DEVICE): SerialPortSelector()}),
+        )
+
+    async def _async_read_ident(self, device: str) -> str:
+        """The controller's identification as a line of text, or why it could not be read.
+
+        Opened and closed for this one question: the entry does not exist yet, so there is no
+        connection to borrow, and leaving one behind would hold the port against the setup that
+        follows.
+        """
+        host = self._proxy_of(device)[0]
+        client = OptolinkClient(device, host)
+        try:
+            await client.connect()
+            ident = await client.read_raw(0x00F8, 4)
+            sys_id = int.from_bytes(ident[0:2], "big")
+            hw_index, sw_index = ident[2], ident[3]
+            f0 = None
+            if (sys_id & 0xFF) in range(0xC0, 0xCC) and sw_index >= 200:
+                # The same narrow guard the coordinator uses: within this range the system id
+                # alone does not separate the variants, and a catalog built without it can be
+                # built for the wrong one.
+                with contextlib.suppress(Exception):
+                    f0 = int.from_bytes(await client.read_raw(0x00F0, 2), "little")
+        except Exception as err:  # noqa: BLE001 - any failure is reported, none is fatal
+            _LOGGER.debug("Could not identify the controller on %s: %s", host, err)
+            return await async_ui_text(self.hass, "identify_failed")
+        finally:
+            with contextlib.suppress(Exception):
+                await client.disconnect()
+        key = "identify_found_f0" if f0 is not None else "identify_found"
+        return await async_ui_text(
+            self.hass,
+            key,
+            system_id=f"0x{sys_id:04X}",
+            hardware=f"0x{hw_index:02X}",
+            software=f"0x{sw_index:02X}",
+            f0=f0,
         )
 
     async def async_step_catalog(
@@ -232,6 +314,8 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             "entries": "",
             "needed": str(catalog_db.CATALOG_SCHEMA_VERSION),
             "oldest": str(catalog_db.CATALOG_SCHEMA_MIN),
+            # A blank one must leave no gap in front of the text that follows it.
+            "identified": f"{self._ident} " if self._ident else "",
         }
 
         if user_input is not None:

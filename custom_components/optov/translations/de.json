@@ -25,7 +25,7 @@
       },
       "catalog": {
         "title": "Regelungs-Katalog",
-        "description": "OptoV benötigt einen Katalog der Regelungen. Er wird nicht mitgeliefert, sondern mit VExtractor aus der eigenen Kopie der Regelungs-Servicesoftware erzeugt; siehe README, Abschnitt \"The catalog\". Einen vorhandenen auswählen oder einen neuen hochladen. Diese Integration benötigt Katalog-Strukturversion {needed}; ab Version {oldest} ist ein Katalog noch lesbar, lässt aber Teile der Regelung aus. Die Version steht neben jedem Katalognamen.",
+        "description": "{identified}OptoV benötigt einen Katalog der Regelungen. Er wird nicht mitgeliefert, sondern mit VExtractor aus der eigenen Kopie der Regelungs-Servicesoftware erzeugt; siehe README, Abschnitt \"The catalog\". Einen vorhandenen auswählen oder einen neuen hochladen. Diese Integration benötigt Katalog-Strukturversion {needed}; ab Version {oldest} ist ein Katalog noch lesbar, lässt aber Teile der Regelung aus. Die Version steht neben jedem Katalognamen.",
         "data": {
           "catalog": "Diesen Katalog verwenden",
           "catalog_file": "Katalog hochladen"
@@ -38,6 +38,13 @@
           "catalog": "Diesen Katalog verwenden",
           "catalog_file": "Katalog hochladen",
           "delete": "Diese Kataloge löschen"
+        }
+      },
+      "identify": {
+        "title": "Welche Regelung ist das?",
+        "description": "Ein Katalog wird für eine System-ID erzeugt, und die Regelung kann nach ihrer eigenen gefragt werden. Den seriellen Port wählen, an dem sie hängt; OptoV liest die ID aus, damit klar ist, wofür der Katalog zu erzeugen ist. Überspringen, wenn die ID bekannt ist oder der Knoten keiner von Home Assistant ist.",
+        "data": {
+          "device": "Serieller Port"
         }
       }
     },
@@ -205,7 +212,10 @@
     "catalog_option_outdated": "für eine ältere Version erzeugt, neu erzeugen",
     "catalog_option_behind": "funktioniert, aber älter als diese Integration; neu erzeugen, um alles zu bekommen",
     "catalog_option_too_new": "neuer als diese Integration, Integration aktualisieren",
-    "catalog_option_in_use": "verwendet von {entries}"
+    "catalog_option_in_use": "verwendet von {entries}",
+    "identify_found": "Diese Regelung meldet System-ID {system_id} (Hardware {hardware}, Software {software}). Den Katalog für diese ID erzeugen.",
+    "identify_found_f0": "Diese Regelung meldet System-ID {system_id} (Hardware {hardware}, Software {software}, Erweiterung {f0}). Den Katalog für diese ID erzeugen.",
+    "identify_failed": "Die Regelung konnte nicht nach ihrer Kennung gefragt werden. Port und Verkabelung prüfen, oder weitergehen und einen Katalog für alle Regelungen erzeugen."
   },
   "issues": {
     "catalog_behind": {
