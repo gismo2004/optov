@@ -18,7 +18,8 @@ commits.
   chosen port and reports the system id, which is what a catalog is built for, before asking for
   the catalog. The read also consults register 0x00F0 where the identification extension calls
   for it, so a catalog is not built for the wrong variant. Skippable throughout; nothing about
-  an existing setup changes. Closes #2. Untested on hardware so far.
+  an existing setup changes. A controller speaking a protocol OptoV does not drive is named
+  as such instead of being offered a catalog. Closes #2.
 - The catalog step of the setup and reconfigure flows now names the catalog structure version
   the integration wants, and the oldest it still reads. The version of each catalog was already
   shown beside its name, but there was nothing to compare it against without leaving the form.

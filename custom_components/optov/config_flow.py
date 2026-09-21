@@ -34,7 +34,7 @@ from homeassistant.helpers.selector import (
     SerialPortSelector,
 )
 
-from . import catalog_db
+from . import catalog_db, optolink
 from .catalog_db import get_available_languages
 from .const import (
     CONF_CATALOG,
@@ -256,6 +256,12 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             sw_index,
             f", identification extension {f0}" if f0 is not None else "",
         )
+        if sys_id in optolink.FOREIGN_PROTOCOL_IDS:
+            # Identified, but speaking something this integration does not drive. Saying only
+            # the id here would send someone off to build a catalog that can never be used.
+            return await async_ui_text(
+                self.hass, "identify_foreign", system_id=f"0x{sys_id:04X}"
+            )
         key = "identify_found_f0" if f0 is not None else "identify_found"
         return await async_ui_text(
             self.hass,

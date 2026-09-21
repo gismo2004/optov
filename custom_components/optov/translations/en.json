@@ -215,7 +215,8 @@
     "catalog_option_in_use": "in use by {entries}",
     "identify_found": "### System id {system_id}\nHardware {hardware}, software {software}. Build the catalog for that id.",
     "identify_found_f0": "### System id {system_id}\nHardware {hardware}, software {software}, identification extension {f0}. Build the catalog for that id.",
-    "identify_failed": "The controller could not be asked which one it is. Check the port and the wiring, or carry on and build a catalog for all controllers."
+    "identify_failed": "The controller could not be asked which one it is. Check the port and the wiring, or carry on and build a catalog for all controllers.",
+    "identify_foreign": "### System id {system_id}\nThis controller speaks a protocol OptoV does not drive, so a catalog for it would not help. See docs/protocols.md."
   },
   "issues": {
     "catalog_behind": {
