@@ -18,8 +18,9 @@ commits.
   fifteen programmes, sixty telegrams a cycle, forever, and no programme ever showed. The
   address rule now comes from the programme's catalog type instead of a probe, a block read
   drops to one record per telegram on the first refusal and remembers it, and only a single
-  record that is still refused marks a programme as absent. Three telegrams fewer per
-  programme at startup for everyone.
+  record that is still refused marks a programme as absent. Any refusal counts, not one
+  particular error code: a read spanning several records is a request shape a controller may
+  reject however it likes. Three telegrams fewer per programme at startup for everyone.
 
 ## [0.2.0] - 2026-09-21
 

@@ -927,13 +927,20 @@ class OptolinkClient:
         programme type -- see address_step_bytes(). Record i therefore sits at
         `address + i * record_size // step_bytes`.
 
-        How many records one telegram may carry differs between controllers. One accepts any
-        whole number of records up to the telegram limit, so 56 three-byte records cost four
-        telegrams; another refuses anything beyond a single record. The read starts with the
-        large chunks and, on the first ERR_BAD_RANGE, drops to one record per telegram for that
-        datapoint and remembers it, so the refusal costs one telegram once. A single record
-        that is still refused is a datapoint this controller does not have, and that error is
-        left to the caller.
+        How many records one telegram may carry differs between controllers, and nothing we
+        can read tells us in advance which kind we are talking to. A multi-record read asks
+        for a byte count that spans several address steps, and since an address step is a
+        record (or three bytes) rather than a byte, that is a request no single-record reader
+        ever produces: a controller that serves addresses as plain memory answers it, one that
+        checks the request against its own datapoint table refuses it. Both are seen in the
+        field on the same catalog entry.
+
+        So the read starts with the large chunks -- 56 three-byte records in four telegrams
+        instead of 56 -- and treats *any* refusal of a multi-record read as "one at a time",
+        dropping to single records for that datapoint and remembering it. The refusal then
+        costs one telegram once per session, and what follows is exactly the single-record
+        sequence. A single record that is still refused is a datapoint this controller does
+        not have, and that error is left to the caller.
         """
         if block_factor < 1 or block_length < 1 or block_length % block_factor:
             raise ValueError(
@@ -963,15 +970,21 @@ class OptolinkClient:
             try:
                 chunk = await self.read_raw(address + offset, n * record_size, fc)
             except OptolinkDeviceError as err:
-                if err.code != ERR_BAD_RANGE or n == 1:
+                if n == 1:
                     raise
-                # This controller wants one record per telegram; from here on, and next time.
+                # Any refusal of a multi-record read is taken as "this controller wants them
+                # one at a time", whatever code it chose: the request shape is one the
+                # protocol never otherwise produces (see above), so there is no documented
+                # answer to expect. A single record is the shape the controller is certain to
+                # recognise, and if that is refused too the error reaches the caller intact.
                 self._single_record_read.add(address)
                 per_telegram = 1
                 _LOGGER.info(
-                    "0x%04X refuses %d records in one read; reading one per telegram",
+                    "0x%04X refuses %d records in one read (0x%02X); "
+                    "reading one per telegram",
                     address,
                     n,
+                    err.code,
                 )
                 continue
             if len(chunk) != n * record_size:
