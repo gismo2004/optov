@@ -8,19 +8,26 @@ The **Unreleased** section is written as the changes are made, one line per chan
 release is a matter of giving the section a number rather than of reconstructing weeks of
 commits.
 
-## [Unreleased]
+## [0.2.1] - 2026-09-22
 
 ### Fixed
-- Weekly programmes on controllers that take only one record per telegram. A Vitocal 333-G
-  (#3) refuses any block read that spans more than one record, where other controllers
-  accept up to the telegram limit; the integration probed each programme with a two-record
-  read, took the refusal for its own mistake and retried every programme on every poll --
-  fifteen programmes, sixty telegrams a cycle, forever, and no programme ever showed. The
-  address rule now comes from the programme's catalog type instead of a probe, a block read
-  drops to one record per telegram on the first refusal and remembers it, and only a single
-  record that is still refused marks a programme as absent. Any refusal counts, not one
-  particular error code: a read spanning several records is a request shape a controller may
-  reject however it likes. Three telegrams fewer per programme at startup for everyone.
+- Weekly programmes stayed empty on some controllers. Where it happened, every programme
+  card was blank, there was nothing to switch or edit, and the log repeated `Could not
+  refresh programme ...` for all of them on every poll -- fifteen warnings a cycle, for as
+  long as the integration ran. Reported on a Vitocal 333-G (#3); a Vitocal 200 with the same
+  catalog entry was never affected, which is what took a while to explain.
+
+  The cause was how a programme is asked for. A programme is an array of records, too large
+  for one telegram, and controllers disagree about how many records may be fetched at once:
+  some serve any number up to the telegram limit, some accept exactly one. OptoV assumed the
+  first kind, read the refusal as a fault of its own and gave up on the programme, then tried
+  again on the next poll, forever. It now falls back to fetching one record at a time the
+  moment a controller objects, remembers that for the rest of the session, and only treats a
+  programme as genuinely absent when even a single record is refused.
+
+  After updating, the programmes appear by themselves within a poll cycle; nothing needs to
+  be re-added or reconfigured. Controllers that were already working keep the fast path and
+  gain a little: three telegrams fewer per programme at startup.
 
 ## [0.2.0] - 2026-09-21
 
