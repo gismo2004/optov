@@ -1992,10 +1992,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 _LOGGER.debug("Refreshed programme %s (0x%04X)", key, base_addr)
             except optolink.OptolinkDeviceError as err:
-                if err.is_permanent:
+                absent = err.is_permanent or await self._async_schedule_absent(
+                    base_addr, cfg, err, fc
+                )
+                if absent:
                     self._unsupported_schedules.add(key)
                     _LOGGER.info(
-                        "Programme %s (0x%04X) is not implemented on this controller",
+                        "Programme %s (0x%04X) is not available on this controller",
                         key,
                         base_addr,
                     )
@@ -2005,6 +2008,42 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("Could not refresh programme %s: %s", key, err)
 
         self.async_update_listeners()
+
+    async def _async_schedule_absent(
+        self,
+        base_addr: int,
+        cfg: dict[str, Any],
+        err: optolink.OptolinkDeviceError,
+        fc: int,
+    ) -> bool:
+        """Whether a programme that answered ERR_BAD_RANGE is simply not on this controller.
+
+        ERR_BAD_RANGE normally means the request did not match the datapoint's layout, which is
+        our fault and worth a warning. But a controller also answers it for a programme whose
+        equipment it does not have: a Vitocal reporting one for hot water, the circulation pump,
+        the immersion heater, noise reduction and ventilation, while the heating circuits and the
+        buffer at neighbouring addresses -- declared with the identical geometry in the catalog --
+        answer perfectly. Identical geometry rules out a layout mistake.
+
+        Telling the two apart costs one telegram: read the smallest unit the datapoint has. If
+        even that is refused the datapoint is not there, and retrying it every poll only fills
+        the log and spends telegrams on a slow optical link.
+        """
+        if err.code != optolink.ERR_BAD_RANGE:
+            return False
+        block_length, block_factor = cfg.get("block_length"), cfg.get("block_factor")
+        record = (
+            block_length // block_factor
+            if block_length and block_factor
+            else cfg.get("day_bytes", 1)
+        )
+        try:
+            await self.client.read_raw(base_addr, max(1, record), fc)
+        except optolink.OptolinkDeviceError:
+            return True
+        except Exception:
+            return False
+        return False
 
     async def async_refresh_gfa_error_history(self) -> None:
         """Fetch and decode the burner automat's fault records.

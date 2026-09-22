@@ -138,9 +138,14 @@ MSGID_ERROR = 0x03
 #   0x01  address not implemented on this hardware. Returned identically for a datapoint the
 #         catalog lists but this unit does not have, and for a nonsense address. Permanent --
 #         retrying can never succeed.
-#   0x04  address exists but the requested range does not match the controller's own datapoint
-#         layout: a misaligned length (for example a byte count that is not a whole number of
-#         records) or one that overruns into a neighbouring region.
+#   0x04  the requested range does not match the controller's own datapoint layout: a misaligned
+#         length (for example a byte count that is not a whole number of records) or one that
+#         overruns into a neighbouring region. A controller also answers it for a block whose
+#         equipment it does not have, where 0x01 might be expected -- seen on a Vitocal that
+#         refuses the hot water, circulation pump, immersion heater, noise reduction and
+#         ventilation programmes while answering the heating circuits and the buffer at
+#         neighbouring addresses, all declared with the identical geometry. So 0x04 alone does
+#         not prove the request was malformed; read the smallest unit to tell the two apart.
 ERR_NOT_IMPLEMENTED = 0x01
 ERR_BAD_RANGE = 0x04
 

@@ -10,6 +10,14 @@ commits.
 
 ## [Unreleased]
 
+### Fixed
+- A programme the controller has no equipment for is now recognised and left alone. Such a
+  controller answers ERR_BAD_RANGE rather than the expected "not implemented", which the
+  integration read as its own mistake and retried on every poll -- one reporter saw five
+  programmes fail 140 times in twenty minutes, filling the log and spending telegrams on a
+  slow optical link. A single extra read of the datapoint's smallest unit now separates a
+  missing programme from a genuine layout error, and only the latter still warns (#3).
+
 ## [0.2.0] - 2026-09-21
 
 ### Added
