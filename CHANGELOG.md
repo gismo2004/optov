@@ -8,6 +8,17 @@ The **Unreleased** section is written as the changes are made, one line per chan
 release is a matter of giving the section a number rather than of reconstructing weeks of
 commits.
 
+## [Unreleased]
+
+### Added
+- Every catalog-driven entity now carries the controller's own explanation of its datapoint
+  as a `description` attribute. The catalog has always held it -- 1252 of this controller's
+  1328 datapoints have text -- and the integration was already reading it and throwing it
+  away. A coding parameter's name tells you what it is called; only this tells you what
+  changing it will do, which for a changeover threshold or a hysteresis is the difference
+  between an informed change and a guess. The text is excluded from the recorder, so it
+  never reaches the database.
+
 ## [0.2.1] - 2026-09-22
 
 ### Fixed

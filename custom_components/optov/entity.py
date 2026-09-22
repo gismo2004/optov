@@ -17,6 +17,9 @@ class OptolinkEntity(CoordinatorEntity[OptolinkCoordinator]):
     """One catalog datapoint of the controller."""
 
     _attr_has_entity_name = False
+    # The description never changes and can run to a couple of thousand characters, so it
+    # would be written to the database on every state change for no benefit at all.
+    _unrecorded_attributes = frozenset({"description"})
 
     def __init__(
         self,
@@ -63,7 +66,17 @@ class OptolinkEntity(CoordinatorEntity[OptolinkCoordinator]):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {
+        """Where the value came from, and what the controller says it means.
+
+        The description is the catalog's own text for the datapoint. A coding parameter's
+        name tells you what it is called; only this tells you what changing it will do, and
+        for the settings that matter -- changeover thresholds, hysteresis, temperature
+        limits -- that is the difference between an informed change and a guess.
+        """
+        attrs: dict[str, Any] = {
             "address": f"0x{self._def['address']:04X}",
             "bytes": self._def["bytes"],
         }
+        if description := self._def.get("description"):
+            attrs["description"] = description
+        return attrs

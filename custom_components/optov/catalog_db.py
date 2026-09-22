@@ -1027,6 +1027,24 @@ def _slug(name: str) -> str:
     return s or "unnamed"
 
 
+# The vendor's own layout markers, which mean nothing outside its service tool.
+_TEXT_MARKERS = re.compile(r"##ecn(?:newline|tab)##")
+
+
+def _description(dp: dict[str, Any]) -> str | None:
+    """The catalog's explanation of what a datapoint does, tidied for display.
+
+    Worth carrying even though nothing in the integration reads it: a coding parameter's
+    name says what it is called, not what changing it will do, and the answer is already in
+    the catalog. Without this the only way to find out is to open the file by hand.
+    """
+    text = dp.get("description")
+    if not text:
+        return None
+    text = " ".join(_TEXT_MARKERS.sub(" ", str(text)).split())
+    return text or None
+
+
 def _number_limits(dp: dict[str, Any], div: float) -> dict[str, Any]:
     """What a writable number may be set to, and in what steps.
 
@@ -1498,6 +1516,8 @@ def _place_datapoint(
         # -- see OptolinkCoordinator._target_interval().
         "priority": dp.get("priority"),
         "tier": tier,
+        # The controller's own words for this datapoint, shown as a state attribute.
+        "description": _description(dp),
         # Base set: what the controller itself puts in front of its user. Plus whichever
         # optional tiers the options have switched on, so diagnostics or coding channels
         # can be brought in for a debugging session and dropped again afterwards.
