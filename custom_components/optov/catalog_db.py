@@ -1699,6 +1699,9 @@ def _schedules(
             "modes": modes,
             "block_length": block_length,
             "block_factor": block_factor,
+            # Says how the address advances from one record to the next; see
+            # optolink.address_step_bytes().
+            "mapping_type": dp.get("mapping_type"),
             "fc_read": dp.get("fc_read"),
             "fc_write": dp.get("fc_write"),
         }

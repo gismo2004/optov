@@ -140,12 +140,12 @@ MSGID_ERROR = 0x03
 #         retrying can never succeed.
 #   0x04  the requested range does not match the controller's own datapoint layout: a misaligned
 #         length (for example a byte count that is not a whole number of records) or one that
-#         overruns into a neighbouring region. A controller also answers it for a block whose
-#         equipment it does not have, where 0x01 might be expected -- seen on a Vitocal that
-#         refuses the hot water, circulation pump, immersion heater, noise reduction and
-#         ventilation programmes while answering the heating circuits and the buffer at
-#         neighbouring addresses, all declared with the identical geometry. So 0x04 alone does
-#         not prove the request was malformed; read the smallest unit to tell the two apart.
+#         overruns into a neighbouring region. How strict that check is differs between
+#         controllers: one Vitocal accepts any whole number of records up to the telegram limit,
+#         another (a 333-G, #3) refuses every read that spans more than one record and takes
+#         exactly one record per telegram. So 0x04 on a multi-record read means "smaller", not
+#         "absent"; only a single-record read that is still refused says the datapoint is not
+#         there. read_block() falls back to single records by itself.
 ERR_NOT_IMPLEMENTED = 0x01
 ERR_BAD_RANGE = 0x04
 
@@ -298,6 +298,37 @@ class _Link(asyncio.Protocol):
             client._synced = False
 
 
+# Programme types whose address advances one step per record, and those whose address
+# advances one step per three bytes. Everything else counts bytes. These come from the
+# catalog's `mapping_type` for the datapoint; the numbers are the catalog's own.
+_STEP_PER_RECORD_TYPES = {2}
+_STEP_PER_THREE_BYTES_TYPES = {5, 6, 7, 8}
+
+
+def address_step_bytes(mapping_type: int | None, record_size: int) -> int:
+    """How many bytes one address step of a block datapoint covers.
+
+    A block datapoint is BlockFactor records, and where record i lives depends on the
+    programme type the catalog assigns it, not on the record size alone:
+
+      bitmap weekly programmes (type 2)     one address per record, so a 7 x 24 byte
+                                            programme occupies seven consecutive addresses
+      phase-coded programmes (types 5-8)    one address per three bytes, so a 56 x 3 byte
+                                            programme occupies 56 consecutive addresses
+      everything else                       the address counts bytes
+
+    Both rules were checked against a live controller: stepping as they say reproduces a
+    contiguous multi-record read exactly, and the next programme starts where they predict
+    (heating circuit 2 at +7, the next phase programme at +56).
+    """
+    mt = int(mapping_type or 0)
+    if mt in _STEP_PER_RECORD_TYPES:
+        return max(1, record_size)
+    if mt in _STEP_PER_THREE_BYTES_TYPES:
+        return 3
+    return 1
+
+
 class OptolinkClient:
     """Speaks P300 to a controller through a serial port that serialx opens from a URL.
 
@@ -323,6 +354,9 @@ class OptolinkClient:
         # Block datapoints whose records the controller insists on receiving one telegram at a
         # time. Learned from its own ERR_BAD_RANGE rather than assumed -- see write_day_schedule().
         self._no_chunked_write: set[int] = set()
+        # The same for reading: datapoints that refused a read spanning several records and
+        # are read one record per telegram from then on -- see read_block().
+        self._single_record_read: set[int] = set()
         # When the next reconnect may be tried (event-loop time), and whether the client was
         # closed on purpose, after which it must never connect again by itself.
         self._reconnect_at = 0.0
@@ -877,44 +911,37 @@ class OptolinkClient:
         address: int,
         block_length: int,
         block_factor: int,
-        record_step: str = "record",
+        step_bytes: int = 1,
         fc: int = FC_VIRTUAL_READ,
     ) -> bytes:
         """Read a whole IdentGroup=Block datapoint and return its concatenated records.
 
         A datapoint with BlockFactor >= 1 is an array rather than a single value, so the
         catalog's `block_factor` column alone carries that distinction -- no extra field is
-        needed. The array is read as BlockFactor sub-reads of BlockLength/BlockFactor bytes.
+        needed. The array is BlockFactor records of BlockLength/BlockFactor bytes, and the
+        controller validates every read against that layout: it refuses a range that is not
+        a whole number of records (ERR_BAD_RANGE) and caps a telegram at MAX_TELEGRAM_PAYLOAD,
+        so a 168-byte datapoint cannot be fetched in one go.
 
-        Two things make this cheaper and more correct than the naive single big read:
+        `step_bytes` says how many bytes one address step covers, which is a property of the
+        programme type -- see address_step_bytes(). Record i therefore sits at
+        `address + i * record_size // step_bytes`.
 
-        * The controller refuses a read whose range does not line up with its own record
-          layout (ERR_BAD_RANGE), and caps a telegram at MAX_TELEGRAM_PAYLOAD. A 168-byte
-          datapoint simply cannot be fetched in one go.
-        * It does, however, happily return *many* records at once. Measured on a live
-          controller, a 168-byte datapoint of 56 three-byte records accepts any multiple of 3
-          up to 54,
-          so the whole datapoint costs 4 telegrams instead of 56 single-record reads.
-
-        `record_step` selects how the address advances between chunks, which is the one thing
-        the catalog does not say:
-
-          "record"  address advances by the number of records consumed. Verified against
-                    hardware for the weekly-schedule datapoints: an address-stepped read
-                    reproduces a contiguous multi-record read exactly, whereas byte-stepping
-                    returns the same records in a different order.
-          "byte"    address advances by the number of bytes consumed.
-
-        The catalog does not record which of the two a given datapoint uses, so rather than
-        guess, callers should use calibrate_record_step() once and pass the measured answer.
+        How many records one telegram may carry differs between controllers. One accepts any
+        whole number of records up to the telegram limit, so 56 three-byte records cost four
+        telegrams; another refuses anything beyond a single record. The read starts with the
+        large chunks and, on the first ERR_BAD_RANGE, drops to one record per telegram for that
+        datapoint and remembers it, so the refusal costs one telegram once. A single record
+        that is still refused is a datapoint this controller does not have, and that error is
+        left to the caller.
         """
         if block_factor < 1 or block_length < 1 or block_length % block_factor:
             raise ValueError(
                 f"invalid block geometry for 0x{address:04X}: "
                 f"{block_length} bytes / {block_factor} records"
             )
-        if record_step not in ("record", "byte"):
-            raise ValueError(f"unknown record_step {record_step!r}")
+        if step_bytes < 1:
+            raise ValueError(f"step_bytes must be positive, got {step_bytes}")
 
         record_size = block_length // block_factor
         if record_size > MAX_TELEGRAM_PAYLOAD:
@@ -922,14 +949,31 @@ class OptolinkClient:
                 f"record size {record_size} of 0x{address:04X} exceeds the "
                 f"{MAX_TELEGRAM_PAYLOAD}-byte telegram limit"
             )
-        per_telegram = (MAX_TELEGRAM_PAYLOAD // record_size) * record_size
+        per_telegram = (
+            1
+            if address in self._single_record_read
+            else (MAX_TELEGRAM_PAYLOAD // record_size)
+        )
 
         result = bytearray()
         done = 0  # records already fetched
         while done < block_factor:
-            n = min(per_telegram // record_size, block_factor - done)
-            offset = done if record_step == "record" else done * record_size
-            chunk = await self.read_raw(address + offset, n * record_size, fc)
+            n = min(per_telegram, block_factor - done)
+            offset = done * record_size // step_bytes
+            try:
+                chunk = await self.read_raw(address + offset, n * record_size, fc)
+            except OptolinkDeviceError as err:
+                if err.code != ERR_BAD_RANGE or n == 1:
+                    raise
+                # This controller wants one record per telegram; from here on, and next time.
+                self._single_record_read.add(address)
+                per_telegram = 1
+                _LOGGER.info(
+                    "0x%04X refuses %d records in one read; reading one per telegram",
+                    address,
+                    n,
+                )
+                continue
             if len(chunk) != n * record_size:
                 raise OptolinkProtocolError(
                     f"0x{address:04X} record {done}: asked for {n * record_size} bytes, "
@@ -948,19 +992,24 @@ class OptolinkClient:
     ) -> str:
         """Ask the controller whether a block datapoint's address counts records or bytes.
 
-        Reads the first two records in one telegram -- which is unambiguous, the controller
-        returns them in order -- then reads one record at `address + 1` and at
-        `address + record_size` and sees which reproduces record 1.
-
-        The catalog does not record which scheme a datapoint uses (see read_block()), so this
-        costs three telegrams once per block datapoint at startup and yields the device's own
-        answer instead of an assumption.
+        Only the fault-history buffers of the boiler family still use this; the weekly
+        programmes take their address rule from the catalog (address_step_bytes()). Reads the
+        first two records in one telegram, then one record at `address + 1` and at
+        `address + record_size` and sees which reproduces record 1. A controller that refuses
+        the two-record read is taken to count bytes, the rule for every type the catalog does
+        not single out, rather than left to fail.
         """
         record_size = block_length // block_factor
         if block_factor < 2 or record_size * 2 > MAX_TELEGRAM_PAYLOAD:
             return "record"
 
-        reference = await self.read_raw(address, record_size * 2, fc)
+        try:
+            reference = await self.read_raw(address, record_size * 2, fc)
+        except OptolinkDeviceError as err:
+            if err.code != ERR_BAD_RANGE:
+                raise
+            self._single_record_read.add(address)
+            return "byte"
         second = reference[record_size : record_size * 2]
 
         by_record = await self.read_raw(address + 1, record_size, fc)
@@ -991,7 +1040,7 @@ class OptolinkClient:
         default_level: int = 0,
         block_length: int | None = None,
         block_factor: int | None = None,
-        record_step: str = "record",
+        step_bytes: int = 1,
         fc: int = FC_VIRTUAL_READ,
     ) -> dict[str, Any]:
         """Read all seven days of a weekly programme.
@@ -1005,7 +1054,7 @@ class OptolinkClient:
         schedule: dict[str, Any] = {}
         if block_length and block_factor:
             raw = await self.read_block(
-                base_address, block_length, block_factor, record_step, fc
+                base_address, block_length, block_factor, step_bytes, fc
             )
             per_day = len(raw) // 7
             _LOGGER.debug(
@@ -1041,15 +1090,14 @@ class OptolinkClient:
         day_bytes: int = 24,
         block_length: int | None = None,
         block_factor: int | None = None,
-        record_step: str = "record",
+        step_bytes: int = 1,
         fc: int = FC_VIRTUAL_WRITE,
     ) -> bool:
         """Write one day of a weekly programme.
 
         A block datapoint is written the way it is read: record by record, at the record's
-        own address, with the address advancing per `record_step` exactly as read_block()
-        advances it -- the controller counts records or bytes and the calibrated answer
-        applies to both directions. For the heat-pump programmes that is one telegram per
+        own address, with the address advancing per `step_bytes` exactly as read_block()
+        advances it -- the address rule of the programme type applies to both directions. For the heat-pump programmes that is one telegram per
         switching window, eight per day. Writing a whole day as one telegram at the base
         address lands on day 0 only.
 
@@ -1075,7 +1123,7 @@ class OptolinkClient:
             )
         records_per_day = day_bytes // record_size
         first = day_index * records_per_day
-        offset = first if record_step == "record" else first * record_size
+        offset = first * record_size // step_bytes
         day_address = base_address + offset
 
         # A day is a run of consecutive records, and the controller reads many records in one
@@ -1100,7 +1148,7 @@ class OptolinkClient:
 
         for i in range(records_per_day):
             index = first + i
-            record_offset = index if record_step == "record" else index * record_size
+            record_offset = index * record_size // step_bytes
             await self.write_raw(
                 base_address + record_offset,
                 raw_data[i * record_size : (i + 1) * record_size],
@@ -1137,6 +1185,8 @@ class OptolinkClient:
                 base_address,
                 record_step,
             )
+        record_size = total_bytes // block_factor if block_factor else 1
+        step_bytes = record_size if record_step == "record" else 1
         return await self.read_block(
-            base_address, total_bytes, block_factor, record_step, function_code
+            base_address, total_bytes, block_factor, step_bytes, function_code
         )

@@ -296,10 +296,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # several entities sharing one register cost one telegram between them. Cleared at the
         # end of every cycle.
         self._cycle_blocks: dict[tuple[int, int, str | None], bytes] = {}
-        # Per-programme result of calibrate_record_step(), measured once on first read.
-        self._schedule_record_step: dict[str, str] = {}
-        # Programmes the controller answered ERR_NOT_IMPLEMENTED for. The catalog lists every
-        # programme of the family; the unit says which ones it has, and it is asked once.
+        # Programmes this controller does not have. The catalog lists every programme of the
+        # family; the unit says which ones it has, and it is asked once.
         self._unsupported_schedules: set[str] = set()
         # Addresses already acted on by _disable_unsupported_entities(), so the registry is
         # touched once per address rather than on every cycle.
@@ -1944,6 +1942,15 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         return in_circuit[0][1] if in_circuit else None
 
+    @staticmethod
+    def _schedule_step_bytes(cfg: dict[str, Any]) -> int:
+        """How the programme's address advances per record, from its catalog type."""
+        block_length, block_factor = cfg.get("block_length"), cfg.get("block_factor")
+        record_size = (
+            block_length // block_factor if block_length and block_factor else 1
+        )
+        return optolink.address_step_bytes(cfg.get("mapping_type"), record_size)
+
     async def async_refresh_schedules(self, schedule: str | None = None) -> None:
         """Fetch one programme, or all of them, from the controller."""
         if not self.profile or not self.profile.schedules:
@@ -1961,25 +1968,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             block_factor = cfg.get("block_factor")
             fc = optolink.function_code(cfg.get("fc_read"))
             try:
-                if (
-                    block_length
-                    and block_factor
-                    and key not in self._schedule_record_step
-                ):
-                    # Determine once, from the controller, whether this datapoint's address
-                    # counts records or bytes; the catalog does not record which
-                    # (see optolink.read_block()).
-                    self._schedule_record_step[
-                        key
-                    ] = await self.client.calibrate_record_step(
-                        base_addr, block_length, block_factor, fc
-                    )
-                    _LOGGER.info(
-                        "Programme %s at 0x%04X uses %s address stepping",
-                        key,
-                        base_addr,
-                        self._schedule_record_step[key],
-                    )
                 self.schedules[key] = await self.client.read_circuit_schedule(
                     base_addr,
                     day_bytes=cfg["day_bytes"],
@@ -1987,15 +1975,16 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     default_level=cfg.get("default_level", 0),
                     block_length=block_length,
                     block_factor=block_factor,
-                    record_step=self._schedule_record_step.get(key, "record"),
+                    step_bytes=self._schedule_step_bytes(cfg),
                     fc=fc,
                 )
                 _LOGGER.debug("Refreshed programme %s (0x%04X)", key, base_addr)
             except optolink.OptolinkDeviceError as err:
-                absent = err.is_permanent or await self._async_schedule_absent(
-                    base_addr, cfg, err, fc
-                )
-                if absent:
+                # read_block() has already dropped to one record per telegram on a bad-range
+                # answer, so a bad range that still arrives here is a single record the
+                # controller refuses: the programme is not on this unit. Retrying it every
+                # poll would only fill the log and keep every other programme being re-read.
+                if err.is_permanent or err.code == optolink.ERR_BAD_RANGE:
                     self._unsupported_schedules.add(key)
                     _LOGGER.info(
                         "Programme %s (0x%04X) is not available on this controller",
@@ -2008,42 +1997,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("Could not refresh programme %s: %s", key, err)
 
         self.async_update_listeners()
-
-    async def _async_schedule_absent(
-        self,
-        base_addr: int,
-        cfg: dict[str, Any],
-        err: optolink.OptolinkDeviceError,
-        fc: int,
-    ) -> bool:
-        """Whether a programme that answered ERR_BAD_RANGE is simply not on this controller.
-
-        ERR_BAD_RANGE normally means the request did not match the datapoint's layout, which is
-        our fault and worth a warning. But a controller also answers it for a programme whose
-        equipment it does not have: a Vitocal reporting one for hot water, the circulation pump,
-        the immersion heater, noise reduction and ventilation, while the heating circuits and the
-        buffer at neighbouring addresses -- declared with the identical geometry in the catalog --
-        answer perfectly. Identical geometry rules out a layout mistake.
-
-        Telling the two apart costs one telegram: read the smallest unit the datapoint has. If
-        even that is refused the datapoint is not there, and retrying it every poll only fills
-        the log and spends telegrams on a slow optical link.
-        """
-        if err.code != optolink.ERR_BAD_RANGE:
-            return False
-        block_length, block_factor = cfg.get("block_length"), cfg.get("block_factor")
-        record = (
-            block_length // block_factor
-            if block_length and block_factor
-            else cfg.get("day_bytes", 1)
-        )
-        try:
-            await self.client.read_raw(base_addr, max(1, record), fc)
-        except optolink.OptolinkDeviceError:
-            return True
-        except Exception:
-            return False
-        return False
 
     async def async_refresh_gfa_error_history(self) -> None:
         """Fetch and decode the burner automat's fault records.
@@ -2211,7 +2164,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 day_bytes=cfg["day_bytes"],
                 block_length=cfg.get("block_length"),
                 block_factor=cfg.get("block_factor"),
-                record_step=self._schedule_record_step.get(key, "record"),
+                step_bytes=self._schedule_step_bytes(cfg),
                 fc=optolink.function_code(
                     cfg.get("fc_write"), optolink.FC_VIRTUAL_WRITE
                 ),

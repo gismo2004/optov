@@ -11,12 +11,15 @@ commits.
 ## [Unreleased]
 
 ### Fixed
-- A programme the controller has no equipment for is now recognised and left alone. Such a
-  controller answers ERR_BAD_RANGE rather than the expected "not implemented", which the
-  integration read as its own mistake and retried on every poll -- one reporter saw five
-  programmes fail 140 times in twenty minutes, filling the log and spending telegrams on a
-  slow optical link. A single extra read of the datapoint's smallest unit now separates a
-  missing programme from a genuine layout error, and only the latter still warns (#3).
+- Weekly programmes on controllers that take only one record per telegram. A Vitocal 333-G
+  (#3) refuses any block read that spans more than one record, where other controllers
+  accept up to the telegram limit; the integration probed each programme with a two-record
+  read, took the refusal for its own mistake and retried every programme on every poll --
+  fifteen programmes, sixty telegrams a cycle, forever, and no programme ever showed. The
+  address rule now comes from the programme's catalog type instead of a probe, a block read
+  drops to one record per telegram on the first refusal and remembers it, and only a single
+  record that is still refused marks a programme as absent. Three telegrams fewer per
+  programme at startup for everyone.
 
 ## [0.2.0] - 2026-09-21
 
