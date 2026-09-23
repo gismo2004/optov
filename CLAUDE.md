@@ -267,6 +267,10 @@ Paste the changelog section into the release body. The `Release` workflow runs o
 fails if the manifest or the changelog disagree with it, which is the reminder for a forgotten
 step -- it cannot undo a release, so look at it.
 
+HACS rechecks an installed custom repository only every 48 hours, so a new release does not show
+up in anyone's Home Assistant straight away. To see it at once, use *Update information* on the
+repository in HACS (the websocket command `hacs/repository/refresh`).
+
 The changelog is written **as the changes are made**: any commit that changes what a user
 sees, gets or has to do adds a line under Unreleased in the same commit. Internal work does not
 go in. That is what keeps a release from being an archaeology of the commits between two tags.
