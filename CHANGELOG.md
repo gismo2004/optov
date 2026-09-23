@@ -8,6 +8,8 @@ The **Unreleased** section is written as the changes are made, one line per chan
 release is a matter of giving the section a number rather than of reconstructing weeks of
 commits.
 
+## [Unreleased]
+
 ## [0.4.0] - 2026-09-23
 
 ### Changed
@@ -112,6 +114,9 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/gismo2004/optov/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/gismo2004/optov/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/gismo2004/optov/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/gismo2004/optov/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gismo2004/optov/releases/tag/v0.1.0
