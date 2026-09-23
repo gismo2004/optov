@@ -8,7 +8,7 @@ The **Unreleased** section is written as the changes are made, one line per chan
 release is a matter of giving the section a number rather than of reconstructing weeks of
 commits.
 
-## [Unreleased]
+## [0.4.0] - 2026-09-23
 
 ### Changed
 - Entities that share a name can now be told apart. The catalog often names a relay's state, its
