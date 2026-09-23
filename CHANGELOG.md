@@ -8,6 +8,16 @@ The **Unreleased** section is written as the changes are made, one line per chan
 release is a matter of giving the section a number rather than of reconstructing weeks of
 commits.
 
+## [Unreleased]
+
+### Changed
+- Entities that share a name can now be told apart. The catalog often names a relay's state, its
+  switching counter and its running hours identically -- "Sekundärpumpe 1" three times. The live
+  reading keeps the plain name; the others get the controller's own menu page appended, such as
+  "Sekundärpumpe 1 · Schaltzyklen WP". On/off readings now show a toggle icon and switching
+  counters a counter icon instead of the same default eye. Entity ids do not change, and names
+  you have set yourself are kept.
+
 ## [0.3.0] - 2026-09-22
 
 ### Added

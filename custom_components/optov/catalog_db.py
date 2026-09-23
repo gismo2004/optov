@@ -132,6 +132,11 @@ TIER_CLASSIFICATION: dict[str, str | None] = {
 
 DAILY_TIERS = {"Overview", "PlantOverview", "Operation", "Trending", "Statistic"}
 
+# For the two kinds of reading Home Assistant has no device class for, so they are not all
+# drawn with the same default eye. Running hours get the duration device class instead.
+ICON_TWO_STATE = "mdi:toggle-switch-outline"
+ICON_COUNTER = "mdi:counter"
+
 KIND_READONLY = 1
 KIND_ACTION = 2
 KIND_WRITABLE = 3
@@ -1240,6 +1245,7 @@ class _ProfileInputs:
     groups: list[dict[str, Any]]
     group_ids_by_et: dict[int, list[int]]
     group_addrs_by_id: dict[int, str]
+    groups_by_id: dict[int, dict[str, Any]]
     datapoints: list[dict[str, Any]]
     enums_by_et: dict[int, dict[str, str]]
     hidden_event_type_ids: set[int]
@@ -1359,6 +1365,7 @@ def _load_profile_inputs(
         groups=[dict(r) for r in g_rows],
         group_ids_by_et=group_ids_by_et,
         group_addrs_by_id={r["id"]: (r["address"] or "") for r in g_rows},
+        groups_by_id={r["id"]: dict(r) for r in g_rows},
         datapoints=[dict(r) for r in dp_rows],
         enums_by_et=enums_by_et,
         hidden_event_type_ids=hidden_event_type_ids,
@@ -1493,6 +1500,8 @@ def _place_datapoint(
     entry: dict[str, Any] = {
         "id": _slug(dp["name"]),
         "name": dp.get("pretty_name") or dp["name"],
+        # Consumed by _disambiguate_names() and removed there.
+        "_group_labels": _group_labels(g_ids, tier, inputs),
         "address": dp["address"],
         "bytes": dp.get("byte_length", 1),
         "block": dp.get("block_length", 1),
@@ -1597,6 +1606,11 @@ def _place_datapoint(
 
     if enum_values:
         entry["options"] = enum_values
+        # Two named states -- a relay's Aus/Ein, a flag's Nein/Ja -- is an on/off reading.
+        # Without an icon it wears the same eye as every other enumeration, and the relay
+        # state is exactly what gets confused with that relay's counters in a picker.
+        if len(enum_values) == 2:
+            entry["icon"] = ICON_TWO_STATE
         profile["sensors"].append(_as_sensor(entry, sensor_category))
     elif param_type == "bit":
         profile["binary_sensors"].append(_as_sensor(entry, sensor_category))
@@ -1615,7 +1629,93 @@ def _place_datapoint(
             entry.setdefault("state_class", "measurement")
             if decodes_to_integer(conversion):
                 entry["display_precision"] = 0
+                # A unitless whole number on the controller's statistics page is a count:
+                # how often a relay switched, how often the compressor started. Running
+                # hours on the same page carry a unit and get the duration device class.
+                if tier == "Statistic" and not entry.get("unit"):
+                    entry["icon"] = ICON_COUNTER
         profile["sensors"].append(_as_sensor(entry, sensor_category))
+
+
+def _group_labels(
+    g_ids: list[int], tier: str | None, inputs: _ProfileInputs
+) -> list[str]:
+    """The names of the menu nodes a datapoint is filed under, its own tier's nodes first.
+
+    Catalog text in the catalog's language, like every other name -- nothing here is
+    written by hand.
+    """
+    root = (tier or "").lower()
+    # The ecnsys nodes are the catalog's own bookkeeping -- which circuit a datapoint belongs
+    # to -- named after the controller model, not pages anyone sees.
+    nodes = [
+        inputs.groups_by_id[g]
+        for g in g_ids
+        if g in inputs.groups_by_id
+        and not (inputs.groups_by_id[g].get("address") or "").startswith("ecnsys")
+    ]
+    nodes.sort(
+        key=lambda g: (
+            (g.get("address") or "").split("~")[1:2] != [root] if root else True,
+            g.get("order_index") or 0,
+        )
+    )
+    labels: list[str] = []
+    for g in nodes:
+        name = (g.get("name") or "").strip()
+        if name and name not in labels:
+            labels.append(name)
+    return labels
+
+
+def _disambiguate_names(profile: dict[str, Any]) -> None:
+    """Give datapoints that share a name a way to be told apart.
+
+    The catalog often names a relay's state, its switching counter and its running hours all
+    the same -- "Sekundärpumpe 1" three times -- because in the vendor's tool they sit on
+    different pages and the page says which is which. In Home Assistant they meet in one
+    entity picker. So each one that collides gets the menu node that sets it apart: the node
+    it is filed under that none of its namesakes share, which for the counters is the
+    statistics page they came from. Where exactly one of them is a base-set reading -- what
+    the controller puts in front of its user -- that one keeps the plain name. Anything the
+    menu cannot separate falls back to its address, which is unique.
+    """
+    entries = [e for plat in _ENTITY_PLATFORMS for e in profile.get(plat, [])]
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        by_name.setdefault(entry["name"], []).append(entry)
+    for name, same in by_name.items():
+        if len(same) < 2:
+            continue
+        base = [e for e in same if e.get("base")]
+        keep = base[0] if len(base) == 1 else None
+        for entry in same:
+            if entry is keep:
+                continue
+            others = {
+                label
+                for other in same
+                if other is not entry
+                for label in other.get("_group_labels", [])
+            }
+            label = next(
+                (
+                    lab
+                    for lab in entry.get("_group_labels", [])
+                    if lab not in others and lab != name
+                ),
+                None,
+            )
+            if label:
+                entry["name"] = f"{name} · {label}"
+    counts: dict[str, int] = {}
+    for entry in entries:
+        counts[entry["name"]] = counts.get(entry["name"], 0) + 1
+    for entry in entries:
+        if counts[entry["name"]] > 1:
+            entry["name"] = f"{entry['name']} · {entry['address']}"
+    for entry in entries:
+        entry.pop("_group_labels", None)
 
 
 def _dedupe_ids(profile: dict[str, Any]) -> None:
@@ -1770,6 +1870,7 @@ def generate_profile(
         for dp in inputs.datapoints:
             _place_datapoint(dp, inputs, profile)
         _dedupe_ids(profile)
+        _disambiguate_names(profile)
         profile["circuits"] = _active_circuits(profile, inputs)
         profile["schedules"] = _schedules(conn, culture, inputs, profile["circuits"])
         return profile
