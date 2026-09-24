@@ -10,6 +10,11 @@ commits.
 
 ## [Unreleased]
 
+### Changed
+- The bridge no longer has to be an ESP32. Any device that runs ESPHome's
+  [serial proxy](https://esphome.io/components/serial_proxy/) will do; the README said ESP32
+  only because that is what the example configuration uses.
+
 ## [0.4.0] - 2026-09-23
 
 ### Changed

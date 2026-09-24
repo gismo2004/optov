@@ -6,7 +6,8 @@
 # OptoV
 
 A Home Assistant integration for Viessmann heating controllers, heat pumps and boilers, over
-the Optolink optical service port, using an ESP32 running stock ESPHome as the bridge.
+the Optolink optical service port, using any device running stock ESPHome with its serial proxy
+as the bridge.
 
 > **Not affiliated with Viessmann.** This is an independent project, built and maintained by
 > the community. It is not endorsed by, sponsored by or connected with Viessmann in any way, and
@@ -41,7 +42,7 @@ part of this repository; you build it yourself, once, in a few minutes.
 |---|---|
 | Controller | A Viessmann controller with an Optolink port (the round optical window on the front). Vitotronic 200/300 families, Vitocal heat pumps, Vitodens and Vitocrossal boilers among others. |
 | Optolink adapter | An IR read/write head for that port. Self-built adapters are common; anything that presents the port as a 4800 baud, 8 data bits, even parity, 2 stop bits serial line works. |
-| Bridge | An ESP32 running **stock ESPHome 2026.3 or newer** with the built-in `serial_proxy` component (still marked experimental by ESPHome). No custom firmware component is needed: the ESP relays raw bytes and nothing else, the whole protocol lives in Home Assistant. |
+| Bridge | Any device that runs **stock ESPHome 2026.3 or newer** and supports its built-in [serial proxy](https://esphome.io/components/serial_proxy/) (still marked experimental by ESPHome). No custom firmware component is needed: the node relays raw bytes and nothing else, the whole protocol lives in Home Assistant. |
 | Home Assistant | **2026.9 or newer**, with the ESPHome integration set up for that node. OptoV opens the serial proxy through Home Assistant's own serial layer, which reports a node that went away only from 2026.9 on. |
 | Catalog | Built once for your controller with [VExtractor](https://github.com/gismo2004/VExtractor), see [The catalog](https://github.com/gismo2004/optov/blob/main/docs/catalog.md). |
 
@@ -55,9 +56,9 @@ part of this repository; you build it yourself, once, in a few minutes.
 
 ## First setup
 
-1. **Flash the ESP32** with a node like the one below, adjust the pins to your adapter, and add
-   it to Home Assistant's ESPHome integration as usual. Keep the adapter off the ESP32's own
-   `TX`/`RX` pins; details, several ports on one node and why the names matter are in
+1. **Flash the bridge** with a node like the one below (an ESP32 example), adjust the board and
+   pins to yours, and add it to Home Assistant's ESPHome integration as usual. Keep the adapter
+   off the board's own `TX`/`RX` pins; details, several ports on one node and why the names matter are in
    [ESPHome configuration](https://github.com/gismo2004/optov/blob/main/docs/esphome.md).
 
    ```yaml
@@ -122,7 +123,7 @@ through HACS afterwards and restart once more.
   the controller's fault history with the fault texts of your controller family.
 - **The controller's clock kept in sync**, its fault buffer decoded, its schedules readable and
   writable from cards, services and automations.
-- **Recovery without you**: the integration reconnects when the ESP32 comes back and marks
+- **Recovery without you**: the integration reconnects when the ESPHome node comes back and marks
   entities unavailable rather than stale when the controller stops answering.
 
 ## Documentation
