@@ -15,6 +15,10 @@ commits.
   [serial proxy](https://esphome.io/components/serial_proxy/) works.
 - The bridge device is now called "Optolink Bridge", with no protocol or board it may not have.
 
+### Fixed
+- A setting changed while a poll is running no longer jumps back to its old value for one cycle.
+- Two settings sharing one register, changed at the same moment, no longer undo each other.
+
 ## [0.4.0] - 2026-09-23
 
 ### Changed

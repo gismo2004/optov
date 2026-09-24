@@ -288,6 +288,12 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._polling = False
         self._cycle_unreachable: str | None = None
         self._cycle_answered = 0
+        # The running poll's results so far, which it publishes when it ends. A write that lands
+        # mid-poll puts its read-back here too, or the poll would publish the value it replaced.
+        self._cycle_data: dict[str, Any] | None = None
+        # One write at a time. A write reads its register, patches its own bits and writes the
+        # register back, so two at once on a shared byte would undo each other.
+        self._write_lock = asyncio.Lock()
         # Addresses this controller answered ERR_NOT_IMPLEMENTED for. Learned at runtime from
         # the device itself rather than guessed from the catalog, which describes the whole
         # family and so lists datapoints no individual unit implements. See _read_reg().
@@ -1091,6 +1097,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._current_datapoints = 0
 
         data: dict[str, Any] = {}
+        self._cycle_data = data
         sensor_status: dict[str, str] = {}
         sensor_status_raw: dict[str, int] = {}
 
@@ -1159,6 +1166,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # already seconds old.
         self._cycle_blocks = {}
         self._polling = False
+        self._cycle_data = None
 
         duration = time.monotonic() - start_time
         self.poll_duration = round(duration, 2)
@@ -1814,6 +1822,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         A rejected write is reported by the controller as an error telegram, the same mechanism
         that rejects a bad read, and surfaces as OptolinkDeviceError.
         """
+        async with self._write_lock:
+            return await self._write_item(item, value)
+
+    async def _write_item(self, item: dict[str, Any], value: int) -> bool:
+        """async_write_item() under the write lock."""
         # A write must see the controller's current bytes, never this cycle's snapshot.
         self._cycle_blocks = {}
 
@@ -1915,6 +1928,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 updated[sw["id"]] = self._raw_int(sw, raw, False)
         if not updated:
             return
+        if self._cycle_data is not None:
+            self._cycle_data.update(updated)
         self.data = {**(self.data or {}), **updated}
         self.async_update_listeners()
 
@@ -2127,6 +2142,16 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         controller rounds times to its grid and drops windows it considers invalid, so what it
         now holds is the only trustworthy picture.
         """
+        async with self._write_lock:
+            return await self._set_day_schedule(schedule, day, windows)
+
+    async def _set_day_schedule(
+        self,
+        schedule: str,
+        day: Any,
+        windows: list[dict[str, Any]],
+    ) -> bool:
+        """async_set_day_schedule() under the write lock."""
         key = self.resolve_schedule(schedule)
         if key is None:
             raise ValueError(f"'{schedule}' is not a programme of this controller")
@@ -2223,6 +2248,22 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         mode: Any = None,
     ) -> bool:
         """Update or add one switching window of one day."""
+        # The lock covers reading the day as well: it is the other half of the same edit.
+        async with self._write_lock:
+            return await self._set_schedule_window(
+                schedule, day, window, start, end, mode
+            )
+
+    async def _set_schedule_window(
+        self,
+        schedule: str,
+        day: Any,
+        window: int,
+        start: str,
+        end: str,
+        mode: Any,
+    ) -> bool:
+        """async_set_schedule_window() under the write lock."""
         key = self.resolve_schedule(schedule)
         if key is None:
             raise ValueError(f"'{schedule}' is not a programme of this controller")
@@ -2244,7 +2285,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             current[window - 1] = new_window
         else:
             current.append(new_window)
-        return await self.async_set_day_schedule(key, day_idx, current)
+        return await self._set_day_schedule(key, day_idx, current)
 
 
 def _slug(text: str) -> str:
