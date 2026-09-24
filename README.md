@@ -58,7 +58,7 @@ part of this repository; you build it yourself, once, in a few minutes.
 
 1. **Flash the bridge** with a node like the one below (an ESP32 example), adjust the board and
    pins to yours, and add it to Home Assistant's ESPHome integration as usual. Keep the adapter
-   off the board's own `TX`/`RX` pins; details, several ports on one node and why the names
+   off the board's serial console pins; details, several ports on one node and why the names
    matter are in [ESPHome configuration](https://github.com/gismo2004/optov/blob/main/docs/esphome.md).
 
    ```yaml

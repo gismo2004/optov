@@ -541,7 +541,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         host = self.config_entry.data.get(CONF_HOST, "")
         esp_info = getattr(self.client, "esphome_info", None)
         sw_ver = getattr(esp_info, "esphome_version", None) if esp_info else None
-        model_name = getattr(esp_info, "model", "ESP32") if esp_info else "ESP32"
+        board = getattr(esp_info, "model", None) if esp_info else None
+        model = f"Optolink P300 Bridge ({board})" if board else "Optolink P300 Bridge"
         mac = getattr(esp_info, "mac_address", None) if esp_info else None
         connections = {(dr.CONNECTION_NETWORK_MAC, mac)} if mac else None
 
@@ -552,7 +553,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             identifiers={(DOMAIN, f"{self.stable_id}_gateway")},
             translation_key="gateway",
             manufacturer="ESPHome",
-            model=f"Optolink P300 Bridge ({model_name})",
+            model=model,
             sw_version=sw_ver,
             connections=connections,
             configuration_url=f"http://{host}" if host else None,
@@ -570,7 +571,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         silently lost every manual change.
 
         What goes in instead is the name of the ESPHome node and of its serial proxy. Both are
-        written by hand in the node's own configuration, so they survive the ESP being replaced
+        written by hand in the node's own configuration, so they survive the node being replaced
         -- flash the same configuration and the entities come back -- which the hardware's MAC
         address would not. An unnamed proxy falls back to its port index, which is stable unless
         the ports are reordered; naming it removes even that.

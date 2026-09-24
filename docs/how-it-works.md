@@ -38,7 +38,7 @@ not fitted is retired.
 weekly programmes are writable. Several settings can share one byte; the integration reads the
 byte, changes its bits and writes it back, then reads it again to confirm.
 
-**Losing the connection.** When the ESP32 restarts or drops off the network, the integration
+**Losing the connection.** When the ESPHome node restarts or drops off the network, the integration
 reconnects by itself as soon as the node is back. When the controller stops answering, because
 it is switched off, restarting, or the read head was taken off, every entity turns unavailable
 instead of showing its last value as if it were current. Each poll cycle then makes a single

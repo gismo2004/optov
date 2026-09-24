@@ -1,6 +1,7 @@
 # ESPHome configuration
 
-A minimal node. Adjust the pins to your adapter. The line settings below are what the
+A minimal node. The example runs on an ESP32; change the board block and the pins to your own
+hardware and adapter. The line settings below are what the
 Optolink port expects; OptoV sets the same values on the proxy itself whenever it opens the
 port, so they are what the node uses on its own rather than something you have to get right.
 
@@ -35,9 +36,10 @@ serial_proxy:
     uart_id: optolink_uart
 ```
 
-Keep the adapter off the ESP32's `TX`/`RX` pins (GPIO1 and GPIO3). The ESP32 prints its boot
-messages there on every restart, before ESPHome takes over, and with the adapter on those pins
-they go straight into the controller's optical port.
+Do not wire the adapter to the board's serial console, the `TX`/`RX` pins used for flashing and
+logging. Boards print their boot messages there on every restart, before ESPHome takes over, and
+with the adapter on those pins they go straight into the controller's optical port. Use two other
+pins your board can run a UART on.
 
 The serial proxy serves **one client at a time**. Do not point a second tool at the same port
 while Home Assistant is connected; both will see garbage. A single ESPHome node may expose
@@ -65,7 +67,7 @@ controllers are told apart there. That has one consequence worth knowing before 
 **Your customisations survive a reinstall.** Enable a few extra entities by hand, put a device
 in an area, rename something: remove OptoV and add it again, uploading your catalog again, and
 Home Assistant restores all of it, because the identities do not change. They are yours, written in the file above, rather than
-anything Home Assistant generated. If the ESP32 itself dies, flash the replacement with the same
+anything Home Assistant generated. If the node itself dies, flash the replacement with the same
 configuration and the new hardware picks up exactly where the old one left off.
 
 **The other side of the same coin:** renaming the node, or renaming a proxy, changes those
