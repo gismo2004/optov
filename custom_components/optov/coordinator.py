@@ -542,7 +542,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         esp_info = getattr(self.client, "esphome_info", None)
         sw_ver = getattr(esp_info, "esphome_version", None) if esp_info else None
         board = getattr(esp_info, "model", None) if esp_info else None
-        model = f"Optolink P300 Bridge ({board})" if board else "Optolink P300 Bridge"
+        model = f"Optolink Bridge ({board})" if board else "Optolink Bridge"
         mac = getattr(esp_info, "mac_address", None) if esp_info else None
         connections = {(dr.CONNECTION_NETWORK_MAC, mac)} if mac else None
 

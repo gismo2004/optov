@@ -1,9 +1,7 @@
 # ESPHome configuration
 
-A minimal node. The example runs on an ESP32; change the board block and the pins to your own
-hardware and adapter. The line settings below are what the
-Optolink port expects; OptoV sets the same values on the proxy itself whenever it opens the
-port, so they are what the node uses on its own rather than something you have to get right.
+A minimal node, here on an ESP32: change the board and pins to yours. The line settings are
+what the Optolink port expects; OptoV sets them again itself whenever it opens the port.
 
 ```yaml
 esphome:
@@ -36,10 +34,8 @@ serial_proxy:
     uart_id: optolink_uart
 ```
 
-Do not wire the adapter to the board's serial console, the `TX`/`RX` pins used for flashing and
-logging. Boards print their boot messages there on every restart, before ESPHome takes over, and
-with the adapter on those pins they go straight into the controller's optical port. Use two other
-pins your board can run a UART on.
+Do not use the board's serial console pins (the ones used for flashing): its boot messages
+would go straight to the controller. Use two other pins.
 
 The serial proxy serves **one client at a time**. Do not point a second tool at the same port
 while Home Assistant is connected; both will see garbage. A single ESPHome node may expose

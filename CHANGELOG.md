@@ -11,11 +11,9 @@ commits.
 ## [Unreleased]
 
 ### Changed
-- The bridge no longer has to be an ESP32. Any device that runs ESPHome's
-  [serial proxy](https://esphome.io/components/serial_proxy/) will do; the README said ESP32
-  only because that is what the example configuration uses.
-- The bridge device no longer calls itself an ESP32 when ESPHome does not report which board it
-  runs on.
+- The bridge no longer has to be an ESP32: any device running ESPHome's
+  [serial proxy](https://esphome.io/components/serial_proxy/) works.
+- The bridge device is now called "Optolink Bridge", with no protocol or board it may not have.
 
 ## [0.4.0] - 2026-09-23
 
