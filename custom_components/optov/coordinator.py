@@ -1806,7 +1806,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_write_custom_datapoint(self, address: int, data: bytes) -> bool:
         """Perform an ad-hoc write of any address."""
-        res = await self.client.write_raw(address, data)
+        async with self._write_lock:
+            res = await self.client.write_raw(address, data)
         await self.async_request_refresh()
         return res
 
@@ -1968,7 +1969,12 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return optolink.address_step_bytes(cfg.get("mapping_type"), record_size)
 
     async def async_refresh_schedules(self, schedule: str | None = None) -> None:
-        """Fetch one programme, or all of them, from the controller."""
+        """Fetch one programme, or all of them, from the controller.
+
+        Each programme is read under the write lock. The read takes several telegrams and
+        stores what it got at the end, so an edit landing in between would be overwritten
+        with the older copy -- and the next window edit starts from that copy.
+        """
         if not self.profile or not self.profile.schedules:
             return
 
@@ -1976,43 +1982,48 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         keys = [resolved] if resolved else list(self.profile.schedules)
 
         for key in keys:
-            if key in self._unsupported_schedules:
-                continue
-            cfg = self.profile.schedules[key]
-            base_addr = parse_address(cfg["address"])
-            block_length = cfg.get("block_length")
-            block_factor = cfg.get("block_factor")
-            fc = optolink.function_code(cfg.get("fc_read"))
-            try:
-                self.schedules[key] = await self.client.read_circuit_schedule(
-                    base_addr,
-                    day_bytes=cfg["day_bytes"],
-                    fmt=cfg["format"],
-                    default_level=cfg.get("default_level", 0),
-                    block_length=block_length,
-                    block_factor=block_factor,
-                    step_bytes=self._schedule_step_bytes(cfg),
-                    fc=fc,
-                )
-                _LOGGER.debug("Refreshed programme %s (0x%04X)", key, base_addr)
-            except optolink.OptolinkDeviceError as err:
-                # read_block() has already dropped to one record per telegram on a bad-range
-                # answer, so a bad range that still arrives here is a single record the
-                # controller refuses: the programme is not on this unit. Retrying it every
-                # poll would only fill the log and keep every other programme being re-read.
-                if err.is_permanent or err.code == optolink.ERR_BAD_RANGE:
-                    self._unsupported_schedules.add(key)
-                    _LOGGER.info(
-                        "Programme %s (0x%04X) is not available on this controller",
-                        key,
-                        base_addr,
-                    )
-                else:
-                    _LOGGER.warning("Could not refresh programme %s: %s", key, err)
-            except Exception as err:
-                _LOGGER.warning("Could not refresh programme %s: %s", key, err)
+            async with self._write_lock:
+                await self._read_schedule(key)
 
         self.async_update_listeners()
+
+    async def _read_schedule(self, key: str) -> None:
+        """Read one programme into self.schedules. The caller holds the write lock."""
+        if key in self._unsupported_schedules:
+            return
+        cfg = self.profile.schedules[key]
+        base_addr = parse_address(cfg["address"])
+        block_length = cfg.get("block_length")
+        block_factor = cfg.get("block_factor")
+        fc = optolink.function_code(cfg.get("fc_read"))
+        try:
+            self.schedules[key] = await self.client.read_circuit_schedule(
+                base_addr,
+                day_bytes=cfg["day_bytes"],
+                fmt=cfg["format"],
+                default_level=cfg.get("default_level", 0),
+                block_length=block_length,
+                block_factor=block_factor,
+                step_bytes=self._schedule_step_bytes(cfg),
+                fc=fc,
+            )
+            _LOGGER.debug("Refreshed programme %s (0x%04X)", key, base_addr)
+        except optolink.OptolinkDeviceError as err:
+            # read_block() has already dropped to one record per telegram on a bad-range
+            # answer, so a bad range that still arrives here is a single record the
+            # controller refuses: the programme is not on this unit. Retrying it every
+            # poll would only fill the log and keep every other programme being re-read.
+            if err.is_permanent or err.code == optolink.ERR_BAD_RANGE:
+                self._unsupported_schedules.add(key)
+                _LOGGER.info(
+                    "Programme %s (0x%04X) is not available on this controller",
+                    key,
+                    base_addr,
+                )
+            else:
+                _LOGGER.warning("Could not refresh programme %s: %s", key, err)
+        except Exception as err:
+            _LOGGER.warning("Could not refresh programme %s: %s", key, err)
 
     async def async_refresh_gfa_error_history(self) -> None:
         """Fetch and decode the burner automat's fault records.
@@ -2214,7 +2225,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return True
 
         self.async_update_listeners()
-        await self.async_refresh_schedules(key)
+        await self._read_schedule(key)
+        self.async_update_listeners()
 
         # What the controller now holds is the only truth. One retry covers a unit that needs
         # a moment to commit; beyond that, say so rather than leaving a card that silently
@@ -2228,7 +2240,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return True
             if attempt == 0:
                 await asyncio.sleep(1.0)
-                await self.async_refresh_schedules(key)
+                await self._read_schedule(key)
+                self.async_update_listeners()
         _LOGGER.warning(
             "Programme %s: the controller did not take %s. Wrote %s, it reports %s",
             key,

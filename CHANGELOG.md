@@ -18,6 +18,8 @@ commits.
 ### Fixed
 - A setting changed while a poll is running no longer jumps back to its old value for one cycle.
 - Two settings sharing one register, changed at the same moment, no longer undo each other.
+- A programme edit made while that programme is being re-read in the background is no longer
+  undone.
 
 ## [0.4.0] - 2026-09-23
 
