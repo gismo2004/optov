@@ -145,3 +145,9 @@ def test_a_single_record_that_is_refused_reaches_the_caller():
         assert err.code == optolink.ERR_BAD_RANGE
     else:
         raise AssertionError("a refused single record must not be swallowed")
+
+
+def test_out_of_range_refusal_does_not_retire_the_address():
+    """0x21 refuses a value, not an address: the setting must stay in the profile."""
+    err = OptolinkDeviceError("refused", address=0x7A07, code=optolink.ERR_OUT_OF_RANGE)
+    assert not err.is_permanent

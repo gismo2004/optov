@@ -165,7 +165,7 @@
       "message": "No controller has a weekly programme called \"{schedule}\"."
     },
     "controller_refused": {
-      "message": "The controller refused {address} with error {code}. 0x01 means it does not have that address; 0x04 means the length does not match its own layout, so read the datapoint's whole block, not just its value."
+      "message": "The controller refused {address} with error {code}. 0x01 means it does not have that address; 0x04 means the length does not match its own layout, so read the datapoint's whole block, not just its value. 0x21 means the value is outside the range the controller accepts for this setting."
     }
   },
   "card": {

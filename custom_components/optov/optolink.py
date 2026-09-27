@@ -146,8 +146,12 @@ MSGID_ERROR = 0x03
 #         exactly one record per telegram. So 0x04 on a multi-record read means "smaller", not
 #         "absent"; only a single-record read that is still refused says the datapoint is not
 #         there. read_block() falls back to single records by itself.
+#   0x21  a written value outside the range the controller accepts for that setting. The same
+#         setting takes a value inside its range at once, so the address is there and the telegram
+#         well formed; only the value was refused. Not permanent in the sense of is_permanent.
 ERR_NOT_IMPLEMENTED = 0x01
 ERR_BAD_RANGE = 0x04
+ERR_OUT_OF_RANGE = 0x21
 
 # Largest payload the controller returns in one telegram. The wire format allows 255
 # (DataLength is a single byte) but 56 is the measured ceiling across every region probed.

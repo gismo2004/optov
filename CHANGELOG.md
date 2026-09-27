@@ -11,6 +11,8 @@ commits.
 ## [Unreleased]
 
 ### Changed
+- A write the controller refuses because the value is outside the setting's range now says so
+  (error 0x21) instead of leaving the code unexplained.
 - `read_datapoint`, `read_schedule` and `write_datapoint` no longer post a notification; their answer
   appears under the call in developer tools and can be used in scripts. `write_datapoint` now answers
   with what the controller holds after the write, so a write it did not apply is visible.

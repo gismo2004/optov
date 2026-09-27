@@ -165,7 +165,7 @@
       "message": "Keine Regelung hat ein Wochenprogramm namens \"{schedule}\"."
     },
     "controller_refused": {
-      "message": "Die Regelung hat {address} mit Fehler {code} abgelehnt. 0x01 heißt, sie hat diese Adresse nicht; 0x04 heißt, die Länge passt nicht zu ihrem eigenen Aufbau -- dann den ganzen Block des Datenpunkts lesen, nicht nur seinen Wert."
+      "message": "Die Regelung hat {address} mit Fehler {code} abgelehnt. 0x01 heißt, sie hat diese Adresse nicht; 0x04 heißt, die Länge passt nicht zu ihrem eigenen Aufbau -- dann den ganzen Block des Datenpunkts lesen, nicht nur seinen Wert. 0x21 heißt, der Wert liegt außerhalb des Bereichs, den die Regelung für diese Einstellung annimmt."
     }
   },
   "card": {
