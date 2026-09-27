@@ -10,6 +10,11 @@ commits.
 
 ## [Unreleased]
 
+### Changed
+- `read_datapoint`, `read_schedule` and `write_datapoint` no longer post a notification; their answer
+  appears under the call in developer tools and can be used in scripts. `write_datapoint` now answers
+  with what the controller holds after the write, so a write it did not apply is visible.
+
 ## [0.4.1] - 2026-09-24
 
 ### Changed

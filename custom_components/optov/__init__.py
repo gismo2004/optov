@@ -9,9 +9,6 @@ from urllib.parse import urlencode
 from homeassistant.components.esphome.serial_proxy import build_url
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.components.persistent_notification import (
-    async_create as pn_async_create,
-)
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import (
     Event,
@@ -872,14 +869,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
             raw = await coordinator.async_read_custom_datapoint(address, length)
         except OptolinkDeviceError as err:
             raise _refused(err, address) from err
-        except Exception as err:
-            pn_async_create(
-                hass,
-                f"Error reading 0x{address:04X}: {err}",
-                title=f"Read 0x{address:04X}",
-                notification_id=f"optov_read_{address}",
-            )
-            raise
         answer: dict[str, Any] = {
             "address": f"0x{address:04X}",
             "bytes": length,
@@ -892,15 +881,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
             answer["value"] = coordinator.decode_datapoint(item, raw)
             if item.get("unit"):
                 answer["unit"] = item["unit"]
-        pn_async_create(
-            hass,
-            "\n".join(f"{key}: {value}" for key, value in answer.items()),
-            title=f"Read 0x{address:04X}",
-            notification_id=f"optov_read_{address}",
-        )
         return answer
 
-    async def write_datapoint(call: ServiceCall) -> None:
+    async def write_datapoint(call: ServiceCall) -> ServiceResponse:
         coordinator = _one_coordinator(hass, call)
         address = parse_address(call.data["address"])
         data = bytes.fromhex(str(call.data["data"]).replace(" ", "").replace("0x", ""))
@@ -908,33 +891,24 @@ def _async_register_services(hass: HomeAssistant) -> None:
             await coordinator.async_write_custom_datapoint(address, data)
         except OptolinkDeviceError as err:
             raise _refused(err, address) from err
-        pn_async_create(
-            hass,
-            f"Wrote {len(data)} bytes to 0x{address:04X}: {data.hex(' ').upper()}",
-            title=f"Write 0x{address:04X}",
-            notification_id=f"optov_write_{address}",
-        )
+        answer: dict[str, Any] = {
+            "address": f"0x{address:04X}",
+            "written": data.hex(" ").upper(),
+        }
+        # The controller acknowledges a write it may not apply, so the answer is what it holds
+        # afterwards. The write itself went through; a failed read-back is reported, not raised.
+        try:
+            held = await coordinator.async_read_custom_datapoint(address, len(data))
+        except Exception as err:  # noqa: BLE001
+            answer["read_back_error"] = str(err)
+        else:
+            answer["read_back"] = held.hex(" ").upper()
+            answer["applied"] = held == data
+        return answer
 
     async def read_schedule(call: ServiceCall) -> ServiceResponse:
         coordinator, key = _schedule_owner(hass, call)
         await coordinator.async_refresh_schedules(key)
-        lines = []
-        for day, windows in coordinator.schedules.get(key, {}).items():
-            if windows:
-                lines.append(
-                    f"{day}: "
-                    + ", ".join(
-                        f"{w['start']}-{w['end']} ({w['mode']})" for w in windows
-                    )
-                )
-            else:
-                lines.append(f"{day}: -")
-        pn_async_create(
-            hass,
-            "\n".join(lines) or "-",
-            title=f"Programme {key}",
-            notification_id=f"optov_schedule_{key}",
-        )
         return {"schedule": key, "weekly_schedule": coordinator.schedules.get(key, {})}
 
     async def set_schedule_day(call: ServiceCall) -> None:
@@ -971,14 +945,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
             await orphaned_statistics.async_update_issue(hass, entry)
         return {"cleared": cleared}
 
-    # The two reading services answer their caller as well as posting the notification, so a
-    # script can use the value without going through an entity.
+    # The raw services answer their caller, so a script can use the value without going
+    # through an entity; the Actions page in developer tools shows the same answer.
     answers = SupportsResponse.OPTIONAL
     for name, handler, response in (
         ("refresh_all", refresh_all, SupportsResponse.NONE),
         ("sync_clock", sync_clock, SupportsResponse.NONE),
         ("read_datapoint", read_datapoint, answers),
-        ("write_datapoint", write_datapoint, SupportsResponse.NONE),
+        ("write_datapoint", write_datapoint, answers),
         ("read_schedule", read_schedule, answers),
         ("set_schedule_day", set_schedule_day, SupportsResponse.NONE),
         ("set_schedule_window", set_schedule_window, SupportsResponse.NONE),
