@@ -21,6 +21,7 @@ commits.
   their bytes instead of a number made of the first four, and are no longer offered as settings.
 - Settings stored most significant byte first are written in that order; they used to be written
   reversed.
+- Display rules on scaled readings compare the value in its shown unit, not the raw number.
 
 ### Changed
 - The fault history is read in full only when its newest entry changed, which is checked about

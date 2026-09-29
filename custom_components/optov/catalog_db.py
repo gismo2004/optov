@@ -902,7 +902,7 @@ def get_fa_error_codes(chip: str, db_path: str, culture: str = "de") -> dict[str
         return {r["code"].upper(): r["value"] for r in rows}
 
 
-def _condition_holds(probed_value: int | None, op: str, compare: int) -> bool:
+def _condition_holds(probed_value: float | None, op: str, compare: int) -> bool:
     if probed_value is None:
         return False
     if op == "eq":
@@ -1020,17 +1020,49 @@ def evaluate_rules(
         key = (r["id"], r["target_event_type_id"], r["target_group_id"], r["rule_type"])
         rules_by_target.setdefault(key, []).append(dict(r))
 
+    # A condition on a scaled datapoint states its value in the scaled unit ("above -1 C" on a
+    # temperature in tenths), while the probe keeps what the controller sent. Enumerations
+    # compare their raw key and are left alone.
+    read_ids = {
+        aliases.get(r["condition_event_type_id"], r["condition_event_type_id"])
+        for r in rows
+    }
+    placeholders = ",".join("?" * len(read_ids)) or "NULL"
+    with closing(get_db_connection(db_path)) as conn:
+        scaling = {
+            r["id"]: (r["conversion"], r["conversion_factor"], r["conversion_offset"])
+            for r in conn.execute(
+                f"""SELECT id, conversion, conversion_factor, conversion_offset
+                    FROM datapoints WHERE device_id = ? AND id IN ({placeholders})""",
+                (device_id, *read_ids),
+            )
+        }
+        enumerated = {
+            r[0]
+            for r in conn.execute(
+                f"SELECT DISTINCT event_type_id FROM enums "
+                f"WHERE event_type_id IN ({placeholders})",
+                tuple(read_ids),
+            )
+        }
+
+    def value_of(condition_id: int) -> float | None:
+        read_id = aliases.get(condition_id, condition_id)
+        raw = probed_values.get(read_id)
+        if raw is None or read_id in enumerated:
+            return raw
+        conversion, factor, offset = scaling.get(read_id, (None, None, None))
+        if not is_encodable(conversion):
+            return raw
+        return scale(raw, conversion, factor, offset)
+
     hidden_event_type_ids: set[int] = set()
     hidden_group_ids: set[int] = set()
 
     for (_rule_id, target_et, target_g, rule_type), conds in rules_by_target.items():
         holds_list = [
             _condition_holds(
-                probed_values.get(
-                    aliases.get(
-                        c["condition_event_type_id"], c["condition_event_type_id"]
-                    )
-                ),
+                value_of(c["condition_event_type_id"]),
                 c["op"],
                 c["compare_value"],
             )
