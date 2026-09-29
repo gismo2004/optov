@@ -348,3 +348,52 @@ def test_force_writes_over_a_change_on_the_controller(coordinator_module):
     c, controller = asyncio.run(scenario())
     assert controller.writes == [0]
     assert c.schedules["hc1"]["mon"][0]["start"] == "06:00"
+
+
+class FaultBuffer:
+    """A heat pump's fault buffer, read by index; entry 0 is the newest."""
+
+    protocol = "P300"
+
+    def __init__(self):
+        self.entries = [bytes([0, 1, 2, 3, 4, 0x31, 0, 0])]
+        self.reads = 0
+
+    async def read_rpc(self, address, prefix):
+        await asyncio.sleep(0)
+        self.reads += 1
+        index = prefix[-1]
+        return self.entries[index] if index < len(self.entries) else bytes(8)
+
+
+def test_the_fault_history_is_read_again_only_when_its_newest_entry_changed(
+    coordinator_module,
+):
+    async def scenario():
+        controller = FaultBuffer()
+        c = _coordinator(coordinator_module, controller)
+        c._error_history_dp = {
+            "address": 0xA801,
+            "fc_read": "Remote_Procedure_Call",
+            "entry_bytes": 8,
+        }
+        c._error_history_loaded = True
+        c._error_head = controller.entries[0]
+        c._gfa_dp = None
+        full_reads = []
+
+        async def full():
+            full_reads.append(1)
+            c._error_head = controller.entries[0]
+
+        c.async_refresh_error_history = full
+        await c._check_fault_histories()  # nothing new
+        # The same fault again, a second later: same code, new time.
+        controller.entries.insert(0, bytes([0, 2, 2, 3, 4, 0x31, 0, 0]))
+        await c._check_fault_histories()
+        await c._check_fault_histories()  # nothing new since
+        return full_reads, controller.reads
+
+    full_reads, reads = asyncio.run(scenario())
+    assert full_reads == [1]
+    assert reads == 3  # one telegram per check

@@ -10,6 +10,11 @@ commits.
 
 ## [Unreleased]
 
+### Changed
+- The fault history is read in full only when its newest entry changed, which is checked about
+  once a minute with a single telegram. New faults appear within about a minute instead of up
+  to fifteen, at less bus time. `refresh_all` reads it again as well.
+
 ## [0.6.0] - 2026-09-29
 
 ### Changed

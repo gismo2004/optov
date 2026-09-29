@@ -64,6 +64,10 @@ from .profiles import DeviceProfile, parse_address, stable_object_id
 _LOGGER = logging.getLogger(__name__)
 
 
+# Poll cycles between two looks at the newest fault entry: about a minute at the usual 15 s.
+_FAULT_CHECK_EVERY = 4
+
+
 class ControllerUnreachable(Exception):
     """A read skipped because earlier in the same cycle nothing answered at all."""
 
@@ -278,7 +282,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._dst_expected: list[dict[str, int]] | None = None
         self._dst_expected_for: tuple[int, str] | None = None
         self._error_codes: dict[str, str] = {}
-        self._error_poll_ticks: int = 0
+        # The newest entry of each fault buffer as last read in full, raw. Entries carry the
+        # time they were logged, so a new fault -- even a repeat of the last one -- changes
+        # these bytes, and so does clearing the list. Checking them costs one telegram; the
+        # whole buffer is read only when they differ.
+        self._error_head: bytes | None = None
+        self._gfa_head: bytes | None = None
+        self._fault_check_ticks = 0
         # Whether the error history has been read successfully at least once. An empty
         # history is a valid answer -- a controller that never had a fault -- so emptiness
         # cannot stand in for "not fetched yet".
@@ -290,7 +300,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._gfa_chip: str | None = None
         self._fa_codes: dict[str, str] = {}
         self._gfa_loaded = False
-        self._gfa_poll_ticks = 0
         # The latest run of each periodic background job, so a run that is still going is not
         # joined by another. See _start_job().
         self._jobs: dict[str, asyncio.Task] = {}
@@ -956,8 +965,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         self._force_full_sweep = True
         _LOGGER.info("Full refresh requested; next poll reads every enabled datapoint")
-        # The programmes too: they are otherwise only read once, at startup.
+        # The programmes and fault histories too: the programmes are otherwise read only once,
+        # the histories only when their newest entry changes.
         self._start_job("programmes", self.async_refresh_schedules)
+        if self._error_history_dp:
+            self._start_job("faults", self.async_refresh_error_history)
+        if self._gfa_dp:
+            self._start_job("burner_faults", self.async_refresh_gfa_error_history)
         await self.async_request_refresh()
 
     def _publish_partial(
@@ -1267,15 +1281,16 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.profile.schedules and self._missing_schedules():
             self._start_job("programmes", self._refresh_missing_schedules)
 
-        # 6. Background error history poll (startup and every ~30 min / 60 poll cycles)
-        if self._error_history_dp:
-            if not self._error_history_loaded or (self._error_poll_ticks % 60 == 0):
-                self._start_job("faults", self.async_refresh_error_history)
-            self._error_poll_ticks += 1
-        if self._gfa_dp:
-            if not self._gfa_loaded or (self._gfa_poll_ticks % 60 == 0):
-                self._start_job("burner_faults", self.async_refresh_gfa_error_history)
-            self._gfa_poll_ticks += 1
+        # 6. Fault histories: read in full until that has worked once, then only their
+        # newest entry every few cycles, and in full again when it changed.
+        if self._error_history_dp and not self._error_history_loaded:
+            self._start_job("faults", self.async_refresh_error_history)
+        if self._gfa_dp and not self._gfa_loaded:
+            self._start_job("burner_faults", self.async_refresh_gfa_error_history)
+        if self._error_history_dp or self._gfa_dp:
+            self._fault_check_ticks += 1
+            if self._fault_check_ticks % _FAULT_CHECK_EVERY == 0:
+                self._start_job("fault_check", self._check_fault_histories)
 
         # Learn what a read actually costs on this link, so the next cycle's slice is sized
         # from measurement rather than the compiled-in estimate. Smoothed, because a single
@@ -2087,6 +2102,42 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             _LOGGER.warning("Could not refresh programme %s: %s", key, err)
 
+    async def _check_fault_histories(self) -> None:
+        """Read each fault buffer's newest entry and the whole buffer only if it changed."""
+        dp = self._error_history_dp
+        if dp and self._error_history_loaded:
+            try:
+                if dp["fc_read"] == "Remote_Procedure_Call":
+                    head = await self.client.read_rpc(dp["address"], bytes([0]))
+                else:
+                    head = await self.client.read_raw(
+                        dp["address"], dp["entry_bytes"], optolink.FC_VIRTUAL_READ
+                    )
+            except Exception as err:
+                _LOGGER.debug("Fault history check failed: %s", err)
+            else:
+                if head != self._error_head:
+                    _LOGGER.debug("Newest fault entry changed; reading the history")
+                    await self.async_refresh_error_history()
+                else:
+                    _LOGGER.debug("Fault history unchanged (%s)", head.hex(" "))
+        gfa = self._gfa_dp
+        if gfa and self._gfa_loaded:
+            try:
+                head = await self.client.read_raw(
+                    gfa["addresses"][0],
+                    gfa["entry_bytes"],
+                    optolink.function_code(gfa["fc_read"]),
+                )
+            except Exception as err:
+                _LOGGER.debug("Burner fault history check failed: %s", err)
+            else:
+                if head != self._gfa_head:
+                    _LOGGER.debug(
+                        "Newest burner fault entry changed; reading the history"
+                    )
+                    await self.async_refresh_gfa_error_history()
+
     async def async_refresh_gfa_error_history(self) -> None:
         """Fetch and decode the burner automat's fault records.
 
@@ -2128,6 +2179,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 error_codes=self._fa_codes,
             )
             self.gfa_error_history = entries
+            self._gfa_head = records[0] if records else None
             self._gfa_loaded = True
             _LOGGER.debug("Refreshed burner fault history: %d entries", len(entries))
             self.async_update_listeners()
@@ -2180,6 +2232,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             self.error_history = entries
             self.last_error = entries[0] if entries else None
+            self._error_head = raw[: dp["entry_bytes"]]
             self._error_history_loaded = True
             _LOGGER.debug(
                 "Refreshed error history from %s (0x%04X): %d entries",
