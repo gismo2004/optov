@@ -10,6 +10,8 @@ commits.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-29
+
 ### Changed
 - Weekly programmes are read once at startup instead of every half hour, and read and written
   one record per telegram, the one request every controller recognises.
@@ -161,7 +163,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/gismo2004/optov/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gismo2004/optov/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/gismo2004/optov/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/gismo2004/optov/compare/v0.3.0...v0.4.0
