@@ -115,6 +115,9 @@
     },
     "gateway": {
       "name": "Optical interface"
+    },
+    "uncategorized": {
+      "name": "Uncategorized"
     }
   },
   "selector": {

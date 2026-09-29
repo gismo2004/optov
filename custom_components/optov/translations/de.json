@@ -115,6 +115,9 @@
     },
     "gateway": {
       "name": "Optische Schnittstelle"
+    },
+    "uncategorized": {
+      "name": "Unkategorisiert"
     }
   },
   "selector": {

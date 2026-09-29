@@ -215,11 +215,20 @@ def tiers_enabled_by(options: dict[str, Any]) -> set[str]:
                 "Statistic",
                 "DiagnosisDiagnosis1",
                 "DiagnosisDiagnosis2",
+                "DiagnosisDeviceData",
                 "Lasterror",
             }
         )
     if options.get(CONF_ENABLE_COMMISSIONING, DEFAULT_ENABLE_COMMISSIONING):
-        tiers.add("Installation")
+        tiers.update(
+            {
+                "Installation",
+                "ProgrammingWP",
+                "ProgrammingPlant",
+                "ProgrammingHC",
+                "ProgrammingCooling",
+            }
+        )
     if options.get(CONF_ENABLE_CODING2, DEFAULT_ENABLE_CODING2):
         tiers.update({"Coding2", "DefaultSettings"})
     if options.get(CONF_ENABLE_EXPERT, DEFAULT_ENABLE_EXPERT):
@@ -533,6 +542,27 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         model = self.profile.model if self.profile else DOMAIN
         circuits = getattr(self.profile, "circuits", {}) if self.profile else {}
         return stable_object_id(model, circuits.get(circuit) if circuit else None, name)
+
+    def get_unlisted_device_info(self) -> DeviceInfo | None:
+        """The "uncategorized" sub-device: what the controller's menus do not list."""
+        if not self.device_info:
+            return None
+        dev_reg = dr.async_get(self.hass)
+        parent_dev = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, self.stable_id),
+            self.config_entry.entry_id,
+        )
+        info: DeviceInfo = DeviceInfo(
+            identifiers={(DOMAIN, f"{self.stable_id}_uncategorized")},
+            translation_key="uncategorized",
+            manufacturer="Viessmann",
+            model=self.profile.device_name if self.profile else None,
+            model_id=self.profile.model if self.profile else None,
+            sw_version=self.profile.sw_version if self.profile else None,
+        )
+        if parent_dev:
+            info["via_device_id"] = parent_dev.id
+        return info
 
     def get_device_info(self, circuit: str | None = None) -> DeviceInfo | None:
         """Return DeviceInfo for the main controller or a circuit sub-device.

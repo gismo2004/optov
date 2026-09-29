@@ -141,6 +141,14 @@ TIER_CLASSIFICATION: dict[str, str | None] = {
     "DiagnosisDiagnosis2": "diagnostic",
     "Lasterror": "diagnostic",
     "Installation": "config",
+    # The heat-pump programming pages: installer settings of the unit, the plant, the heating
+    # circuits and cooling, each on its own page.
+    "ProgrammingWP": "config",
+    "ProgrammingPlant": "config",
+    "ProgrammingHC": "config",
+    "ProgrammingCooling": "config",
+    # Versions, serial numbers and the like.
+    "DiagnosisDeviceData": "diagnostic",
     "Coding2": "config",
     "CodeAccessLevelTD": "config",
     "Expertlayer": "config",
@@ -1184,6 +1192,8 @@ def _as_sensor(entry: dict[str, Any], sensor_category: str | None) -> dict[str, 
     """A sensor may not be `config`; Home Assistant allows that only on writable entities."""
     if sensor_category:
         entry["entity_category"] = sensor_category
+    else:
+        entry.pop("entity_category", None)
     return entry
 
 
@@ -1527,7 +1537,14 @@ def _place_datapoint(
 ) -> None:
     """Decide what one datapoint becomes -- which platform, enabled or not -- or nothing."""
     tier = dp.get("tier")
-    if tier not in TIER_CLASSIFICATION:
+    # A datapoint the controller's menus do not list at all is still offered, disabled and filed
+    # under a device of its own, so it can be switched on without cluttering the controller.
+    # A menu that is not one of the known pages says nothing about what it holds and is left out.
+    unlisted = tier is None
+    if unlisted:
+        if str(dp.get("address") or "0").lower() in ("0", "0x0000"):
+            return  # a placeholder, not a place in the controller
+    elif tier not in TIER_CLASSIFICATION:
         return
     if dp.get("entity_kind") == KIND_ACTION:
         return
@@ -1589,7 +1606,8 @@ def _place_datapoint(
     # and eco all live in bits of a shared register. Writing them needs the whole block
     # read and patched, which async_write_item() handles.
 
-    entity_category = TIER_CLASSIFICATION[tier]
+    # Uncategorized settings sit under "Configuration" on their device, readings under "Sensors".
+    entity_category = "config" if unlisted else TIER_CLASSIFICATION[tier]
     if et_id in inputs.clock_settings:
         entity_category = "config"
     enum_values = inputs.enums_by_et.get(et_id, {})
@@ -1631,6 +1649,8 @@ def _place_datapoint(
     # HA doesn't allow sensors to have entity_category=config, only writable
     # entities (numbers, selects) may be 'config'. For sensors, downgrade to 'diagnostic'.
     sensor_category = "diagnostic" if entity_category == "config" else entity_category
+    if unlisted:
+        sensor_category = None
 
     entry: dict[str, Any] = {
         "id": _slug(dp["name"]),
@@ -1686,6 +1706,11 @@ def _place_datapoint(
         entry["entity_category"] = entity_category
     if c:
         entry["circuit"] = c
+    if unlisted:
+        # Offered, never switched on by itself, and never part of the fast set.
+        entry["unlisted"] = True
+        entry["enabled_by_default"] = False
+        entry["base"] = False
 
     # A full-width value takes the health nibble that shares its address. A bit-field takes
     # none: it would only find itself, or a neighbouring flag in the same register, and read
@@ -1819,6 +1844,57 @@ def _group_labels(
     return labels
 
 
+def _drop_unlisted_repeats(profile: dict[str, Any]) -> None:
+    """Leave out datapoints the menus do not list that read what another entity already reads.
+
+    The catalog carries some values twice or three times under different names -- migration
+    variants of one setting at one address -- and a menu-less copy of a value the controller
+    entity already shows would only be a second switch for the same thing.
+
+    Also left out: one whose bytes lie inside another entity's -- the older two-byte
+    definition of a counter the controller entity reads with four.
+    """
+
+    def span(e: dict[str, Any]) -> tuple[str, int, int, int, int]:
+        """(address and prefix, first byte, end byte, first bit, bit count) of what it reads."""
+        start = e.get("byte_position") or 0
+        return (
+            f"{str(e['address']).lower()}/{e.get('prefix_read')}",
+            start,
+            start + (e.get("bytes") or 1),
+            e.get("bit_start") or 0,
+            e.get("bit_length") or 0,
+        )
+
+    def inside(inner: tuple, outer: tuple) -> bool:
+        if inner[0] != outer[0] or not (outer[1] <= inner[1] and inner[2] <= outer[2]):
+            return False
+        if not outer[4]:
+            return True  # the outer one reads its bytes whole
+        return (
+            inner[4] > 0
+            and outer[3] <= inner[3]
+            and inner[3] + inner[4] <= outer[3] + outer[4]
+        )
+
+    shown = [
+        span(e)
+        for plat in _ENTITY_PLATFORMS
+        for e in profile.get(plat, [])
+        if not e.get("unlisted")
+    ]
+    for plat in _ENTITY_PLATFORMS:
+        kept = []
+        for e in profile.get(plat, []):
+            if e.get("unlisted"):
+                mine = span(e)
+                if any(inside(mine, other) for other in shown):
+                    continue
+                shown.append(mine)
+            kept.append(e)
+        profile[plat] = kept
+
+
 def _disambiguate_names(profile: dict[str, Any]) -> None:
     """Give datapoints that share a name a way to be told apart.
 
@@ -1830,8 +1906,12 @@ def _disambiguate_names(profile: dict[str, Any]) -> None:
     statistics page they came from. Where exactly one of them is a base-set reading -- what
     the controller puts in front of its user -- that one keeps the plain name. Anything the
     menu cannot separate falls back to its address, which is unique.
+
+    Datapoints the menus do not list take no part in that: they must not rename a controller
+    entity that had its name long before they were offered. They carry their address instead.
     """
-    entries = [e for plat in _ENTITY_PLATFORMS for e in profile.get(plat, [])]
+    everything = [e for plat in _ENTITY_PLATFORMS for e in profile.get(plat, [])]
+    entries = [e for e in everything if not e.get("unlisted")]
     by_name: dict[str, list[dict[str, Any]]] = {}
     for entry in entries:
         by_name.setdefault(entry["name"], []).append(entry)
@@ -1865,6 +1945,18 @@ def _disambiguate_names(profile: dict[str, Any]) -> None:
     for entry in entries:
         if counts[entry["name"]] > 1:
             entry["name"] = f"{entry['name']} · {entry['address']}"
+    # Uncategorized ones always carry their address: it is how such a value is usually known,
+    # and the only thing to search a few hundred disabled entities by.
+    unlisted = [e for e in everything if e.get("unlisted")]
+    for e in unlisted:
+        e["name"] = f"{e['name']} · {e['address']}"
+    taken = {e["name"] for e in entries}
+    seen: dict[str, int] = {}
+    for e in unlisted:
+        seen[e["name"]] = seen.get(e["name"], 0) + 1
+    for e in unlisted:
+        if e["name"] in taken or seen[e["name"]] > 1:
+            e["name"] = f"{e['name']}/{e.get('byte_position') or 0}"
     for entry in entries:
         entry.pop("_group_labels", None)
 
@@ -2022,6 +2114,7 @@ def generate_profile(
         }
         for dp in inputs.datapoints:
             _place_datapoint(dp, inputs, profile)
+        _drop_unlisted_repeats(profile)
         _dedupe_ids(profile)
         _disambiguate_names(profile)
         profile["circuits"] = _active_circuits(profile, inputs)

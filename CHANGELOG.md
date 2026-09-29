@@ -10,6 +10,15 @@ commits.
 
 ## [Unreleased]
 
+### Added
+- Values the controller has but lists in none of its menus are offered too, disabled, on a new
+  device "Uncategorized" below the controller: readings under Sensors, settings under
+  Configuration. Their names end in their address (for example "... · 0x2308"), so a known address
+  finds them in the entity list. A disabled one costs nothing; switch on only what you need.
+- Heat pumps whose controller has separate programming pages (unit, plant, heating circuits,
+  cooling) get those settings with the Commissioning option, and the device data page (versions,
+  serial numbers) with the Diagnostics option. Both were missing before.
+
 ## [0.7.0] - 2026-09-29
 
 To get everything in this release, rebuild your catalog with

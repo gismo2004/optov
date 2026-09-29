@@ -31,7 +31,11 @@ class OptolinkEntity(CoordinatorEntity[OptolinkCoordinator]):
         self._def = definition
         self._attr_name = definition["name"]
         self._attr_unique_id = f"{coordinator.stable_id}_{definition['id']}"
-        self._attr_device_info = coordinator.get_device_info(definition.get("circuit"))
+        self._attr_device_info = (
+            coordinator.get_unlisted_device_info()
+            if definition.get("unlisted")
+            else coordinator.get_device_info(definition.get("circuit"))
+        )
         self._attr_entity_category = definition.get("entity_category")
         self._attr_icon = definition.get("icon")
         self._attr_entity_registry_enabled_default = definition.get(

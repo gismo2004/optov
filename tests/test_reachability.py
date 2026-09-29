@@ -136,3 +136,82 @@ def test_a_sixteen_byte_number_is_neither_a_number_nor_writable():
     )
     assert list(placed) == ["sensors"]
     assert "state_class" not in placed["sensors"][0]
+
+
+def test_a_datapoint_no_menu_lists_is_offered_disabled_and_filed_apart():
+    placed = _placed({"tier": None})
+    entry = placed["sensors"][0]
+    assert entry["unlisted"] and not entry["enabled_by_default"]
+
+
+def test_a_placeholder_without_an_address_is_not_offered():
+    assert _placed({"tier": None, "address": "0x0000"}) == {}
+
+
+def test_a_menu_that_is_not_a_known_page_is_still_left_out():
+    assert _placed({"tier": "Functionscontroll"}) == {}
+
+
+def test_the_heat_pump_programming_pages_are_settings():
+    placed = _placed(
+        {
+            "tier": "ProgrammingWP",
+            "entity_kind": catalog_db.KIND_WRITABLE,
+            "fc_write": "Virtual_WRITE",
+        }
+    )
+    assert placed["numbers"][0]["entity_category"] == "config"
+
+
+def test_an_unlisted_namesake_does_not_rename_a_controller_entity():
+    listed = {"name": "Pumpe", "address": "0x0100", "_group_labels": [], "base": True}
+    unlisted = {
+        "name": "Pumpe",
+        "address": "0x0200",
+        "_group_labels": [],
+        "unlisted": True,
+    }
+    profile = {"sensors": [listed, unlisted]}
+    catalog_db._disambiguate_names(profile)
+    assert listed["name"] == "Pumpe"
+    assert unlisted["name"] == "Pumpe · 0x0200"
+
+
+def test_an_unlisted_copy_of_a_shown_value_is_dropped():
+    shown = {"id": "a", "address": "0x600D", "bytes": 2, "block": 2}
+    copy = {"id": "b", "address": "0x600D", "bytes": 2, "block": 2, "unlisted": True}
+    other = {"id": "c", "address": "0x600E", "bytes": 2, "block": 2, "unlisted": True}
+    profile = {"numbers": [shown, copy, other]}
+    catalog_db._drop_unlisted_repeats(profile)
+    assert [e["id"] for e in profile["numbers"]] == ["a", "c"]
+
+
+def test_an_unlisted_value_inside_a_shown_one_is_dropped():
+    # The older two-byte definition of a counter the controller entity reads with four bytes.
+    shown = {"id": "a", "address": "0x1640", "bytes": 4, "block": 4}
+    part = {"id": "b", "address": "0x1640", "bytes": 2, "block": 2, "unlisted": True}
+    # Another field of the same block, beside the shown one: a value of its own.
+    beside = {
+        "id": "c",
+        "address": "0x1640",
+        "bytes": 1,
+        "block": 8,
+        "byte_position": 5,
+        "unlisted": True,
+    }
+    profile = {"sensors": [shown, part, beside]}
+    catalog_db._drop_unlisted_repeats(profile)
+    assert [e["id"] for e in profile["sensors"]] == ["a", "c"]
+
+
+def test_uncategorized_readings_are_sensors_and_settings_configuration():
+    reading = _placed({"tier": None})["sensors"][0]
+    setting = _placed(
+        {
+            "tier": None,
+            "entity_kind": catalog_db.KIND_WRITABLE,
+            "fc_write": "Virtual_WRITE",
+        }
+    )["numbers"][0]
+    assert "entity_category" not in reading
+    assert setting["entity_category"] == "config"
