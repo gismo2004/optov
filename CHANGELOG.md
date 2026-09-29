@@ -10,14 +10,18 @@ commits.
 
 ## [Unreleased]
 
-### Added
-- Values the controller has but lists in none of its menus are offered too, disabled, on a new
-  device "Uncategorized" below the controller: readings under Sensors, settings under
-  Configuration. Their names end in their address (for example "... · 0x2308"), so a known address
-  finds them in the entity list. A disabled one costs nothing; switch on only what you need.
+## [0.7.1] - 2026-09-29
+
+### Fixed
+- Values the controller has but lists in none of its menus were left out entirely, so some could
+  not be reached at all -- for example the party room setpoint on some Vitodens controls. They now
+  appear, disabled, on a device "Uncategorized" below the controller: readings under Sensors,
+  settings under Configuration. Each name ends in its address (for example "... · 0x2308"), so a
+  known address finds it in the entity list. Switch on only what you need; a disabled one is never
+  read from the controller.
 - Heat pumps whose controller has separate programming pages (unit, plant, heating circuits,
-  cooling) get those settings with the Commissioning option, and the device data page (versions,
-  serial numbers) with the Diagnostics option. Both were missing before.
+  cooling) were missing those settings; they now come with the Commissioning option. The device
+  data page (versions, serial numbers) comes with the Diagnostics option.
 
 ## [0.7.0] - 2026-09-29
 
@@ -201,7 +205,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/gismo2004/optov/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/gismo2004/optov/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/gismo2004/optov/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gismo2004/optov/compare/v0.4.1...v0.5.0
