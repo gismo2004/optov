@@ -1857,11 +1857,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             value = extract_bitfield(raw, item.get("bit_start", 0), bit_length)
         else:
             value = decode_int(self._slice_field(item, raw), item.get("parameter_type"))
-        return scale(
-            value,
-            item.get("conversion"),
-            item.get("conversion_factor"),
-            item.get("conversion_offset"),
+        # A float, as a number entity's state has always been ("15.0", not "15").
+        return float(
+            scale(
+                value,
+                item.get("conversion"),
+                item.get("conversion_factor"),
+                item.get("conversion_offset"),
+            )
         )
 
     def _decode_select(self, item: dict[str, Any], raw: bytes) -> str:
