@@ -13,6 +13,7 @@ import asyncio
 import importlib
 import sys
 import types
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -61,7 +62,10 @@ def _stub_home_assistant():
         DataUpdateCoordinator=_Stub,
         UpdateFailed=Exception,
     )
-    module("homeassistant.util", dt=types.SimpleNamespace())
+    module(
+        "homeassistant.util",
+        dt=types.SimpleNamespace(now=lambda: datetime.now(UTC)),
+    )
 
 
 @pytest.fixture(scope="module")
@@ -215,6 +219,7 @@ class FakeProgrammes:
         self.hold = asyncio.Event()
         self.held = asyncio.Event()  # set once the first read is waiting
         self.reads = 0
+        self.writes = []  # day indexes written
 
     async def read_circuit_schedule(self, base_addr, *, day_bytes, fmt, **kwargs):
         self.reads += 1
@@ -225,8 +230,14 @@ class FakeProgrammes:
         names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
         return {names[i]: self.decode(raw, fmt, 0) for i, raw in snapshot.items()}
 
+    async def read_schedule_days(self, base_addr, day_indexes, *, fmt, **kwargs):
+        await asyncio.sleep(0)
+        names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        return {names[i]: self.decode(self.days[i], fmt, 0) for i in day_indexes}
+
     async def write_day_schedule(self, base_addr, day_idx, raw, **kwargs):
         await asyncio.sleep(0)
+        self.writes.append(day_idx)
         self.days[day_idx] = bytes(raw)
 
 
@@ -236,6 +247,7 @@ def test_programme_read_in_the_background_keeps_an_edit(coordinator_module):
         c = _coordinator(coordinator_module, controller)
         c.profile.schedules = {"hc1": PROGRAMME}
         c.schedules = {}
+        c.schedule_read_at = {}
         c._unsupported_schedules = set()
         background = asyncio.create_task(c.async_refresh_schedules())
         await controller.held.wait()
@@ -272,3 +284,67 @@ def test_raw_write_waits_for_a_setting_write(coordinator_module):
     # The raw write came second, so its byte stands whole; interleaved, the setting write would
     # have written its patch over it.
     assert asyncio.run(scenario()) == 0x01
+
+
+def _programme_coordinator(module):
+    controller = FakeProgrammes(module.decode_day_schedule)
+    controller.hold.set()  # no read is held here
+    controller.encode = module.encode_day_schedule
+    c = _coordinator(module, controller)
+    c.profile.schedules = {"hc1": PROGRAMME}
+    c.schedules = {}
+    c.schedule_read_at = {}
+    c._unsupported_schedules = set()
+    return c, controller
+
+
+def _window(controller, day, start, end):
+    phase = [{"window": 1, "start": start, "end": end, "mode": 2}]
+    raw = controller.encode(phase, "phase3", 0, [0, 1, 2, 3])
+    controller.days[day] = bytes(raw)
+
+
+def test_a_programme_unchanged_on_the_controller_is_written(coordinator_module):
+    async def scenario():
+        c, controller = _programme_coordinator(coordinator_module)
+        await c.async_refresh_schedules()
+        await c.async_set_schedule_window("hc1", "mon", 1, "06:00", "22:00", 2)
+        return c, controller
+
+    c, controller = asyncio.run(scenario())
+    assert controller.writes == [0]
+    assert c.schedules["hc1"]["mon"][0]["start"] == "06:00"
+    assert c.schedule_read_at["hc1"]
+
+
+def test_a_programme_changed_on_the_controller_is_not_written_over(coordinator_module):
+    async def scenario():
+        c, controller = _programme_coordinator(coordinator_module)
+        await c.async_refresh_schedules()
+        _window(controller, 3, "07:00", "09:00")  # someone edits Thursday at the panel
+        try:
+            await c.async_set_schedule_window("hc1", "mon", 1, "06:00", "22:00", 2)
+        except coordinator_module.ScheduleChanged as err:
+            return c, controller, err
+        raise AssertionError("a changed programme must not be written over silently")
+
+    c, controller, err = asyncio.run(scenario())
+    assert err.days == ["thu"]
+    assert controller.writes == []
+    # The controller's version is what the entity shows now.
+    assert c.schedules["hc1"]["thu"][0]["start"] == "07:00"
+
+
+def test_force_writes_over_a_change_on_the_controller(coordinator_module):
+    async def scenario():
+        c, controller = _programme_coordinator(coordinator_module)
+        await c.async_refresh_schedules()
+        _window(controller, 0, "07:00", "09:00")
+        await c.async_set_schedule_window(
+            "hc1", "mon", 1, "06:00", "22:00", 2, force=True
+        )
+        return c, controller
+
+    c, controller = asyncio.run(scenario())
+    assert controller.writes == [0]
+    assert c.schedules["hc1"]["mon"][0]["start"] == "06:00"

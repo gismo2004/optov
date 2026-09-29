@@ -166,6 +166,9 @@
     },
     "controller_refused": {
       "message": "The controller refused {address} with error {code}. 0x01 means it does not have that address; 0x04 means the length does not match its own layout, so read the datapoint's whole block, not just its value. 0x21 means the value is outside the range the controller accepts for this setting."
+    },
+    "schedule_changed": {
+      "message": "The programme {schedule} was changed on the controller ({days}) since it was last read. Nothing was written; the controller's version is shown now. Call again with force to write over it."
     }
   },
   "card": {
@@ -203,7 +206,13 @@
     "editor_hide_codes": "Hide these codes",
     "editor_max": "Entries to show",
     "editor_entity": "Fault history",
-    "editor_height": "List height (px)"
+    "editor_height": "List height (px)",
+    "checking": "Checking the programme on the controller…",
+    "changed_on_controller": "Changed on the controller since it was read ({days}). Now shown: the controller's version.",
+    "overwrite": "Overwrite with my changes",
+    "keep_controller": "Keep the controller's",
+    "read_at": "Read from the controller {time}",
+    "reread": "Read again from the controller"
   },
   "text": {
     "no_faults": "No entries",

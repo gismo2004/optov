@@ -91,8 +91,9 @@ write_datapoint:
 read_schedule:
   name: Read schedule
   description: >-
-    Re-read a weekly programme from the controller. The programme key is the `schedule`
-    attribute of its sensor; which programmes exist depends on the controller.
+    Re-read a weekly programme from the controller, for example after changing it there.
+    Programmes are otherwise read once at startup and checked before every write. The
+    programme key is the `schedule` attribute of its sensor.
   fields:
     config_entry_id:
       name: Controller
@@ -159,6 +160,15 @@ set_schedule_day:
       example: '[{"start": "05:00", "end": "22:00", "mode": 2}]'
       selector:
         object:
+    force:
+      name: Overwrite changes on the controller
+      description: >-
+        The programme is read first. If it was changed on the controller since it was last
+        read, the call fails and the controller's version is shown, unless this is on.
+      required: false
+      default: false
+      selector:
+        boolean:
 
 set_schedule_window:
   name: Set one switching window
@@ -228,6 +238,15 @@ set_schedule_window:
         number:
           min: 0
           max: 4
+    force:
+      name: Overwrite changes on the controller
+      description: >-
+        The programme is read first. If it was changed on the controller since it was last
+        read, the call fails and the controller's version is shown, unless this is on.
+      required: false
+      default: false
+      selector:
+        boolean:
 
 clear_orphaned_statistics:
   name: Delete statistics of disabled entities

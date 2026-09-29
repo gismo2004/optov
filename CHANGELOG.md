@@ -11,8 +11,12 @@ commits.
 ## [Unreleased]
 
 ### Changed
-- Weekly programmes are read and written one record per telegram, the one request every
-  controller recognises. Reading them takes longer in the background; nothing else changes.
+- Weekly programmes are read once at startup instead of every half hour, and read and written
+  one record per telegram, the one request every controller recognises.
+- Before writing a programme, it is read from the controller again. If it was changed there,
+  nothing is written: the card shows the controller's version and offers to overwrite it, and
+  `set_schedule_day` / `set_schedule_window` fail unless called with `force: true`.
+- The schedule card shows when the programme was read and can read it again.
 
 ### Fixed
 - Datapoints with a read or write code this integration does not implement are left out, instead

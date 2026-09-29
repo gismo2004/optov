@@ -181,6 +181,7 @@ class OptolinkScheduleSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntit
       default_level    the level that means "nothing scheduled"
       days             day tokens in controller order
       weekly_schedule  {day: [{window, start, end, mode}, ...]}
+      read_at          when the programme was last read from the controller (ISO time)
 
     Until the first successful read the state is unknown, which is how a frontend tells a
     programme that exists from one that has not been fetched yet.
@@ -239,6 +240,7 @@ class OptolinkScheduleSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntit
             "default_level": cfg.get("default_level", 0),
             "days": list(DAYS),
             "base_address": f"0x{self._base_address:04X}",
+            "read_at": self.coordinator.schedule_read_at.get(self._key),
             # A copy: the attributes of the state Home Assistant has already published must
             # never share structure with the coordinator, or an update to one silently edits
             # the other and the comparison that decides whether to publish sees no change.

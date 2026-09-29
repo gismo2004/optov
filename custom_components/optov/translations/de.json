@@ -166,6 +166,9 @@
     },
     "controller_refused": {
       "message": "Die Regelung hat {address} mit Fehler {code} abgelehnt. 0x01 heißt, sie hat diese Adresse nicht; 0x04 heißt, die Länge passt nicht zu ihrem eigenen Aufbau -- dann den ganzen Block des Datenpunkts lesen, nicht nur seinen Wert. 0x21 heißt, der Wert liegt außerhalb des Bereichs, den die Regelung für diese Einstellung annimmt."
+    },
+    "schedule_changed": {
+      "message": "Das Programm {schedule} wurde seit dem letzten Lesen an der Regelung geändert ({days}). Es wurde nichts geschrieben; angezeigt wird jetzt der Stand der Regelung. Mit force erneut aufrufen, um ihn zu überschreiben."
     }
   },
   "card": {
@@ -203,7 +206,13 @@
     "editor_hide_codes": "Diese Codes ausblenden",
     "editor_max": "Anzahl Einträge",
     "editor_entity": "Fehlerhistorie",
-    "editor_height": "Listenhöhe (px)"
+    "editor_height": "Listenhöhe (px)",
+    "checking": "Programm an der Regelung wird geprüft…",
+    "changed_on_controller": "Seit dem Lesen an der Regelung geändert ({days}). Angezeigt wird jetzt der Stand der Regelung.",
+    "overwrite": "Mit meinen Änderungen überschreiben",
+    "keep_controller": "Stand der Regelung behalten",
+    "read_at": "Von der Regelung gelesen {time}",
+    "reread": "Neu von der Regelung lesen"
   },
   "text": {
     "no_faults": "Keine Einträge",

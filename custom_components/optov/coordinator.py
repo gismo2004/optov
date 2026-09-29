@@ -68,6 +68,15 @@ class ControllerUnreachable(Exception):
     """A read skipped because earlier in the same cycle nothing answered at all."""
 
 
+class ScheduleChanged(Exception):
+    """A programme differs on the controller from the copy an edit was made against."""
+
+    def __init__(self, key: str, days: list[str]) -> None:
+        self.key = key
+        self.days = days
+        super().__init__(f"{key} was changed on the controller: {', '.join(days)}")
+
+
 # Conversions that cannot be expressed as a bare div_ratio and must go through decode.py's
 # catalog-driven logic -- anything here either produces a non-numeric result or applies a
 # rule a divisor cannot express.
@@ -233,12 +242,15 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.device_info: DeviceInfo | None = None
         self.data: dict[str, Any] = {}
         self.schedules: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        # When each programme was last read from the controller (ISO time), shown on its
+        # entity. Programmes change almost only through this integration, so they are read
+        # once and then only to check them before a write.
+        self.schedule_read_at: dict[str, str] = {}
         # Sensor-health status decoded from the same block read as the value it describes
         # (WPR3_SensorStatus_* datapoints). Entities read this via `available`, not a separate
         # entity -- see decode.py for why the status nibble rides along for free.
         self.sensor_status: dict[str, str] = {}
         self.sensor_status_raw: dict[str, int] = {}
-        self._schedule_poll_ticks = 0
         # This controller's catalog. Held here rather than as a module global so two hubs can
         # use two different catalogs; every catalog query is given it explicitly.
         self.db_path: str | None = None
@@ -944,6 +956,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         self._force_full_sweep = True
         _LOGGER.info("Full refresh requested; next poll reads every enabled datapoint")
+        # The programmes too: they are otherwise only read once, at startup.
+        self._start_job("programmes", self.async_refresh_schedules)
         await self.async_request_refresh()
 
     def _publish_partial(
@@ -1246,18 +1260,12 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sensor_status = sensor_status
         self.sensor_status_raw = sensor_status_raw
 
-        # 5. Weekly programmes, in the background. Cheap enough not to be worth an option:
-        # one telegram per record (7 to 56 per programme), re-read once every 120 cycles, so
-        # even six phase programmes cost some 20 s of bus time per half hour.
-        if self.profile.schedules:
-            has_empty_sched = any(
-                not self.schedules.get(key)
-                for key in self.profile.schedules
-                if key not in self._unsupported_schedules
-            )
-            if has_empty_sched or (self._schedule_poll_ticks % 120 == 0):
-                self._start_job("programmes", self.async_refresh_schedules)
-            self._schedule_poll_ticks += 1
+        # 5. Weekly programmes, in the background, until each has been read once. After that
+        # they are read only to check them before a write (see _set_day_schedule) or when
+        # asked to: they change almost only through this integration, and a read costs one
+        # telegram per record, up to 56 per programme.
+        if self.profile.schedules and self._missing_schedules():
+            self._start_job("programmes", self._refresh_missing_schedules)
 
         # 6. Background error history poll (startup and every ~30 min / 60 poll cycles)
         if self._error_history_dp:
@@ -2015,32 +2023,58 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self.async_update_listeners()
 
+    def _missing_schedules(self) -> list[str]:
+        """Programmes this controller has that have not been read yet."""
+        return [
+            key
+            for key in self.profile.schedules
+            if key not in self._unsupported_schedules and not self.schedules.get(key)
+        ]
+
+    async def _refresh_missing_schedules(self) -> None:
+        for key in self._missing_schedules():
+            async with self._write_lock:
+                await self._read_schedule(key)
+        self.async_update_listeners()
+
+    def _schedule_geometry(self, key: str) -> dict[str, Any]:
+        """The arguments every programme read and write of `key` shares."""
+        cfg = self.profile.schedules[key]
+        return {
+            "day_bytes": cfg["day_bytes"],
+            "block_length": cfg.get("block_length"),
+            "block_factor": cfg.get("block_factor"),
+            "step_bytes": self._schedule_step_bytes(cfg),
+        }
+
+    def _store_schedule(self, key: str, programme: dict[str, Any]) -> None:
+        """Keep what the controller holds. A new dict, so the entity sees a change."""
+        self.schedules[key] = dict(programme)
+        self.schedule_read_at[key] = dt_util.now().isoformat(timespec="seconds")
+
+    async def _fetch_schedule(self, key: str) -> dict[str, Any]:
+        """Read one whole programme from the controller and return it. Raises on failure."""
+        cfg = self.profile.schedules[key]
+        return await self.client.read_circuit_schedule(
+            parse_address(cfg["address"]),
+            fmt=cfg["format"],
+            default_level=cfg.get("default_level", 0),
+            fc=optolink.function_code(cfg.get("fc_read")),
+            **self._schedule_geometry(key),
+        )
+
     async def _read_schedule(self, key: str) -> None:
         """Read one programme into self.schedules. The caller holds the write lock."""
         if key in self._unsupported_schedules:
             return
-        cfg = self.profile.schedules[key]
-        base_addr = parse_address(cfg["address"])
-        block_length = cfg.get("block_length")
-        block_factor = cfg.get("block_factor")
-        fc = optolink.function_code(cfg.get("fc_read"))
+        base_addr = parse_address(self.profile.schedules[key]["address"])
         try:
-            self.schedules[key] = await self.client.read_circuit_schedule(
-                base_addr,
-                day_bytes=cfg["day_bytes"],
-                fmt=cfg["format"],
-                default_level=cfg.get("default_level", 0),
-                block_length=block_length,
-                block_factor=block_factor,
-                step_bytes=self._schedule_step_bytes(cfg),
-                fc=fc,
-            )
+            self._store_schedule(key, await self._fetch_schedule(key))
             _LOGGER.debug("Refreshed programme %s (0x%04X)", key, base_addr)
         except optolink.OptolinkDeviceError as err:
-            # read_block() has already dropped to one record per telegram on a bad-range
-            # answer, so a bad range that still arrives here is a single record the
-            # controller refuses: the programme is not on this unit. Retrying it every
-            # poll would only fill the log and keep every other programme being re-read.
+            # Records are read one per telegram, so a bad range here is a single record the
+            # controller refuses: the programme is not on this unit. Retrying it every poll
+            # would only fill the log.
             if err.is_permanent or err.code == optolink.ERR_BAD_RANGE:
                 self._unsupported_schedules.add(key)
                 _LOGGER.info(
@@ -2171,27 +2205,32 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         schedule: str,
         day: Any,
         windows: list[dict[str, Any]],
+        force: bool = False,
     ) -> bool:
-        """Write one programme's day, or several days at once, and re-read the programme.
+        """Write one programme's day, or several days at once.
 
         `day` may be a single day or a list of them. The controller has no notion of grouped
         days -- it stores seven independent days, and any "Mon-Fri" grouping is a display
         convention over days whose contents happen to match -- so applying one day's windows
-        to a whole week means writing each day. Days that already hold exactly these bytes are
-        skipped, which is what makes "apply to the whole week" cheap on a bus this slow.
+        to a whole week means writing each day. Days that already hold exactly these windows
+        are skipped, which is what makes "apply to the whole week" cheap on a bus this slow.
 
-        The re-read at the end is deliberate: the days go out as record telegrams, and the
-        controller rounds times to its grid and drops windows it considers invalid, so what it
-        now holds is the only trustworthy picture.
+        The programme is read from the controller first and compared with the copy the edit
+        was made against. If someone changed it at the controller in the meantime, the
+        controller's version is published and ScheduleChanged raised, unless `force` says to
+        write over it. After writing, the written days are read back: the controller rounds
+        times to its grid and drops windows it considers invalid, so what it now holds is the
+        only trustworthy picture.
         """
         async with self._write_lock:
-            return await self._set_day_schedule(schedule, day, windows)
+            return await self._set_day_schedule(schedule, day, windows, force)
 
     async def _set_day_schedule(
         self,
         schedule: str,
         day: Any,
         windows: list[dict[str, Any]],
+        force: bool = False,
     ) -> bool:
         """async_set_day_schedule() under the write lock."""
         key = self.resolve_schedule(schedule)
@@ -2212,73 +2251,73 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         default_level = cfg.get("default_level", 0)
         levels = cfg.get("levels")
         raw = encode_day_schedule(windows, fmt, default_level, levels)
+        expected = decode_day_schedule(raw, fmt, default_level)
 
-        written: list[str] = []
-        for day_idx in day_indexes:
-            day_name = DAYS[day_idx]
-            current = self.schedules.get(key, {}).get(day_name)
-            if (
-                current is not None
-                and encode_day_schedule(current, fmt, default_level, levels) == raw
-            ):
-                continue
+        # What the edit was made against, then what the controller holds now.
+        edited_from = self.schedules.get(key) or {}
+        held = await self._fetch_schedule(key)
+        changed = [d for d in DAYS if edited_from and held.get(d) != edited_from.get(d)]
+        if changed:
+            self._store_schedule(key, held)
+            self.async_update_listeners()
+            if not force:
+                raise ScheduleChanged(key, changed)
             _LOGGER.info(
-                "Writing programme %s day %s (%s): %s", key, day_name, fmt, raw.hex(" ")
+                "Programme %s was changed on the controller (%s); writing over it",
+                key,
+                ", ".join(changed),
             )
-            await self.client.write_day_schedule(
-                base_addr,
-                day_idx,
-                raw,
-                day_bytes=cfg["day_bytes"],
-                block_length=cfg.get("block_length"),
-                block_factor=cfg.get("block_factor"),
-                step_bytes=self._schedule_step_bytes(cfg),
-                fc=optolink.function_code(
-                    cfg.get("fc_write"), optolink.FC_VIRTUAL_WRITE
-                ),
-            )
-            written.append(day_name)
-            # Show the intended result at once; the re-read below replaces it with the
-            # controller's own. Replace the programme's dict rather than mutating it: the
-            # entity's published attributes still reference the old one, and Home Assistant
-            # decides whether to fire a state change by comparing the two. Mutating in place
-            # makes it compare an object with itself, so nothing is published and the card
-            # keeps showing the previous programme however often this runs.
-            self.schedules[key] = {
-                **self.schedules.get(key, {}),
-                day_name: decode_day_schedule(raw, fmt, default_level),
-            }
 
-        if not written:
+        to_write = [i for i in day_indexes if held.get(DAYS[i]) != expected]
+        if not to_write:
+            self._store_schedule(key, held)
+            self.async_update_listeners()
             _LOGGER.info(
                 "Programme %s already holds these windows on every requested day", key
             )
             return True
 
-        self.async_update_listeners()
-        await self._read_schedule(key)
-        self.async_update_listeners()
+        fc_write = optolink.function_code(
+            cfg.get("fc_write"), optolink.FC_VIRTUAL_WRITE
+        )
+        for day_idx in to_write:
+            _LOGGER.info(
+                "Writing programme %s day %s (%s): %s",
+                key,
+                DAYS[day_idx],
+                fmt,
+                raw.hex(" "),
+            )
+            await self.client.write_day_schedule(
+                base_addr, day_idx, raw, fc=fc_write, **self._schedule_geometry(key)
+            )
 
-        # What the controller now holds is the only truth. One retry covers a unit that needs
-        # a moment to commit; beyond that, say so rather than leaving a card that silently
-        # disagrees with the appliance.
-        expected = decode_day_schedule(raw, fmt, default_level)
+        # What the controller now holds on the written days is the only truth. One retry
+        # covers a unit that needs a moment to commit; beyond that, say so rather than leaving
+        # a card that silently disagrees with the appliance.
+        fc_read = optolink.function_code(cfg.get("fc_read"))
         for attempt in range(2):
-            mismatched = [
-                d for d in written if self.schedules.get(key, {}).get(d) != expected
-            ]
+            written = await self.client.read_schedule_days(
+                base_addr,
+                to_write,
+                fmt=fmt,
+                default_level=default_level,
+                fc=fc_read,
+                **self._schedule_geometry(key),
+            )
+            self._store_schedule(key, {**held, **written})
+            self.async_update_listeners()
+            mismatched = [d for d, w in written.items() if w != expected]
             if not mismatched:
                 return True
             if attempt == 0:
                 await asyncio.sleep(1.0)
-                await self._read_schedule(key)
-                self.async_update_listeners()
         _LOGGER.warning(
             "Programme %s: the controller did not take %s. Wrote %s, it reports %s",
             key,
             ", ".join(mismatched),
             raw.hex(" "),
-            self.schedules.get(key, {}).get(mismatched[0]),
+            self.schedules[key].get(mismatched[0]),
         )
         return True
 
@@ -2290,12 +2329,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         start: str,
         end: str,
         mode: Any = None,
+        force: bool = False,
     ) -> bool:
-        """Update or add one switching window of one day."""
+        """Update or add one switching window of one day; see async_set_day_schedule()."""
         # The lock covers reading the day as well: it is the other half of the same edit.
         async with self._write_lock:
             return await self._set_schedule_window(
-                schedule, day, window, start, end, mode
+                schedule, day, window, start, end, mode, force
             )
 
     async def _set_schedule_window(
@@ -2306,6 +2346,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         start: str,
         end: str,
         mode: Any,
+        force: bool = False,
     ) -> bool:
         """async_set_schedule_window() under the write lock."""
         key = self.resolve_schedule(schedule)
@@ -2329,7 +2370,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             current[window - 1] = new_window
         else:
             current.append(new_window)
-        return await self._set_day_schedule(key, day_idx, current)
+        return await self._set_day_schedule(key, day_idx, current, force)
 
 
 def _slug(text: str) -> str:

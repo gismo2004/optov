@@ -362,6 +362,17 @@ const STYLE = `
             color: var(--primary-text-color); font: inherit; font-weight: 500; cursor: pointer; }
   .button.primary { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
   .button:disabled { opacity: 0.5; cursor: default; }
+  .conflict { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; margin-bottom: 12px;
+              border-radius: 8px; border: 1px solid var(--warning-color, #ffa600);
+              font-size: 0.9rem; color: var(--primary-text-color); }
+  .conflict .actions { justify-content: flex-end; flex-wrap: wrap; }
+  .read-at { display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding-top: 6px;
+             font-size: 0.8rem; color: var(--secondary-text-color); }
+  .reread { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none;
+            border-radius: 50%; background: none; color: var(--secondary-text-color); cursor: pointer;
+            --mdc-icon-size: 18px; }
+  .reread:hover { background: var(--secondary-background-color); }
+  .reread:disabled { opacity: 0.5; cursor: default; }
 `;
 
 class OptoVScheduleCard extends HTMLElement {
@@ -375,6 +386,11 @@ class OptoVScheduleCard extends HTMLElement {
     this._edits = {}; // "entity_id|day" -> windows being edited
     this._saving = false;
     this._status = null; // { kind: 'ok' | 'error', text }
+    // A save the controller refused because the programme was changed there since it was
+    // read: what the user wanted to write, kept for "overwrite". { entityId, windows, targets,
+    // days }. The card meanwhile shows the controller's version.
+    this._conflict = null;
+    this._reading = false;
     this._signature = null;
     this._strings = null;
   }
@@ -486,10 +502,10 @@ class OptoVScheduleCard extends HTMLElement {
     return modes.filter((m) => m.value !== off);
   }
 
-  async _save(entity) {
+  async _save(entity, overwrite = null) {
     const t = makeTranslator(this._strings || {});
     const lang = languageOf(this._hass);
-    const windows = this._windowsOf(entity)
+    const windows = (overwrite ? overwrite.windows : this._windowsOf(entity))
       .slice()
       .sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
     for (let i = 0; i < windows.length; i += 1) {
@@ -501,19 +517,25 @@ class OptoVScheduleCard extends HTMLElement {
     }
     const attrs = entity.attributes;
     const dayKeys = Array.isArray(attrs.days) && attrs.days.length === 7 ? attrs.days : DAY_KEYS;
-    const scope = this._scope || detectScope(dayKeys, this._activeDay, attrs.weekly_schedule || {});
-    const targets = scopeDays(scope, dayKeys, this._activeDay);
+    const scope = overwrite
+      ? overwrite.scope
+      : this._scope || detectScope(dayKeys, this._activeDay, attrs.weekly_schedule || {});
+    const targets = overwrite ? overwrite.targets : scopeDays(scope, dayKeys, this._activeDay);
     const shortNames = weekdayNames(lang, 'short');
     const longNames = weekdayNames(lang, 'long');
 
     this._saving = true;
-    this._status = null;
+    this._conflict = null;
+    // The integration reads the programme from the controller before writing, to see whether
+    // it was changed there; that is most of the wait.
+    this._status = { kind: '', text: t('checking') };
     this._render();
     try {
       await this._hass.callService(DOMAIN, 'set_schedule_day', {
         schedule: attrs.schedule,
         day: targets,
         windows: windows.map((w, i) => ({ window: i + 1, start: w.start, end: w.end, mode: w.mode })),
+        force: Boolean(overwrite),
       });
       // Every target day now holds what was just written, so no pending edit of one can
       // still be meaningful.
@@ -532,9 +554,34 @@ class OptoVScheduleCard extends HTMLElement {
         }
       }, 4000);
     } catch (err) {
-      this._status = { kind: 'error', text: t('save_failed', { err: (err && err.message) || err }) };
+      if (err && err.translation_key === 'schedule_changed') {
+        // Nothing was written, and the entity already carries the controller's version. Show
+        // that instead of the edit, and keep the edit for "overwrite".
+        for (const day of targets) delete this._edits[`${entity.entity_id}|${day}`];
+        const placeholders = err.translation_placeholders || {};
+        this._conflict = { entityId: entity.entity_id, windows, targets, scope, days: placeholders.days || '' };
+        this._status = null;
+      } else {
+        this._status = { kind: 'error', text: t('save_failed', { err: (err && err.message) || err }) };
+      }
     } finally {
       this._saving = false;
+      this._render();
+    }
+  }
+
+  async _reread(entity) {
+    const t = makeTranslator(this._strings || {});
+    this._reading = true;
+    this._status = { kind: '', text: t('loading') };
+    this._render();
+    try {
+      await this._hass.callService(DOMAIN, 'read_schedule', { schedule: entity.attributes.schedule });
+      this._status = null;
+    } catch (err) {
+      this._status = { kind: 'error', text: (err && err.message) || String(err) };
+    } finally {
+      this._reading = false;
       this._render();
     }
   }
@@ -593,6 +640,10 @@ class OptoVScheduleCard extends HTMLElement {
     // A scope other than the single day is itself a change: copying today's untouched
     // programme onto the working week is the whole point of the control.
     const canSave = dirty || scope !== 'day';
+    const conflict = this._conflict && this._conflict.entityId === entity.entity_id ? this._conflict : null;
+    const readAt = attrs.read_at
+      ? new Date(attrs.read_at).toLocaleString(lang, { dateStyle: 'short', timeStyle: 'short' })
+      : '';
 
     const title = this._config.title || attrs.device_name || t('title');
     const programmeName = (this._labels || {})[entity.entity_id] || attrs.name || '';
@@ -715,17 +766,39 @@ class OptoVScheduleCard extends HTMLElement {
       }).join('')}
         </div>
 
+        ${conflict
+        ? `<div class="conflict">
+            <div>${escapeHtml(t('changed_on_controller', {
+          days: String(conflict.days).split(/,\s*/).map((d) => shortNames[d] || d).join(', '),
+        }))}</div>
+            <div class="actions">
+              <button class="button keep">${escapeHtml(t('keep_controller'))}</button>
+              <button class="button primary overwrite">${escapeHtml(t('overwrite'))}</button>
+            </div>
+          </div>`
+        : ''
+      }
+
         <div class="footer">
           <div class="status ${this._status ? this._status.kind : ''}">
             ${escapeHtml(this._status ? this._status.text : dirty ? t('unsaved') : '')}
           </div>
           <div class="actions">
             ${dirty && !this._saving ? `<button class="button discard">${escapeHtml(t('discard'))}</button>` : ''}
-            <button class="button primary save" ${this._saving || !canSave ? 'disabled' : ''}>
+            <button class="button primary save" ${this._saving || this._reading || !canSave ? 'disabled' : ''}>
               ${escapeHtml(this._saving ? t('saving') : t('save'))}
             </button>
           </div>
         </div>
+        ${readAt
+        ? `<div class="read-at">
+            <span>${escapeHtml(t('read_at', { time: readAt }))}</span>
+            <button class="reread" title="${escapeHtml(t('reread'))}" ${this._saving || this._reading ? 'disabled' : ''}>
+              <ha-icon icon="mdi:refresh"></ha-icon>
+            </button>
+          </div>`
+        : ''
+      }
       </ha-card>`;
 
     this._bind(entity, levels, step);
@@ -804,6 +877,12 @@ class OptoVScheduleCard extends HTMLElement {
     });
 
     on('.save', 'click', () => this._save(entity));
+    on('.overwrite', 'click', () => this._save(entity, this._conflict));
+    on('.keep', 'click', () => {
+      this._conflict = null;
+      this._render();
+    });
+    on('.reread', 'click', () => this._reread(entity));
   }
 }
 

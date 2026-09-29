@@ -47,7 +47,12 @@ from .const import (
     PLATFORMS,
     option,
 )
-from .coordinator import OptolinkConfigEntry, OptolinkCoordinator, OptolinkRuntime
+from .coordinator import (
+    OptolinkConfigEntry,
+    OptolinkCoordinator,
+    OptolinkRuntime,
+    ScheduleChanged,
+)
 from .optolink import OptolinkClient, OptolinkDeviceError, UnsupportedProtocol
 from .profiles import DeviceProfile, parse_address
 
@@ -843,6 +848,15 @@ def _refused(err: OptolinkDeviceError, address: int) -> HomeAssistantError:
     )
 
 
+def _changed(err: ScheduleChanged) -> ServiceValidationError:
+    """A programme changed on the controller since it was read; nothing was written."""
+    return ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="schedule_changed",
+        translation_placeholders={"schedule": err.key, "days": ", ".join(err.days)},
+    )
+
+
 @callback
 def _async_register_services(hass: HomeAssistant) -> None:
     async def refresh_all(call: ServiceCall) -> None:
@@ -917,20 +931,30 @@ def _async_register_services(hass: HomeAssistant) -> None:
         if isinstance(windows, str):
             windows = json.loads(windows)
         # Errors propagate: a call that fails must fail visibly for the caller.
-        await coordinator.async_set_day_schedule(
-            key, call.data.get("day"), list(windows)
-        )
+        try:
+            await coordinator.async_set_day_schedule(
+                key,
+                call.data.get("day"),
+                list(windows),
+                force=bool(call.data.get("force", False)),
+            )
+        except ScheduleChanged as err:
+            raise _changed(err) from err
 
     async def set_schedule_window(call: ServiceCall) -> None:
         coordinator, key = _schedule_owner(hass, call)
-        await coordinator.async_set_schedule_window(
-            key,
-            call.data.get("day"),
-            int(call.data.get("window", 1)),
-            str(call.data.get("start", "06:00")),
-            str(call.data.get("end", "22:00")),
-            call.data.get("mode"),
-        )
+        try:
+            await coordinator.async_set_schedule_window(
+                key,
+                call.data.get("day"),
+                int(call.data.get("window", 1)),
+                str(call.data.get("start", "06:00")),
+                str(call.data.get("end", "22:00")),
+                call.data.get("mode"),
+                force=bool(call.data.get("force", False)),
+            )
+        except ScheduleChanged as err:
+            raise _changed(err) from err
 
     async def clear_orphaned_statistics(call: ServiceCall) -> ServiceResponse:
         """The repair's operation, callable any time and for hand-disabled entities too."""

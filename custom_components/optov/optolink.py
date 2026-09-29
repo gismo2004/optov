@@ -954,8 +954,21 @@ class OptolinkClient:
                 f"record size {record_size} of 0x{address:04X} exceeds the "
                 f"{MAX_TELEGRAM_PAYLOAD}-byte telegram limit"
             )
+        return await self.read_records(
+            address, record_size, range(block_factor), step_bytes, fc
+        )
+
+    async def read_records(
+        self,
+        address: int,
+        record_size: int,
+        indexes: range,
+        step_bytes: int = 1,
+        fc: int = FC_VIRTUAL_READ,
+    ) -> bytes:
+        """Some records of a block datapoint, one telegram each; see read_block()."""
         result = bytearray()
-        for index in range(block_factor):
+        for index in indexes:
             offset = index * record_size // step_bytes
             chunk = await self.read_raw(address + offset, record_size, fc)
             if len(chunk) != record_size:
@@ -1015,6 +1028,40 @@ class OptolinkClient:
                 )
                 schedule[day] = []
         return schedule
+
+    async def read_schedule_days(
+        self,
+        base_address: int,
+        day_indexes: list[int],
+        day_bytes: int = 24,
+        fmt: str = "phase3",
+        default_level: int = 0,
+        block_length: int | None = None,
+        block_factor: int | None = None,
+        step_bytes: int = 1,
+        fc: int = FC_VIRTUAL_READ,
+    ) -> dict[str, Any]:
+        """Read only some days of a weekly programme, at the records read_block() would use."""
+        from .conversions import DAYS, decode_day_schedule
+
+        days: dict[str, Any] = {}
+        for day_idx in day_indexes:
+            if block_length and block_factor:
+                record_size = block_length // block_factor
+                per_day = day_bytes // record_size
+                raw = await self.read_records(
+                    base_address,
+                    record_size,
+                    range(day_idx * per_day, (day_idx + 1) * per_day),
+                    step_bytes,
+                    fc,
+                )
+            else:
+                raw = await self.read_raw(
+                    base_address + day_idx * day_bytes, day_bytes, fc
+                )
+            days[DAYS[day_idx]] = decode_day_schedule(raw, fmt, default_level)
+        return days
 
     async def write_day_schedule(
         self,

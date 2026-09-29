@@ -12,3 +12,7 @@
 
 Programmes are addressed by the `schedule` attribute of their sensor. With more than one
 controller set up, pass `config_entry_id` to say which one a call is for.
+
+Weekly programmes are read once at startup (and by `refresh_all` or `read_schedule`). Before
+every write the programme is read again: if it was changed at the controller since, nothing is
+written and the call fails. Pass `force: true` to write over the change.
