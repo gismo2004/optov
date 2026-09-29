@@ -1375,7 +1375,12 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # the field isn't block-sliced (most are plain same-size counters) -- a bare
         # div_ratio can't express them: Sec2Hour would silently report seconds
         # labelled as hours otherwise.
-        if s.get("bit_length") or block != s["bytes"] or conv in EXOTIC_CONVERSIONS:
+        if (
+            s.get("bit_length")
+            or block != s["bytes"]
+            or conv in EXOTIC_CONVERSIONS
+            or s["bytes"] > 4
+        ):
             # Block-addressed datapoint: request the whole telegram the controller
             # expects at this address, then slice the field out via decode.py.
             field = (

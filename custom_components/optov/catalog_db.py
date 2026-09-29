@@ -1629,14 +1629,22 @@ def _place_datapoint(
 
     conv_lower = (dp.get("conversion") or "").strip().lower()
     param_type = (dp.get("parameter_type") or "").strip().lower()
-    is_datetime_or_str = conv_lower in (
-        "datetimebcd",
-        "datetime_bcd",
-        "datebcd",
-        "daytodate",
-        "hexbyte2asciibyte",
-        "hexbyte2utf16byte",
-    ) or param_type in ("array", "string")
+    # A plain value wider than four bytes is an identifier (a LON Neuron ID, a serial number, a
+    # MAC address), not a number: no integer type is that wide.
+    too_wide = (dp.get("byte_length") or 0) > 4 and conv_lower in ("", "noconversion")
+    is_datetime_or_str = (
+        conv_lower
+        in (
+            "datetimebcd",
+            "datetime_bcd",
+            "datebcd",
+            "daytodate",
+            "hexbyte2asciibyte",
+            "hexbyte2utf16byte",
+        )
+        or param_type in ("array", "string")
+        or too_wide
+    )
 
     # Writable only through a write code this link has, and never as a procedure call. A
     # missing code ("undefined") is not replaced by a guess.

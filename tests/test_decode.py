@@ -103,3 +103,12 @@ def test_a_conversion_without_an_inverse_is_not_writable_as_a_number():
 
     assert is_encodable("Mult10") and is_encodable("MultOffset")
     assert not is_encodable("IPAddress") and not is_encodable("DateBCD")
+
+
+def test_an_identifier_wider_than_any_integer_is_shown_as_bytes():
+    from decode import decode_value
+
+    neuron_id = bytes([0x05, 0x01, 0x8F, 0x32, 0x10, 0x00])
+    assert decode_value(neuron_id, "NoConversion", parameter_type="Int") == (
+        "05 01 8F 32 10 00"
+    )

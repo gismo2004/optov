@@ -400,6 +400,10 @@ def decode_value(
         days = int.from_bytes(raw[:8], "little", signed=False)
         return (date(1970, 1, 1) + timedelta(days=days)).isoformat()
 
+    if len(raw) > 4 and conv in _PLAIN:
+        # Wider than any integer type: an identifier, shown as its bytes.
+        return raw.hex(" ").upper()
+
     value: Any = decode_int(raw, parameter_type)
 
     if conv in DIVISORS:

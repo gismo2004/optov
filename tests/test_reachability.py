@@ -122,3 +122,17 @@ def test_an_address_setting_is_shown_not_set():
         }
     )
     assert list(placed) == ["sensors"]
+
+
+def test_a_sixteen_byte_number_is_neither_a_number_nor_writable():
+    placed = _placed(
+        {
+            "entity_kind": catalog_db.KIND_WRITABLE,
+            "fc_write": "Virtual_WRITE",
+            "parameter_type": "Byte",
+            "byte_length": 16,
+            "block_length": 16,
+        }
+    )
+    assert list(placed) == ["sensors"]
+    assert "state_class" not in placed["sensors"][0]

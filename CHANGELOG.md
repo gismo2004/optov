@@ -17,6 +17,8 @@ commits.
   as hours or minutes are shown and written in the unit they are set in. They used to show and take
   the raw stored number while their limits were in the real unit.
 - Settings whose value cannot be written as a number (addresses, byte strings) are shown as readings.
+- Identifiers wider than four bytes (LON Neuron ID and domain, serial and MAC numbers) are shown as
+  their bytes instead of a number made of the first four, and are no longer offered as settings.
 
 ### Changed
 - The fault history is read in full only when its newest entry changed, which is checked about
