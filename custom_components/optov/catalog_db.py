@@ -755,7 +755,7 @@ def get_error_history_datapoint(device_id: int, db_path: str) -> dict[str, Any] 
     """
     with closing(get_db_connection(db_path)) as conn:
         row = conn.execute(
-            """SELECT address, name, byte_length, block_factor, fc_read, prefix_read
+            """SELECT *
                FROM datapoints
                WHERE device_id = ?
                  AND block_factor > 0
@@ -789,6 +789,8 @@ def get_error_history_datapoint(device_id: int, db_path: str) -> dict[str, Any] 
             "entry_bytes": byte_length // block_factor,
             "fc_read": row["fc_read"] or "Virtual_READ",
             "prefix_read": row["prefix_read"],
+            # Older catalogs lack the column; type 0 is the byte-counting rule.
+            "mapping_type": dict(row).get("mapping_type") or 0,
         }
 
 

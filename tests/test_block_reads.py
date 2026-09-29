@@ -20,11 +20,14 @@ class Recorder:
     ordered read shows up as wrong content rather than merely a wrong call count.
     """
 
-    def __init__(self, base, refuse_multi=None, refuse_all=None):
+    def __init__(self, base, refuse_multi=None, refuse_all=None, short_multi=False):
         self.base = base
         # error codes the fake controller answers with; None means it answers normally
         self.refuse_multi = refuse_multi  # for a read of more than one record
         self.refuse_all = refuse_all  # error code for every read, whatever its size
+        self.short_multi = (
+            short_multi  # a read of more than one record comes back a byte short
+        )
         self.calls = []  # (address, length)
 
     async def read_raw(self, address, length, fc=optolink.FC_VIRTUAL_READ):
@@ -36,6 +39,8 @@ class Recorder:
                 "refused", address=address, code=self.refuse_multi
             )
         start = (address - self.base) * self.step_bytes
+        if self.short_multi and length > self.record_size:
+            length -= 1
         return bytes((start + i) & 0xFF for i in range(length))
 
 
@@ -121,6 +126,37 @@ def test_the_refusal_may_carry_any_code():
         client = client_with(rec, record_size=3, step_bytes=3)
         data = run(client.read_block(0x9200, 168, 56, step_bytes=3))
         assert data == bytes(i & 0xFF for i in range(168))
+
+
+def test_a_short_answer_to_a_chunk_also_gets_one_record_per_telegram():
+    # A week of seven 8-byte days, answered with 55 bytes instead of an error telegram.
+    rec = Recorder(0x2000, short_multi=True)
+    client = client_with(rec, record_size=8, step_bytes=1)
+    data = run(client.read_block(0x2000, 56, 7, step_bytes=1))
+
+    assert data == bytes(range(56))
+    assert rec.calls[0] == (0x2000, 56)
+    assert rec.calls[1:] == [(0x2000 + 8 * i, 8) for i in range(7)]
+
+
+def test_a_boiler_error_buffer_is_addressed_by_its_type_not_probed():
+    # Ten 9-byte records, type 3: record i at base + 9 i. Nothing asks for base + 1, which
+    # such a controller refuses as an address it does not have.
+    rec = Recorder(0x7507, refuse_multi=optolink.ERR_BAD_RANGE)
+    client = client_with(rec, record_size=9, step_bytes=1)
+    data = run(
+        client.read_error_history(
+            0x7507,
+            total_bytes=90,
+            block_factor=10,
+            function_code=optolink.FC_VIRTUAL_READ,
+            step_bytes=address_step_bytes(3, 9),
+        )
+    )
+
+    assert data == bytes(range(90))
+    assert (0x7508, 9) not in rec.calls
+    assert rec.calls[1:] == [(0x7507 + 9 * i, 9) for i in range(10)]
 
 
 def test_the_fallback_is_remembered_for_the_next_read():

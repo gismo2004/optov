@@ -10,6 +10,14 @@ commits.
 
 ## [Unreleased]
 
+### Fixed
+- Weekly programmes of a controller that answers a whole week one byte short are read day by day
+  instead of failing.
+- The boiler error history is read record by record at the addresses its catalog entry gives,
+  instead of failing where the controller refuses an address inside the buffer.
+- Over P300, datapoints only KW can reach are no longer asked for, which ends the "response does
+  not match request" warnings at setup.
+
 ## [0.5.0] - 2026-09-28
 
 ### Changed

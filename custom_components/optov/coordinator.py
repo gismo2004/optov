@@ -473,6 +473,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             except Exception as err:
                 _LOGGER.warning("Could not resolve burner fault history: %s", err)
+        # Records the link cannot ask for would fail on every refresh.
+        gfa_fcs = (
+            {self._gfa_dp["fc_read"], self._gfa_dp["chip_fc_read"]}
+            if self._gfa_dp
+            else set()
+        )
+        if gfa_fcs & optolink.unreachable_function_codes(self.client.protocol):
+            self._gfa_dp = None
         if self._gfa_dp:
             _LOGGER.info(
                 "Burner fault history: %d records of %d bytes from 0x%04X, chip code at 0x%04X",
@@ -683,9 +691,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         withdrawn: the controller accepts such a read and answers with bytes that are not what
         those addresses return individually, so cutting the answer up by address silently
         produces wrong values. The whole result is cached in the config entry, so this runs
-        once per installation and never again.
+        once per installation and never again. A register this link has no telegram for is
+        left unread, as a refused one would be, without asking.
         """
+        unreachable = optolink.unreachable_function_codes(self.client.protocol)
         for dp in targets:
+            if (dp.get("fc_read") or "Virtual_READ") in unreachable:
+                continue
             try:
                 address = parse_address(dp["address"])
                 block = dp.get("block_length") or dp.get("byte_length") or 1
@@ -2095,6 +2107,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 total_bytes=dp["total_bytes"],
                 block_factor=dp["block_factor"],
                 function_code=fc,
+                step_bytes=optolink.address_step_bytes(
+                    dp.get("mapping_type"), dp["entry_bytes"]
+                ),
             )
             if not raw:
                 _LOGGER.warning(

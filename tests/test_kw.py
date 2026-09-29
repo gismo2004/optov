@@ -131,8 +131,11 @@ def test_what_kw_cannot_express_is_known_up_front():
     missing = optolink.unreachable_function_codes(optolink.PROTO_KW)
     assert "Remote_Procedure_Call" in missing
     assert "Virtual_READ" not in missing and "GFA_READ" not in missing
-    # P300 reaches everything the catalog names.
-    assert optolink.unreachable_function_codes(optolink.PROTO_P300) == set()
+    # P300 reaches everything but the GFA pair, which is served over KW only.
+    assert optolink.unreachable_function_codes(optolink.PROTO_P300) == {
+        "GFA_READ",
+        "GFA_WRITE",
+    }
 
 
 def test_all_bits_set_is_not_a_reading():

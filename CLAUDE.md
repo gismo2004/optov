@@ -177,8 +177,8 @@ An `if language == "de"` branch anywhere is a bug.
 **Ask the device, don't guess.** Where the catalog is silent or self-contradictory, prefer a
 one-off probe at startup over an assumption: the controller is the authority on what it
 implements, what read lengths it accepts, and how its array datapoints are addressed. Several
-such probes already exist (`calibrate_record_step`, the unsupported-address set, the equipment
-probe) and they follow that pattern deliberately.
+such probes already exist (`read_block`'s drop to one record per telegram, the unsupported-address
+set, the equipment probe) and they follow that pattern deliberately.
 
 **Measure before optimising, and record negative results.** Several plausible ideas here turned
 out to be wrong when measured, and the reasons are written next to the code so they are not

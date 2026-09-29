@@ -106,12 +106,17 @@ def unreachable_function_codes(protocol: str) -> set[str]:
     """Catalog FCRead/FCWrite values this protocol has no telegram for.
 
     Entities for those cannot work, so they are not generated at all -- see generate_profile().
+    Over P300 that is the GFA pair: those datapoints are served over KW only, and their codes
+    do not fit the five bits a P300 telegram has for the function, so what the controller
+    receives is some other function (0xC9 arrives as 0x09).
     """
-    if protocol != PROTO_KW:
-        return set()
-    return {
-        name for name, code in FUNCTION_CODES.items() if code not in KW_FUNCTION_CODES
-    }
+    if protocol == PROTO_KW:
+        return {
+            name
+            for name, code in FUNCTION_CODES.items()
+            if code not in KW_FUNCTION_CODES
+        }
+    return {"GFA_READ", "GFA_WRITE"}
 
 
 def function_code(name: str | None, default: int = FC_VIRTUAL_READ) -> int:
@@ -694,10 +699,12 @@ class OptolinkClient:
 
         # Correlate before trusting anything in the payload. Verified against the live
         # controller: the echo is exact on both success and error telegrams.
+        # The function takes the low five bits of its byte; the upper three are the sequence
+        # number, so a code above 0x1F (the process pair) is compared on those five bits.
         msgid = resp_payload[0] & 0x0F
         echoed_fc = resp_payload[1] & 0x1F
         echoed_addr = (resp_payload[2] << 8) | resp_payload[3]
-        if echoed_addr != address or echoed_fc != function_code:
+        if echoed_addr != address or echoed_fc != function_code & 0x1F:
             raise OptolinkProtocolError(
                 f"response does not match request: sent fc=0x{function_code:02X} "
                 f"addr=0x{address:04X}, got fc=0x{echoed_fc:02X} addr=0x{echoed_addr:04X}"
@@ -941,10 +948,12 @@ class OptolinkClient:
 
         So the read starts with the large chunks -- 56 three-byte records in four telegrams
         instead of 56 -- and treats *any* refusal of a multi-record read as "one at a time",
-        dropping to single records for that datapoint and remembering it. The refusal then
-        costs one telegram once per session, and what follows is exactly the single-record
-        sequence. A single record that is still refused is a datapoint this controller does
-        not have, and that error is left to the caller.
+        dropping to single records for that datapoint and remembering it. A multi-record read
+        answered with the wrong number of bytes counts as a refusal too: a boiler controller
+        answers a whole 56-byte week with 55 bytes rather than an error telegram. The refusal
+        then costs one telegram once per session, and what follows is exactly the single-record
+        sequence. A single record that is still refused, or still comes back short, is left to
+        the caller.
         """
         if block_factor < 1 or block_length < 1 or block_length % block_factor:
             raise ValueError(
@@ -991,6 +1000,18 @@ class OptolinkClient:
                     err.code,
                 )
                 continue
+            if len(chunk) != n * record_size and n > 1:
+                self._single_record_read.add(address)
+                per_telegram = 1
+                _LOGGER.info(
+                    "0x%04X answers %d records with %d bytes instead of %d; "
+                    "reading one per telegram",
+                    address,
+                    n,
+                    len(chunk),
+                    n * record_size,
+                )
+                continue
             if len(chunk) != n * record_size:
                 raise OptolinkProtocolError(
                     f"0x{address:04X} record {done}: asked for {n * record_size} bytes, "
@@ -999,55 +1020,6 @@ class OptolinkClient:
             result.extend(chunk)
             done += n
         return bytes(result)
-
-    async def calibrate_record_step(
-        self,
-        address: int,
-        block_length: int,
-        block_factor: int,
-        fc: int = FC_VIRTUAL_READ,
-    ) -> str:
-        """Ask the controller whether a block datapoint's address counts records or bytes.
-
-        Only the fault-history buffers of the boiler family still use this; the weekly
-        programmes take their address rule from the catalog (address_step_bytes()). Reads the
-        first two records in one telegram, then one record at `address + 1` and at
-        `address + record_size` and sees which reproduces record 1. A controller that refuses
-        the two-record read is taken to count bytes, the rule for every type the catalog does
-        not single out, rather than left to fail.
-        """
-        record_size = block_length // block_factor
-        if block_factor < 2 or record_size * 2 > MAX_TELEGRAM_PAYLOAD:
-            return "record"
-
-        try:
-            reference = await self.read_raw(address, record_size * 2, fc)
-        except OptolinkDeviceError as err:
-            if err.code != ERR_BAD_RANGE:
-                raise
-            self._single_record_read.add(address)
-            return "byte"
-        second = reference[record_size : record_size * 2]
-
-        by_record = await self.read_raw(address + 1, record_size, fc)
-        if by_record == second:
-            # Ambiguous when record_size == 1, but then both schemes coincide anyway.
-            return "record"
-
-        by_byte = await self.read_raw(address + record_size, record_size, fc)
-        if by_byte == second:
-            return "byte"
-
-        _LOGGER.warning(
-            "0x%04X: neither address stepping reproduced record 1 "
-            "(ref=%s, +1=%s, +%d=%s); assuming record stepping",
-            address,
-            second.hex(" "),
-            by_record.hex(" "),
-            record_size,
-            by_byte.hex(" "),
-        )
-        return "record"
 
     async def read_circuit_schedule(
         self,
@@ -1179,7 +1151,7 @@ class OptolinkClient:
         total_bytes: int,
         block_factor: int,
         function_code: int = FC_RPC,
-        record_step: str = "auto",
+        step_bytes: int = 1,
     ) -> bytes:
         """Read a controller error-history buffer, honouring its catalog function code.
 
@@ -1189,21 +1161,11 @@ class OptolinkClient:
           be fetched as `block_factor` indexed sub-reads. Reading it as plain chunked memory
           gets 0x01 "not implemented" from the controller.
         * `FCRead = Virtual_READ` (boilers) -- an ordinary block datapoint, fetched by
-          read_block() on its own record boundaries.
+          read_block() on its own record boundaries, with the address rule of its catalog type
+          (address_step_bytes()), as for the weekly programmes.
         """
         if function_code == FC_RPC:
             return await self.read_rpc_block(base_address, total_bytes, block_factor)
-        if record_step == "auto":
-            record_step = await self.calibrate_record_step(
-                base_address, total_bytes, block_factor, function_code
-            )
-            _LOGGER.debug(
-                "error history 0x%04X uses %s address stepping",
-                base_address,
-                record_step,
-            )
-        record_size = total_bytes // block_factor if block_factor else 1
-        step_bytes = record_size if record_step == "record" else 1
         return await self.read_block(
             base_address, total_bytes, block_factor, step_bytes, function_code
         )
