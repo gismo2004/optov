@@ -10,6 +10,10 @@ commits.
 
 ## [Unreleased]
 
+### Fixed
+- A reading the controller answers with fewer bytes than asked for is discarded instead of being
+  decoded into a wrong value.
+
 ### Changed
 - The fault history is read in full only when its newest entry changed, which is checked about
   once a minute with a single telegram. New faults appear within about a minute instead of up

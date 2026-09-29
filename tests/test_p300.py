@@ -33,6 +33,7 @@ def answer(payload):
 def p300_client(answers):
     client = OptolinkClient("esphome://node", "node")
     client._transport = FakeTransport(client, answers)
+    client._link = object()  # connected, as far as the retry wrapper is concerned
     client._synced = True
     return client
 
@@ -47,3 +48,26 @@ def test_a_function_above_five_bits_is_matched_on_its_five_bits():
         assert payload[5:] == bytes([0x2A])
 
     asyncio.run(go())
+
+
+def test_a_short_answer_is_not_taken_for_a_value():
+    # Two bytes asked for, one delivered: decoding it would give a wrong reading.
+    async def go():
+        reply = bytes([0x01, 0x01, 0x08, 0x00, 0x02, 0x2A])
+        client = p300_client([answer(reply)])
+        try:
+            await client.read_raw(0x0800, 2)
+        except optolink.OptolinkProtocolError:
+            return
+        raise AssertionError("a short answer must not pass as a value")
+
+    asyncio.run(go())
+
+
+def test_a_longer_answer_yields_the_bytes_asked_for():
+    async def go():
+        reply = bytes([0x01, 0x01, 0x08, 0x00, 0x02, 0x2A, 0x01, 0x99])
+        client = p300_client([answer(reply)])
+        return await client.read_raw(0x0800, 2)
+
+    assert asyncio.run(go()) == bytes([0x2A, 0x01])

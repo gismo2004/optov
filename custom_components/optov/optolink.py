@@ -897,7 +897,14 @@ class OptolinkClient:
                 f"for 0x{address:04X}; use read_block() for larger datapoints"
             )
         resp = await self._transact_retry(fc, address, length)
-        return resp[5:]
+        data = resp[5:]
+        # Every datapoint is cut out of the block by position, so a short answer would decode
+        # into a wrong value rather than fail. A longer one only carries what follows.
+        if len(data) < length:
+            raise OptolinkProtocolError(
+                f"0x{address:04X}: asked for {length} bytes, got {len(data)}"
+            )
+        return data[:length]
 
     async def write_raw(
         self, address: int, data: bytes, fc: int = FC_VIRTUAL_WRITE
