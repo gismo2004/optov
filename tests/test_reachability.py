@@ -82,3 +82,15 @@ def test_a_remote_procedure_reading_carries_its_parameter_and_is_not_writable():
 def test_an_array_or_an_oversize_value_is_not_one_entity():
     assert _placed({"block_factor": 3, "byte_length": 12, "block_length": 12}) == {}
     assert _placed({"byte_length": 60, "block_length": 60}) == {}
+
+
+def test_a_conversion_nothing_can_decode_makes_no_entity():
+    assert _placed({"conversion": "Estrich", "byte_length": 1, "block_length": 1}) == {}
+
+
+def test_the_service_counters_are_plain_numbers():
+    from decode import decode_value
+
+    placed = _placed({"conversion": "LastBurnerCheck", "byte_length": 4})
+    assert list(placed) == ["sensors"]
+    assert decode_value(bytes([0x10, 0x27, 0, 0]), "LastCheckInterval") == 10000

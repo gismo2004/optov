@@ -17,12 +17,12 @@ from typing import Any
 try:
     # Real package context (Home Assistant importing custom_components.optov.catalog_db).
     from .conversions import schedule_type
-    from .decode import decodes_to_integer, decodes_to_number, raw_bounds
+    from .decode import decodes_to_integer, decodes_to_number, is_supported, raw_bounds
 except ImportError:
     # Standalone context: a script adds the integration directory to sys.path and imports
     # this module directly, with no parent package.
     from conversions import schedule_type
-    from decode import decodes_to_integer, decodes_to_number, raw_bounds
+    from decode import decodes_to_integer, decodes_to_number, is_supported, raw_bounds
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1444,6 +1444,10 @@ def _place_datapoint(
     if (dp.get("block_factor") or 0) > 1:
         return
     if max(dp.get("block_length") or 0, dp.get("byte_length") or 0) > TELEGRAM_PAYLOAD:
+        return
+    # A conversion nothing here can decode would fail on every read. Bit-fields are exempt:
+    # they are taken as the bits themselves.
+    if not dp.get("bit_length") and not is_supported(dp.get("conversion")):
         return
 
     # Skip raw multi-byte array dumps (e.g. 168-byte EEPROM schedule arrays handled by the

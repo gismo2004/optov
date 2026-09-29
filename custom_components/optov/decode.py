@@ -70,6 +70,26 @@ _PRECISION = {
 # Plain multiplication, no rounding.
 _MULTIPLIERS = {"mult2": 2, "mult5": 5, "mult10": 10, "mult100": 100}
 
+# Named in the catalog but no transformation of the value: the integer is the reading (hours
+# since, months since the last service).
+_PLAIN = {"", "noconversion", "lastburnercheck", "lastcheckinterval"}
+
+# Everything decode_value() turns into something other than the plain integer.
+_DECODED = {
+    "datetimebcd",
+    "datetime_bcd",
+    "datebcd",
+    "rotatebytes",
+    "hexbyte2decimalbyte",
+    "time53",
+    "ipaddress",
+    "convert4bytestofloat",
+    "hexbyte2asciibyte",
+    "hexbyte2utf16byte",
+    "daytodate",
+    "multoffset",
+}
+
 
 class DecodeError(ValueError):
     """Raised when raw bytes cannot be decoded as the catalog describes."""
@@ -94,6 +114,17 @@ def raw_bounds(parameter_type: str | None) -> tuple[int, int]:
     return 0, (1 << width) - 1
 
 
+def is_supported(conversion: str | None) -> bool:
+    """Whether decode_value() can turn this catalog conversion into a value at all.
+
+    A datapoint with any other conversion would fail on every read, so it is not made an entity.
+    """
+    conv = (conversion or "").strip().lower()
+    return (
+        conv in _PLAIN or conv in _DECODED or conv in DIVISORS or conv in _MULTIPLIERS
+    )
+
+
 def decodes_to_number(conversion: str | None) -> bool:
     """Whether decode_value() turns this conversion into a number rather than text or a date.
 
@@ -103,7 +134,8 @@ def decodes_to_number(conversion: str | None) -> bool:
     """
     conv = (conversion or "").strip().lower()
     return (
-        conv in ("", "noconversion", "multoffset", "convert4bytestofloat")
+        conv in _PLAIN
+        or conv in ("multoffset", "convert4bytestofloat")
         or conv in DIVISORS
         or conv in _MULTIPLIERS
     )
@@ -112,7 +144,7 @@ def decodes_to_number(conversion: str | None) -> bool:
 def decodes_to_integer(conversion: str | None) -> bool:
     """Whether the number decode_value() produces for this conversion is always whole."""
     conv = (conversion or "").strip().lower()
-    return conv in ("", "noconversion") or conv in _MULTIPLIERS
+    return conv in _PLAIN or conv in _MULTIPLIERS
 
 
 def decode_int(raw: bytes, parameter_type: str | None) -> int:
@@ -328,7 +360,7 @@ def decode_value(
             + (offset if offset is not None else 0.0),
             3,
         )
-    elif conv not in ("noconversion", ""):
+    elif conv not in _PLAIN:
         # Unknown conversion: do not silently pass the raw integer off as a real value.
         raise DecodeError(f"unsupported conversion {conversion!r}")
 

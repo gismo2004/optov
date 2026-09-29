@@ -22,6 +22,9 @@ commits.
 - Arrays, and values longer than one telegram, no longer appear as entities that fail on every
   poll.
 - A setting whose write code is missing from the catalog is shown as a reading.
+- The time since the last burner service (hours and months) shows its value instead of failing.
+- Datapoints with a conversion that cannot be decoded are left out instead of failing on every
+  poll.
 - Weekly programmes of a controller that answers a whole week one byte short are read.
 - The boiler error history is read at the addresses its catalog entry gives, instead of failing
   where the controller refuses an address inside the buffer.
