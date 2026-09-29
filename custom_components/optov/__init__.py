@@ -509,7 +509,8 @@ def _async_reconcile_registry(
         )
 
     # Circuit sub-devices the profile no longer has (a circuit hidden by the equipment probe).
-    live_circuits = set(profile.circuits) | {"gateway"}
+    # The gateway and the uncategorized device are not circuits and always stay.
+    live_circuits = set(profile.circuits) | {"gateway", "uncategorized"}
     for dev in dr.async_entries_for_config_entry(device_reg, entry.entry_id):
         for domain, identifier in dev.identifiers:
             device_prefix = f"{coordinator.stable_id}_"
