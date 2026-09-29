@@ -301,7 +301,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Bytes already read this cycle, keyed exactly as _read_reg() asks for them, so that
         # several entities sharing one register cost one telegram between them. Cleared at the
         # end of every cycle.
-        self._cycle_blocks: dict[tuple[int, int, str | None], bytes] = {}
+        self._cycle_blocks: dict[tuple[int, int, str | None, str | None], bytes] = {}
         # Programmes this controller does not have. The catalog lists every programme of the
         # family; the unit says which ones it has, and it is asked once.
         self._unsupported_schedules: set[str] = set()
@@ -479,7 +479,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._gfa_dp
             else set()
         )
-        if gfa_fcs & optolink.unreachable_function_codes(self.client.protocol):
+        if not gfa_fcs <= optolink.reachable_function_codes(self.client.protocol):
             self._gfa_dp = None
         if self._gfa_dp:
             _LOGGER.info(
@@ -694,14 +694,19 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         once per installation and never again. A register this link has no telegram for is
         left unread, as a refused one would be, without asking.
         """
-        unreachable = optolink.unreachable_function_codes(self.client.protocol)
+        reachable = optolink.reachable_function_codes(self.client.protocol)
         for dp in targets:
-            if (dp.get("fc_read") or "Virtual_READ") in unreachable:
+            fc_read = dp.get("fc_read") or "Virtual_READ"
+            if fc_read not in reachable or (
+                fc_read == "Remote_Procedure_Call" and not dp.get("prefix_read")
+            ):
                 continue
             try:
                 address = parse_address(dp["address"])
                 block = dp.get("block_length") or dp.get("byte_length") or 1
-                raw = await self._read_reg(address, block, dp.get("fc_read"))
+                raw = await self._read_reg(
+                    address, block, dp.get("fc_read"), prefix=dp.get("prefix_read")
+                )
             except Exception as err:
                 _LOGGER.debug(
                     "Equipment probe failed for %s (%s): %s",
@@ -788,7 +793,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._language,
             probed_values,
             tiers_enabled_by(self.config_entry.options),
-            optolink.unreachable_function_codes(self.client.protocol),
+            optolink.reachable_function_codes(self.client.protocol),
         )
         total = sum(len(v) for v in generated.values() if isinstance(v, list))
         enabled = sum(
@@ -829,7 +834,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._language,
             self._probed_values,
             tiers_enabled_by(options),
-            optolink.unreachable_function_codes(self.client.protocol),
+            optolink.reachable_function_codes(self.client.protocol),
         )
         return DeviceProfile(
             sys_id=self.profile.sys_id,
@@ -979,8 +984,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         length: int,
         fc_read: str | None = None,
         fresh: bool = False,
+        prefix: str | None = None,
     ) -> bytes:
         """Read raw bytes from Optolink and track telegram and byte counts.
+
+        A remote-procedure reading is called with `prefix`, the catalog's parameter in hex,
+        and several of them share one address (one index per entry), so the prefix is part of
+        what identifies the read.
 
         Addresses the controller has declared unimplemented are dropped permanently. The
         catalog describes a whole controller family, so it always lists more datapoints than
@@ -1006,10 +1016,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # `fresh` is for the write path, where the cache is not merely unhelpful but wrong: the
         # bytes it holds were read before the write, so a read-back served from it always
         # reports the old value and the entity snaps straight back to it.
+        key = (address, length, fc_read, prefix)
         if fresh:
-            self._cycle_blocks.pop((address, length, fc_read), None)
+            self._cycle_blocks.pop(key, None)
         else:
-            cached = self._cycle_blocks.get((address, length, fc_read))
+            cached = self._cycle_blocks.get(key)
             if cached is not None:
                 return cached
 
@@ -1024,9 +1035,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             optolink.PROTO_OVERHEAD.get(self.client.protocol, 18) + length
         )
         try:
-            raw = await self.client.read_raw(
-                address, length, optolink.function_code(fc_read)
-            )
+            fc = optolink.function_code(fc_read)
+            if fc == optolink.FC_RPC:
+                raw = await self.client.read_rpc(address, bytes.fromhex(prefix or ""))
+            else:
+                raw = await self.client.read_raw(address, length, fc)
         except (
             optolink.OptolinkNotConnected,
             optolink.OptolinkControllerSilent,
@@ -1071,7 +1084,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"0x{address:04X} answered with all bits set, which is not a reading"
             )
         self._nothing_usable.pop(address, None)
-        self._cycle_blocks[(address, length, fc_read)] = raw
+        self._cycle_blocks[key] = raw
         return raw
 
     def _nothing_usable_from(self, address: int) -> None:
@@ -1157,7 +1170,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 try:
                     block = item.get("block") or item["bytes"]
                     raw = await self._read_reg(
-                        item["address"], block, item.get("fc_read")
+                        item["address"],
+                        block,
+                        item.get("fc_read"),
+                        prefix=item.get("prefix_read"),
                     )
                     data[item["id"]] = decode(item, raw)
                 except Exception as err:
@@ -1231,8 +1247,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sensor_status_raw = sensor_status_raw
 
         # 5. Weekly programmes, in the background. Cheap enough not to be worth an option:
-        # each is four telegrams, re-read once every 120 cycles, so three programmes cost under
-        # a second of bus time per half hour.
+        # one telegram per record (7 to 56 per programme), re-read once every 120 cycles, so
+        # even six phase programmes cost some 20 s of bus time per half hour.
         if self.profile.schedules:
             has_empty_sched = any(
                 not self.schedules.get(key)

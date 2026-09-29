@@ -26,7 +26,7 @@ def _inputs(groups=(), links=None, datapoints=(), enums=None):
         hidden_event_type_ids=set(),
         hidden_group_ids=set(),
         active_tiers=set(),
-        unreachable_fc=set(),
+        reachable_fc=None,
     )
 
 

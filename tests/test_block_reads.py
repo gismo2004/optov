@@ -3,8 +3,7 @@
 The addresses are the whole point. A block datapoint's address counts records for the
 bitmap programmes and three-byte groups for the phase ones, while a telegram's length field
 counts bytes, so the two only agree when a read covers exactly one record. Everything here
-pins that arithmetic, and pins the fallback that exists because some controllers accept a
-read spanning several records and some refuse it.
+pins that arithmetic, and that every record is its own telegram.
 """
 
 import asyncio
@@ -20,26 +19,18 @@ class Recorder:
     ordered read shows up as wrong content rather than merely a wrong call count.
     """
 
-    def __init__(self, base, refuse_multi=None, refuse_all=None, short_multi=False):
+    def __init__(self, base, refuse_all=None, short=False):
         self.base = base
-        # error codes the fake controller answers with; None means it answers normally
-        self.refuse_multi = refuse_multi  # for a read of more than one record
-        self.refuse_all = refuse_all  # error code for every read, whatever its size
-        self.short_multi = (
-            short_multi  # a read of more than one record comes back a byte short
-        )
+        self.refuse_all = refuse_all  # error code for every read; None answers normally
+        self.short = short  # every answer comes back a byte short
         self.calls = []  # (address, length)
 
     async def read_raw(self, address, length, fc=optolink.FC_VIRTUAL_READ):
         self.calls.append((address, length))
         if self.refuse_all is not None:
             raise OptolinkDeviceError("refused", address=address, code=self.refuse_all)
-        if self.refuse_multi is not None and length > self.record_size:
-            raise OptolinkDeviceError(
-                "refused", address=address, code=self.refuse_multi
-            )
         start = (address - self.base) * self.step_bytes
-        if self.short_multi and length > self.record_size:
+        if self.short:
             length -= 1
         return bytes((start + i) & 0xFF for i in range(length))
 
@@ -76,23 +67,16 @@ def test_anything_else_steps_one_address_per_byte():
     assert address_step_bytes(3, 10) == 1
 
 
-# -- chunking --------------------------------------------------------------------------
+# -- one record per telegram ----------------------------------------------------------
 
 
-def test_a_phase_programme_is_read_in_four_telegrams_when_allowed():
+def test_a_phase_programme_is_read_one_record_per_telegram():
     rec = Recorder(0x9200)
     client = client_with(rec, record_size=3, step_bytes=3)
     data = run(client.read_block(0x9200, 168, 56, step_bytes=3))
 
-    assert len(data) == 168
     assert data == bytes(i & 0xFF for i in range(168))
-    # 56 // 3 = 18 records per telegram, so 18 + 18 + 18 + 2.
-    assert rec.calls == [
-        (0x9200, 54),
-        (0x9212, 54),
-        (0x9224, 54),
-        (0x9236, 6),
-    ]
+    assert rec.calls == [(0x9200 + i, 3) for i in range(56)]
 
 
 def test_a_bitmap_programme_addresses_records_not_bytes():
@@ -100,49 +84,24 @@ def test_a_bitmap_programme_addresses_records_not_bytes():
     client = client_with(rec, record_size=24, step_bytes=24)
     data = run(client.read_block(0x9000, 168, 7, step_bytes=24))
 
-    assert len(data) == 168
-    # 56 // 24 = 2 records per telegram; the second starts two addresses on, not 48.
-    assert rec.calls == [(0x9000, 48), (0x9002, 48), (0x9004, 48), (0x9006, 24)]
-
-
-# -- the fallback ----------------------------------------------------------------------
-
-
-def test_a_controller_that_refuses_a_chunk_gets_one_record_per_telegram():
-    rec = Recorder(0x92E0, refuse_multi=optolink.ERR_BAD_RANGE)
-    client = client_with(rec, record_size=3, step_bytes=3)
-    data = run(client.read_block(0x92E0, 168, 56, step_bytes=3))
-
     assert data == bytes(i & 0xFF for i in range(168))
-    assert rec.calls[0] == (0x92E0, 54)  # the one refused telegram
-    assert rec.calls[1:] == [(0x92E0 + i, 3) for i in range(56)]
+    assert rec.calls == [(0x9000 + i, 24) for i in range(7)]
 
 
-def test_the_refusal_may_carry_any_code():
-    # Nothing documents what a controller answers to a read shape it does not recognise, so
-    # the fallback may not depend on the code being the one seen so far.
-    for code in (0x01, 0x03, 0x04, 0x05, 0x99):
-        rec = Recorder(0x9200, refuse_multi=code)
-        client = client_with(rec, record_size=3, step_bytes=3)
-        data = run(client.read_block(0x9200, 168, 56, step_bytes=3))
-        assert data == bytes(i & 0xFF for i in range(168))
-
-
-def test_a_short_answer_to_a_chunk_also_gets_one_record_per_telegram():
-    # A week of seven 8-byte days, answered with 55 bytes instead of an error telegram.
-    rec = Recorder(0x2000, short_multi=True)
+def test_a_byte_counting_programme_steps_by_the_record_size():
+    # A week of seven 8-byte days, type 1: day i at base + 8 i.
+    rec = Recorder(0x2000)
     client = client_with(rec, record_size=8, step_bytes=1)
     data = run(client.read_block(0x2000, 56, 7, step_bytes=1))
 
     assert data == bytes(range(56))
-    assert rec.calls[0] == (0x2000, 56)
-    assert rec.calls[1:] == [(0x2000 + 8 * i, 8) for i in range(7)]
+    assert rec.calls == [(0x2000 + 8 * i, 8) for i in range(7)]
 
 
 def test_a_boiler_error_buffer_is_addressed_by_its_type_not_probed():
     # Ten 9-byte records, type 3: record i at base + 9 i. Nothing asks for base + 1, which
     # such a controller refuses as an address it does not have.
-    rec = Recorder(0x7507, refuse_multi=optolink.ERR_BAD_RANGE)
+    rec = Recorder(0x7507)
     client = client_with(rec, record_size=9, step_bytes=1)
     data = run(
         client.read_error_history(
@@ -155,23 +114,10 @@ def test_a_boiler_error_buffer_is_addressed_by_its_type_not_probed():
     )
 
     assert data == bytes(range(90))
-    assert (0x7508, 9) not in rec.calls
-    assert rec.calls[1:] == [(0x7507 + 9 * i, 9) for i in range(10)]
+    assert rec.calls == [(0x7507 + 9 * i, 9) for i in range(10)]
 
 
-def test_the_fallback_is_remembered_for_the_next_read():
-    rec = Recorder(0x9200, refuse_multi=optolink.ERR_BAD_RANGE)
-    client = client_with(rec, record_size=3, step_bytes=3)
-    run(client.read_block(0x9200, 168, 56, step_bytes=3))
-    first = len(rec.calls)
-    run(client.read_block(0x9200, 168, 56, step_bytes=3))
-
-    assert first == 57  # one refused, then 56
-    assert len(rec.calls) - first == 56  # second pass does not repeat the refusal
-
-
-def test_a_single_record_that_is_refused_reaches_the_caller():
-    # This, and only this, means the datapoint is absent from this controller.
+def test_a_refused_record_reaches_the_caller():
     rec = Recorder(0x92E0, refuse_all=optolink.ERR_BAD_RANGE)
     client = client_with(rec, record_size=3, step_bytes=3)
 
@@ -180,7 +126,38 @@ def test_a_single_record_that_is_refused_reaches_the_caller():
     except OptolinkDeviceError as err:
         assert err.code == optolink.ERR_BAD_RANGE
     else:
-        raise AssertionError("a refused single record must not be swallowed")
+        raise AssertionError("a refused record must not be swallowed")
+
+
+def test_a_short_record_is_an_error_not_data():
+    rec = Recorder(0x2000, short=True)
+    client = client_with(rec, record_size=8, step_bytes=1)
+    try:
+        run(client.read_block(0x2000, 56, 7, step_bytes=1))
+    except optolink.OptolinkProtocolError:
+        pass
+    else:
+        raise AssertionError("a record of the wrong length must not pass as data")
+
+
+class WriteRecorder:
+    def __init__(self):
+        self.calls = []
+
+    async def write_raw(self, address, data, fc=optolink.FC_VIRTUAL_WRITE):
+        self.calls.append((address, bytes(data)))
+        return True
+
+
+def test_a_programme_day_is_written_one_record_per_telegram():
+    # Day 2 of a phase programme: eight 3-byte windows from record 16 on.
+    rec = WriteRecorder()
+    client = OptolinkClient("esphome://node", "node")
+    client.write_raw = rec.write_raw
+    day = bytes(range(24))
+    run(client.write_day_schedule(0x9200, 2, day, 24, 168, 56, step_bytes=3))
+
+    assert rec.calls == [(0x9200 + 16 + i, day[3 * i : 3 * i + 3]) for i in range(8)]
 
 
 def test_out_of_range_refusal_does_not_retire_the_address():

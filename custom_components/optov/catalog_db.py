@@ -130,6 +130,10 @@ TIER_CLASSIFICATION: dict[str, str | None] = {
     "DefaultSettings": "config",
 }
 
+# The largest payload one telegram carries; the same figure as optolink.MAX_TELEGRAM_PAYLOAD,
+# repeated because the catalog is read without the link.
+TELEGRAM_PAYLOAD = 56
+
 DAILY_TIERS = {"Overview", "PlantOverview", "Operation", "Trending", "Statistic"}
 
 # For the two kinds of reading Home Assistant has no device class for, so they are not all
@@ -710,7 +714,7 @@ def get_probe_targets(device_id: int, db_path: str) -> list[dict[str, Any]]:
         rows = conn.execute(
             """SELECT DISTINCT dp.id, dp.address, dp.byte_length, dp.block_length,
                       dp.byte_position, dp.bit_start, dp.bit_length, dp.parameter_type,
-                      dp.name, dp.fc_read
+                      dp.name, dp.fc_read, dp.prefix_read
                FROM display_conditions dc
                JOIN datapoints dp
                  ON dc.condition_event_type_id = dp.id AND dp.device_id = dc.device_id
@@ -730,7 +734,7 @@ def get_probe_targets(device_id: int, db_path: str) -> list[dict[str, Any]]:
             row = conn.execute(
                 """SELECT dp.id, dp.address, dp.byte_length, dp.block_length,
                           dp.byte_position, dp.bit_start, dp.bit_length, dp.parameter_type,
-                          dp.name, dp.fc_read
+                          dp.name, dp.fc_read, dp.prefix_read
                    FROM datapoints dp WHERE dp.device_id = ? AND dp.id = ?""",
                 (device_id, local_id),
             ).fetchone()
@@ -1253,7 +1257,7 @@ class _ProfileInputs:
     hidden_event_type_ids: set[int]
     hidden_group_ids: set[int]
     active_tiers: set[str]
-    unreachable_fc: set[str]
+    reachable_fc: set[str] | None
     # Derived once the datapoints are known.
     by_address: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     clock_settings: set[int] = field(default_factory=set)
@@ -1267,7 +1271,7 @@ def _load_profile_inputs(
     hidden_event_type_ids: set[int],
     hidden_group_ids: set[int],
     active_tiers: set[str],
-    unreachable_fc: set[str],
+    reachable_fc: set[str] | None,
 ) -> _ProfileInputs:
     """Read what the catalog says about one controller, in the culture asked for."""
     # Get device info
@@ -1373,7 +1377,7 @@ def _load_profile_inputs(
         hidden_event_type_ids=hidden_event_type_ids,
         hidden_group_ids=hidden_group_ids,
         active_tiers=active_tiers,
-        unreachable_fc=unreachable_fc,
+        reachable_fc=reachable_fc,
     )
     # Group siblings by address for status-nibble pairing
     for dp in inputs.datapoints:
@@ -1406,6 +1410,17 @@ def _circuit_of(dp: dict[str, Any], inputs: _ProfileInputs) -> str | None:
     return None
 
 
+def _reachable(fc: str, inputs: _ProfileInputs, known_only: bool = False) -> bool:
+    """Whether this link has a telegram for a catalog FCRead/FCWrite value.
+
+    Without a set from the link everything the catalog names passes, except, for writes, a
+    field that names no code at all.
+    """
+    if inputs.reachable_fc is None:
+        return not (known_only and fc in ("", "undefined"))
+    return fc in inputs.reachable_fc
+
+
 def _place_datapoint(
     dp: dict[str, Any], inputs: _ProfileInputs, profile: dict[str, Any]
 ) -> None:
@@ -1415,7 +1430,20 @@ def _place_datapoint(
         return
     if dp.get("entity_kind") == KIND_ACTION:
         return
-    if (dp.get("fc_read") or "Virtual_READ") in inputs.unreachable_fc:
+    fc_read = dp.get("fc_read") or "Virtual_READ"
+    if not _reachable(fc_read, inputs):
+        return
+    # A remote procedure is a reading only when the catalog gives the parameter it is called
+    # with (the LON participant list, one index per entry). Without one it is a procedure --
+    # clear the fault history, step the boiler sequence -- and polling it would call it.
+    if fc_read == "Remote_Procedure_Call" and not dp.get("prefix_read"):
+        return
+    # An array (several records) is not one value, and neither is anything longer than a
+    # telegram carries: read as one they either fail on every cycle or yield the first record
+    # cut out of a read the controller may not serve.
+    if (dp.get("block_factor") or 0) > 1:
+        return
+    if max(dp.get("block_length") or 0, dp.get("byte_length") or 0) > TELEGRAM_PAYLOAD:
         return
 
     # Skip raw multi-byte array dumps (e.g. 168-byte EEPROM schedule arrays handled by the
@@ -1519,6 +1547,10 @@ def _place_datapoint(
         # VScotHO1 boiler family uses GFA_READ for 94 of its datapoints.
         "fc_read": dp.get("fc_read"),
         "fc_write": dp.get("fc_write"),
+        # The parameter a remote-procedure reading is called with (hex); None otherwise.
+        "prefix_read": dp.get("prefix_read")
+        if fc_read == "Remote_Procedure_Call"
+        else None,
         # Only MultOffset consumes these (IntData * factor + offset); decode.py raises
         # rather than substituting 1.0/0.0 when a MultOffset datapoint lacks them.
         "conversion_factor": dp.get("conversion_factor"),
@@ -1581,9 +1613,13 @@ def _place_datapoint(
         "hexbyte2utf16byte",
     ) or param_type in ("array", "string")
 
+    # Writable only through a write code this link has, and never as a procedure call. A
+    # missing code ("undefined") is not replaced by a guess.
+    fc_write = dp.get("fc_write") or "undefined"
     writable = (
         dp.get("entity_kind") == KIND_WRITABLE
-        and (dp.get("fc_write") or "undefined") not in inputs.unreachable_fc
+        and fc_write != "Remote_Procedure_Call"
+        and _reachable(fc_write, inputs, known_only=True)
     )
     if writable:
         # A writable datapoint one bit wide has exactly two states, so it is a switch --
@@ -1783,6 +1819,8 @@ def _schedules(
         circuit = dp.get("circuit")
         if circuit and circuit in inputs.hidden_circuits:
             continue
+        if not _reachable(dp.get("fc_read") or "Virtual_READ", inputs):
+            continue
         block_length = dp.get("block_length") or 0
         block_factor = dp.get("block_factor") or 0
         if block_length % 7:
@@ -1836,12 +1874,12 @@ def generate_profile(
     culture: str,
     probed_values: dict[int, int],
     enabled_tiers: set[str] | None = None,
-    unreachable_fc: set[str] | None = None,
+    reachable_fc: set[str] | None = None,
 ) -> dict[str, Any]:
     """The entity set for one installation: what the catalog says, minus what the rules hide.
 
-    `unreachable_fc` are catalog FCRead/FCWrite values this link has no telegram for (see
-    optolink.unreachable_function_codes). A datapoint that cannot be read is left out entirely,
+    `reachable_fc` are the catalog FCRead/FCWrite values this link has a telegram for (see
+    optolink.reachable_function_codes). A datapoint that cannot be read is left out entirely,
     and one that cannot be written becomes a reading rather than a control that always fails.
     """
     hidden_event_type_ids, hidden_group_ids = evaluate_rules(
@@ -1859,7 +1897,7 @@ def generate_profile(
             # controller's own menu tree, not from tiers, so falling back to a tier list here
             # would silently re-enable a couple of hundred entities the user did not ask for.
             enabled_tiers if enabled_tiers is not None else set(),
-            unreachable_fc or set(),
+            reachable_fc,
         )
         profile: dict[str, Any] = {
             **{platform: [] for platform in _ENTITY_PLATFORMS},

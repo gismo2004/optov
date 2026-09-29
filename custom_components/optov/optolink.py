@@ -102,33 +102,36 @@ def is_filler(raw: bytes) -> bool:
     return bool(raw) and all(byte == 0xFF for byte in raw)
 
 
-def unreachable_function_codes(protocol: str) -> set[str]:
-    """Catalog FCRead/FCWrite values this protocol has no telegram for.
+def reachable_function_codes(protocol: str) -> set[str]:
+    """Catalog FCRead/FCWrite values this link has a telegram for.
 
-    Entities for those cannot work, so they are not generated at all -- see generate_profile().
-    Over P300 that is the GFA pair: those datapoints are served over KW only, and their codes
-    do not fit the five bits a P300 telegram has for the function, so what the controller
-    receives is some other function (0xC9 arrives as 0x09).
+    Everything else is left out of the profile -- see generate_profile() -- rather than sent
+    with a code guessed in its place: a datapoint of one of the bus families (KBUS, XRAM,
+    OpenTherm and the like) read as Virtual_READ answers from a different memory, and written
+    as Virtual_WRITE lands in it. KW has no RPC. Over P300 the GFA pair is out: those
+    datapoints are served over KW only, and their codes do not fit the five bits a P300
+    telegram has for the function, so what the controller receives is some other function
+    (0xC9 arrives as 0x09).
     """
     if protocol == PROTO_KW:
         return {
-            name
-            for name, code in FUNCTION_CODES.items()
-            if code not in KW_FUNCTION_CODES
+            name for name, code in FUNCTION_CODES.items() if code in KW_FUNCTION_CODES
         }
-    return {"GFA_READ", "GFA_WRITE"}
+    return set(FUNCTION_CODES) - {"GFA_READ", "GFA_WRITE"}
 
 
 def function_code(name: str | None, default: int = FC_VIRTUAL_READ) -> int:
-    """Resolve a catalog FCRead/FCWrite string to its wire function code."""
+    """Resolve a catalog FCRead/FCWrite string to its wire function code.
+
+    An empty field means the default. A name this integration does not implement is refused,
+    never replaced: the profile leaves such datapoints out, so reaching this is a bug, and a
+    substitute code would read or write some other memory.
+    """
     if not name:
         return default
     code = FUNCTION_CODES.get(name)
     if code is None:
-        _LOGGER.warning(
-            "unknown catalog function code %r, falling back to 0x%02X", name, default
-        )
-        return default
+        raise ValueError(f"function code {name!r} is not implemented")
     return code
 
 
@@ -147,10 +150,8 @@ MSGID_ERROR = 0x03
 #         length (for example a byte count that is not a whole number of records) or one that
 #         overruns into a neighbouring region. How strict that check is differs between
 #         controllers: one Vitocal accepts any whole number of records up to the telegram limit,
-#         another (a 333-G, #3) refuses every read that spans more than one record and takes
-#         exactly one record per telegram. So 0x04 on a multi-record read means "smaller", not
-#         "absent"; only a single-record read that is still refused says the datapoint is not
-#         there. read_block() falls back to single records by itself.
+#         another refuses every read that spans more than one record, which is why read_block()
+#         only ever asks for one record per telegram.
 #   0x21  a written value outside the range the controller accepts for that setting. The same
 #         setting takes a value inside its range at once, so the address is there and the telegram
 #         well formed; only the value was refused. Not permanent in the sense of is_permanent.
@@ -360,12 +361,6 @@ class OptolinkClient:
         # The opening in use while the port works; None once it went away or was closed.
         self._link: _Link | None = None
         self.esphome_info: Any | None = None
-        # Block datapoints whose records the controller insists on receiving one telegram at a
-        # time. Learned from its own ERR_BAD_RANGE rather than assumed -- see write_day_schedule().
-        self._no_chunked_write: set[int] = set()
-        # The same for reading: datapoints that refused a read spanning several records and
-        # are read one record per telegram from then on -- see read_block().
-        self._single_record_read: set[int] = set()
         # When the next reconnect may be tried (event-loop time), and whether the client was
         # closed on purpose, after which it must never connect again by itself.
         self._reconnect_at = 0.0
@@ -938,22 +933,12 @@ class OptolinkClient:
         programme type -- see address_step_bytes(). Record i therefore sits at
         `address + i * record_size // step_bytes`.
 
-        How many records one telegram may carry differs between controllers, and nothing we
-        can read tells us in advance which kind we are talking to. A multi-record read asks
-        for a byte count that spans several address steps, and since an address step is a
-        record (or three bytes) rather than a byte, that is a request no single-record reader
-        ever produces: a controller that serves addresses as plain memory answers it, one that
-        checks the request against its own datapoint table refuses it. Both are seen in the
-        field on the same catalog entry.
-
-        So the read starts with the large chunks -- 56 three-byte records in four telegrams
-        instead of 56 -- and treats *any* refusal of a multi-record read as "one at a time",
-        dropping to single records for that datapoint and remembering it. A multi-record read
-        answered with the wrong number of bytes counts as a refusal too: a boiler controller
-        answers a whole 56-byte week with 55 bytes rather than an error telegram. The refusal
-        then costs one telegram once per session, and what follows is exactly the single-record
-        sequence. A single record that is still refused, or still comes back short, is left to
-        the caller.
+        Every record is its own telegram. Controllers differ in what they make of a read that
+        spans several records: one serves it as plain memory, another refuses it, a third
+        answers a byte short, and one that answers something else entirely would go unnoticed.
+        A single record is the request every controller recognises, so that is the only one
+        sent. A record that is refused, or comes back with the wrong length, is left to the
+        caller.
         """
         if block_factor < 1 or block_length < 1 or block_length % block_factor:
             raise ValueError(
@@ -969,56 +954,16 @@ class OptolinkClient:
                 f"record size {record_size} of 0x{address:04X} exceeds the "
                 f"{MAX_TELEGRAM_PAYLOAD}-byte telegram limit"
             )
-        per_telegram = (
-            1
-            if address in self._single_record_read
-            else (MAX_TELEGRAM_PAYLOAD // record_size)
-        )
-
         result = bytearray()
-        done = 0  # records already fetched
-        while done < block_factor:
-            n = min(per_telegram, block_factor - done)
-            offset = done * record_size // step_bytes
-            try:
-                chunk = await self.read_raw(address + offset, n * record_size, fc)
-            except OptolinkDeviceError as err:
-                if n == 1:
-                    raise
-                # Any refusal of a multi-record read is taken as "this controller wants them
-                # one at a time", whatever code it chose: the request shape is one the
-                # protocol never otherwise produces (see above), so there is no documented
-                # answer to expect. A single record is the shape the controller is certain to
-                # recognise, and if that is refused too the error reaches the caller intact.
-                self._single_record_read.add(address)
-                per_telegram = 1
-                _LOGGER.info(
-                    "0x%04X refuses %d records in one read (0x%02X); "
-                    "reading one per telegram",
-                    address,
-                    n,
-                    err.code,
-                )
-                continue
-            if len(chunk) != n * record_size and n > 1:
-                self._single_record_read.add(address)
-                per_telegram = 1
-                _LOGGER.info(
-                    "0x%04X answers %d records with %d bytes instead of %d; "
-                    "reading one per telegram",
-                    address,
-                    n,
-                    len(chunk),
-                    n * record_size,
-                )
-                continue
-            if len(chunk) != n * record_size:
+        for index in range(block_factor):
+            offset = index * record_size // step_bytes
+            chunk = await self.read_raw(address + offset, record_size, fc)
+            if len(chunk) != record_size:
                 raise OptolinkProtocolError(
-                    f"0x{address:04X} record {done}: asked for {n * record_size} bytes, "
+                    f"0x{address:04X} record {index}: asked for {record_size} bytes, "
                     f"got {len(chunk)}"
                 )
             result.extend(chunk)
-            done += n
         return bytes(result)
 
     async def read_circuit_schedule(
@@ -1084,11 +1029,11 @@ class OptolinkClient:
     ) -> bool:
         """Write one day of a weekly programme.
 
-        A block datapoint is written the way it is read: record by record, at the record's
-        own address, with the address advancing per `step_bytes` exactly as read_block()
-        advances it -- the address rule of the programme type applies to both directions. For the heat-pump programmes that is one telegram per
-        switching window, eight per day. Writing a whole day as one telegram at the base
-        address lands on day 0 only.
+        A block datapoint is written the way it is read: record by record, one telegram each,
+        at the record's own address, with the address advancing per `step_bytes` exactly as
+        read_block() advances it -- the address rule of the programme type applies to both
+        directions. Writing a whole day as one telegram at the base address lands on day 0 only,
+        and a controller that takes a multi-record write may apply only part of it.
 
         Without block geometry each day is its own block at base + day * day_bytes and is
         written in one telegram.
@@ -1112,29 +1057,6 @@ class OptolinkClient:
             )
         records_per_day = day_bytes // record_size
         first = day_index * records_per_day
-        offset = first * record_size // step_bytes
-        day_address = base_address + offset
-
-        # A day is a run of consecutive records, and the controller reads many records in one
-        # telegram, so try to write it in one too: eight telegrams per day become one, and the
-        # day lands as a unit rather than as eight partial states. A controller that will not
-        # take it answers ERR_BAD_RANGE, which is a definitive no for that datapoint, so it is
-        # remembered and the slow path used from then on.
-        if (
-            base_address not in self._no_chunked_write
-            and len(raw_data) <= MAX_TELEGRAM_PAYLOAD
-        ):
-            try:
-                return await self.write_raw(day_address, raw_data, fc)
-            except OptolinkDeviceError as err:
-                if err.code != ERR_BAD_RANGE:
-                    raise
-                self._no_chunked_write.add(base_address)
-                _LOGGER.info(
-                    "0x%04X refuses a whole-day write; writing its records one at a time",
-                    base_address,
-                )
-
         for i in range(records_per_day):
             index = first + i
             record_offset = index * record_size // step_bytes

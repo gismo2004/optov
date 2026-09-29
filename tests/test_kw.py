@@ -126,16 +126,26 @@ def test_the_answer_must_be_as_long_as_it_was_asked_for():
     run(go())
 
 
-def test_what_kw_cannot_express_is_known_up_front():
-    # Entities for these would exist and never work, so the profile leaves them out.
-    missing = optolink.unreachable_function_codes(optolink.PROTO_KW)
-    assert "Remote_Procedure_Call" in missing
-    assert "Virtual_READ" not in missing and "GFA_READ" not in missing
-    # P300 reaches everything but the GFA pair, which is served over KW only.
-    assert optolink.unreachable_function_codes(optolink.PROTO_P300) == {
-        "GFA_READ",
-        "GFA_WRITE",
-    }
+def test_what_each_protocol_can_express_is_known_up_front():
+    # Entities for anything else would exist and never work, so the profile leaves them out.
+    kw = optolink.reachable_function_codes(optolink.PROTO_KW)
+    assert "Remote_Procedure_Call" not in kw
+    assert {"Virtual_READ", "GFA_READ"} <= kw
+    # P300 reaches everything the integration implements but the GFA pair, served over KW only.
+    p300 = optolink.reachable_function_codes(optolink.PROTO_P300)
+    assert {"Virtual_READ", "Remote_Procedure_Call", "EEPROM_READ"} <= p300
+    assert not {"GFA_READ", "GFA_WRITE"} & p300
+
+
+def test_a_function_code_it_does_not_implement_is_refused_not_guessed():
+    # A bus-family code read as Virtual_READ would answer from some other memory.
+    try:
+        optolink.function_code("KBUS_VIRTUAL_READ")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("an unknown function code must not fall back to another")
+    assert optolink.function_code(None) == optolink.FC_VIRTUAL_READ
 
 
 def test_all_bits_set_is_not_a_reading():

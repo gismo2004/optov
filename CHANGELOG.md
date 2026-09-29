@@ -10,11 +10,21 @@ commits.
 
 ## [Unreleased]
 
+### Changed
+- Weekly programmes are read and written one record per telegram, the one request every
+  controller recognises. Reading them takes longer in the background; nothing else changes.
+
 ### Fixed
-- Weekly programmes of a controller that answers a whole week one byte short are read day by day
-  instead of failing.
-- The boiler error history is read record by record at the addresses its catalog entry gives,
-  instead of failing where the controller refuses an address inside the buffer.
+- Datapoints with a read or write code this integration does not implement are left out, instead
+  of being read and written with a substitute code that reaches a different memory.
+- Remote procedures (such as clearing the fault history) are no longer polled or offered as
+  settings; readings that need a parameter are sent with it.
+- Arrays, and values longer than one telegram, no longer appear as entities that fail on every
+  poll.
+- A setting whose write code is missing from the catalog is shown as a reading.
+- Weekly programmes of a controller that answers a whole week one byte short are read.
+- The boiler error history is read at the addresses its catalog entry gives, instead of failing
+  where the controller refuses an address inside the buffer.
 - Over P300, datapoints only KW can reach are no longer asked for, which ends the "response does
   not match request" warnings at setup.
 
