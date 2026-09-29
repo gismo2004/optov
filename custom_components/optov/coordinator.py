@@ -380,21 +380,24 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_init_device(self) -> None:
         """Detect controller System ID and load matching device profile.
 
-        DeviceIdent is four consecutive bytes:
+        DeviceIdent starts with four bytes (the block is eight; the rest are protocol and
+        developer versions):
 
             0x00F8 DeviceGroup      0x00F9 Device
             0x00FA HardwareIndex    0x00FB SoftwareIndex
 
         System ID is DeviceGroup:Device big-endian. The last two are two independent
         single-byte indices, NOT a little-endian 16-bit version -- reading them as one number
-        yields a meaningless "software version". All four come back in one telegram.
+        yields a meaningless "software version". The whole block comes back in one telegram.
 
         A controller that does not answer this read is not identified at all, and the failure is
         left to speak for itself. Standing in a System ID of 0x0000 instead reported a link that
         never came up, or a controller that does not speak P300, as a catalog that lacks an
         entry -- and sent at least one user looking for the entry.
         """
-        ident = await self.client.read_raw(0x00F8, 4)
+        ident = await self.client.read_raw(
+            optolink.IDENT_ADDRESS, optolink.IDENT_LENGTH
+        )
         sys_id = int.from_bytes(ident[0:2], "big")
         hw_index, sw_index = ident[2], ident[3]
         sw_version = f"v{sw_index:02X}"

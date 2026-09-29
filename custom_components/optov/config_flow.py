@@ -62,7 +62,7 @@ from .const import (
     DOMAIN,
     option,
 )
-from .optolink import OptolinkClient
+from .optolink import IDENT_ADDRESS, IDENT_LENGTH, OptolinkClient
 from .translate import async_ui_text
 
 _LOGGER = logging.getLogger(__name__)
@@ -229,7 +229,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         client = OptolinkClient(device, host)
         try:
             await client.connect()
-            ident = await client.read_raw(0x00F8, 4)
+            ident = await client.read_raw(IDENT_ADDRESS, IDENT_LENGTH)
             sys_id = int.from_bytes(ident[0:2], "big")
             hw_index, sw_index = ident[2], ident[3]
             f0 = None

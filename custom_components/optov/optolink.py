@@ -166,6 +166,12 @@ ERR_OUT_OF_RANGE = 0x21
 # support for a controller family that has not been tried.
 MAX_TELEGRAM_PAYLOAD = 56
 
+# The identification block: eight bytes at 0x00F8 -- DeviceGroup, Device, HardwareIndex,
+# SoftwareIndex, then protocol and developer versions. It is read whole, as it is laid out; a
+# controller that checks reads against its own datapoint table may refuse a part of it.
+IDENT_ADDRESS = 0x00F8
+IDENT_LENGTH = 8
+
 # How long a failed reconnect holds off the next attempt. A node that is rebooting or off the
 # network refuses every try, and a poll cycle asks for hundreds of telegrams: trying again for
 # each of them would stretch the cycle by one connection timeout per datapoint.
