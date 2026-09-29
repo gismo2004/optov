@@ -10,29 +10,34 @@ commits.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-29
+
+To get everything in this release, rebuild your catalog with
+[VExtractor 0.2.0](https://github.com/gismo2004/VExtractor/releases/tag/v0.2.0) and upload it with
+Reconfigure. With your current catalog OptoV keeps working as before and shows a repair notice.
+
 ### Fixed
-- A reading the controller answers with fewer bytes than asked for is discarded instead of being
-  decoded into a wrong value.
-- Settings stored as a multiple (x2, x5, x10, x100), with a factor and offset, or in seconds shown
-  as hours or minutes are shown and written in the unit they are set in. They used to show and take
-  the raw stored number while their limits were in the real unit.
-- Settings whose value cannot be written as a number (addresses, byte strings) are shown as readings.
-- Identifiers wider than four bytes (LON Neuron ID and domain, serial and MAC numbers) are shown as
-  their bytes instead of a number made of the first four, and are no longer offered as settings.
-- Settings stored most significant byte first are written in that order; they used to be written
-  reversed.
-- Display rules on scaled readings compare the value in its shown unit, not the raw number.
-- A controller variant is chosen by its software index alone; a hardware index the catalog does not
-  list no longer sends some controllers to the generic variant of their family.
-- Display rules that hide a datapoint only when several conditions hold together are evaluated as
-  such. Each condition used to count on its own, so datapoints for equipment that is present went
-  missing -- on a heat pump with internal solar control, the solar pump's switching counter. Needs a
-  catalog rebuilt with VExtractor (catalog structure 3); older catalogs keep working as before.
+- Values your equipment has but that were missing in Home Assistant appear now -- for example the
+  solar pump's switching counter on a heat pump with its own solar control. Needs the rebuilt
+  catalog.
+- Settings kept in steps (x2, x5, x10, x100), with an offset, or in seconds show their real value
+  and accept it -- for example a delay in steps of 5 or a burner output in steps of 100. They used
+  to show the internal number, so a value entered could set something several times too large or
+  too small. Common on boilers; heat pumps such as the Vitocal with WO1A are not affected.
+- Serial numbers, network and LON identifiers show as text instead of a meaningless number, and
+  can no longer be changed by mistake. Addresses and similar values that cannot be set correctly
+  are shown as read-only.
+- The party timer on solid-fuel and pellet boiler controls (Vitoligno, Ecotronic) is set to the
+  time entered; it used to receive a different one.
+- Some controllers were recognised as a neighbouring model variant and got a slightly wrong set of
+  entities; they are now recognised correctly.
+- Values that depend on a sensor being connected (for example solar collector and tank
+  temperature) are shown or hidden correctly when the sensor reads just below 0 C.
+- A reading that arrives incomplete is skipped instead of showing a wrong value for one cycle.
 
 ### Changed
-- The fault history is read in full only when its newest entry changed, which is checked about
-  once a minute with a single telegram. New faults appear within about a minute instead of up
-  to fifteen, at less bus time. `refresh_all` reads it again as well.
+- New faults appear in the fault history within about a minute instead of up to fifteen, while the
+  controller is asked less often. `optov.refresh_all` reads the fault history again too.
 
 ## [0.6.0] - 2026-09-29
 
@@ -187,7 +192,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/gismo2004/optov/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/gismo2004/optov/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gismo2004/optov/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/gismo2004/optov/compare/v0.4.0...v0.4.1
