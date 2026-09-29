@@ -56,6 +56,7 @@ from .decode import (
     extract_bitfield,
     insert_bitfield,
     is_signed,
+    scale,
 )
 from .errors import decode_boiler_error_history, decode_wp_error_history
 from .optolink import OptolinkClient
@@ -1840,15 +1841,19 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """A setting's value, read with the same signedness async_write_item encodes it with.
 
         The declared parameter type decides, so a one-byte setting ranging up to 255 reads back
-        as the number that was written. Rounded to three places, which keeps the finest divisor
-        the catalog uses intact.
+        as the number that was written; its conversion then gives the unit it is set in.
         """
         bit_length = item.get("bit_length") or 0
         if bit_length:
             value = extract_bitfield(raw, item.get("bit_start", 0), bit_length)
         else:
             value = decode_int(self._slice_field(item, raw), item.get("parameter_type"))
-        return round(value / (item.get("div_ratio") or 1.0), 3)
+        return scale(
+            value,
+            item.get("conversion"),
+            item.get("conversion_factor"),
+            item.get("conversion_offset"),
+        )
 
     def _decode_select(self, item: dict[str, Any], raw: bytes) -> str:
         raw_int = self._raw_int(item, raw, False)

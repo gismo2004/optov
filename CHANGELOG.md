@@ -13,6 +13,10 @@ commits.
 ### Fixed
 - A reading the controller answers with fewer bytes than asked for is discarded instead of being
   decoded into a wrong value.
+- Settings stored as a multiple (x2, x5, x10, x100), with a factor and offset, or in seconds shown
+  as hours or minutes are shown and written in the unit they are set in. They used to show and take
+  the raw stored number while their limits were in the real unit.
+- Settings whose value cannot be written as a number (addresses, byte strings) are shown as readings.
 
 ### Changed
 - The fault history is read in full only when its newest entry changed, which is checked about

@@ -80,3 +80,26 @@ def test_a_type_says_what_it_can_hold():
     assert raw_bounds("SByte") == (-128, 127)
     assert raw_bounds("Int4") == (0, 4294967295)
     assert raw_bounds(None) == (0, 65535)
+
+
+def test_a_setting_is_written_back_in_the_raw_unit_it_was_read_in():
+    from decode import scale, unscale
+
+    cases = [
+        ("Div10", None, None, 215, 21.5),
+        ("Mult5", None, None, 150, 750),
+        ("Mult100", None, None, 199, 19900),
+        ("MultOffset", 0.5, -30.0, 100, 20.0),
+        ("Sec2Hour", None, None, 7200, 2.0),
+        ("NoConversion", None, None, 42, 42),
+    ]
+    for conv, factor, offset, raw, shown in cases:
+        assert scale(raw, conv, factor, offset) == shown, conv
+        assert unscale(shown, conv, factor, offset) == raw, conv
+
+
+def test_a_conversion_without_an_inverse_is_not_writable_as_a_number():
+    from decode import is_encodable
+
+    assert is_encodable("Mult10") and is_encodable("MultOffset")
+    assert not is_encodable("IPAddress") and not is_encodable("DateBCD")

@@ -94,3 +94,31 @@ def test_the_service_counters_are_plain_numbers():
     placed = _placed({"conversion": "LastBurnerCheck", "byte_length": 4})
     assert list(placed) == ["sensors"]
     assert decode_value(bytes([0x10, 0x27, 0, 0]), "LastCheckInterval") == 10000
+
+
+def test_a_multiplied_setting_takes_its_limits_in_the_shown_unit():
+    placed = _placed(
+        {
+            "entity_kind": catalog_db.KIND_WRITABLE,
+            "fc_write": "Virtual_WRITE",
+            "conversion": "Mult5",
+            "parameter_type": "Byte",
+            "byte_length": 1,
+            "block_length": 1,
+        }
+    )
+    number = placed["numbers"][0]
+    assert (number["min"], number["max"], number["step"]) == (0, 1275, 5)
+
+
+def test_an_address_setting_is_shown_not_set():
+    placed = _placed(
+        {
+            "entity_kind": catalog_db.KIND_WRITABLE,
+            "fc_write": "Virtual_WRITE",
+            "conversion": "IPAddress",
+            "byte_length": 4,
+            "block_length": 4,
+        }
+    )
+    assert list(placed) == ["sensors"]

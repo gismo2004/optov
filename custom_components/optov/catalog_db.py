@@ -17,12 +17,26 @@ from typing import Any
 try:
     # Real package context (Home Assistant importing custom_components.optov.catalog_db).
     from .conversions import schedule_type
-    from .decode import decodes_to_integer, decodes_to_number, is_supported, raw_bounds
+    from .decode import (
+        decodes_to_integer,
+        decodes_to_number,
+        is_encodable,
+        is_supported,
+        raw_bounds,
+        scale,
+    )
 except ImportError:
     # Standalone context: a script adds the integration directory to sys.path and imports
     # this module directly, with no parent package.
     from conversions import schedule_type
-    from decode import decodes_to_integer, decodes_to_number, is_supported, raw_bounds
+    from decode import (
+        decodes_to_integer,
+        decodes_to_number,
+        is_encodable,
+        is_supported,
+        raw_bounds,
+        scale,
+    )
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1056,15 +1070,17 @@ def _description(dp: dict[str, Any]) -> str | None:
     return text or None
 
 
-def _number_limits(dp: dict[str, Any], div: float) -> dict[str, Any]:
-    """What a writable number may be set to, and in what steps.
+def _number_limits(dp: dict[str, Any]) -> dict[str, Any]:
+    """What a writable number may be set to, and in what steps, in the unit it is shown in.
 
-    The catalog's own limits where it states them. Where it does not -- and it does not for
-    well over a third of this family's settings -- the datapoint itself answers: its parameter
-    type's width and sign give the range, the conversion's divisor the step. Inventing a range
-    instead refuses values the controller accepts and whole steps hide the tenths a scaled
-    datapoint is set in.
+    The catalog's own limits where it states them; they are in that unit already. Where it does
+    not -- and it does not for well over a third of this family's settings -- the datapoint
+    itself answers: its parameter type's width and sign give the raw range, and the conversion
+    turns that range and one raw step into the shown unit. Inventing a range instead refuses
+    values the controller accepts, and whole steps hide the tenths a scaled datapoint is set in.
     """
+    conv = dp.get("conversion")
+    factor, offset = dp.get("conversion_factor"), dp.get("conversion_offset")
     limits: dict[str, Any] = {}
     if dp.get("min_value") is not None:
         limits["min"] = dp["min_value"]
@@ -1072,10 +1088,15 @@ def _number_limits(dp: dict[str, Any], div: float) -> dict[str, Any]:
         limits["max"] = dp["max_value"]
     if dp.get("stepping") is not None and dp["stepping"] > 0:
         limits["step"] = dp["stepping"]
-    low, high = raw_bounds(dp.get("parameter_type"))
-    limits.setdefault("min", round(low / div, 3))
-    limits.setdefault("max", round(high / div, 3))
-    limits.setdefault("step", round(1 / div, 3))
+    ends = sorted(
+        scale(x, conv, factor, offset) for x in raw_bounds(dp.get("parameter_type"))
+    )
+    limits.setdefault("min", ends[0])
+    limits.setdefault("max", ends[1])
+    limits.setdefault(
+        "step",
+        abs(scale(1, conv, factor, offset) - scale(0, conv, factor, offset)) or 1,
+    )
     return limits
 
 
@@ -1636,13 +1657,13 @@ def _place_datapoint(
         elif enum_values:
             entry["options"] = enum_values
             profile["selects"].append(entry)
-        elif is_datetime_or_str:
+        elif is_datetime_or_str or not is_encodable(dp.get("conversion")):
+            # A value that cannot be turned back into its raw integer is shown, not set.
             entry["conversion"] = dp.get("conversion") or "NoConversion"
             profile["sensors"].append(_as_sensor(entry, sensor_category))
         else:
-            entry["div_ratio"] = _div_ratio(dp.get("conversion"))
             entry.update(_unit_meta(unit_str))
-            entry.update(_number_limits(dp, entry["div_ratio"]))
+            entry.update(_number_limits(dp))
             profile["numbers"].append(entry)
         return
 

@@ -125,6 +125,64 @@ def is_supported(conversion: str | None) -> bool:
     )
 
 
+def is_encodable(conversion: str | None) -> bool:
+    """Whether a value in this conversion's unit can be turned back into the raw integer.
+
+    Only then can a setting be offered as a number: the plain integer, a divisor, a multiplier
+    and MultOffset. Anything else -- dates, addresses, byte strings -- stays a reading.
+    """
+    conv = (conversion or "").strip().lower()
+    return (
+        conv in _PLAIN
+        or conv in DIVISORS
+        or conv in _MULTIPLIERS
+        or conv == "multoffset"
+    )
+
+
+def scale(
+    raw: int,
+    conversion: str | None,
+    factor: float | None = None,
+    offset: float | None = None,
+) -> float:
+    """A raw integer in the unit its conversion gives it; see is_encodable()."""
+    conv = (conversion or "").strip().lower()
+    if conv in DIVISORS:
+        return round(raw / DIVISORS[conv], 6)
+    if conv in _MULTIPLIERS:
+        return raw * _MULTIPLIERS[conv]
+    if conv == "multoffset":
+        return round(
+            raw * (factor if factor is not None else 1.0)
+            + (offset if offset is not None else 0.0),
+            6,
+        )
+    return raw
+
+
+def unscale(
+    value: float,
+    conversion: str | None,
+    factor: float | None = None,
+    offset: float | None = None,
+) -> int:
+    """The raw integer that scale() turns into `value`, rounded to the controller's grid."""
+    conv = (conversion or "").strip().lower()
+    if conv in DIVISORS:
+        return round(value * DIVISORS[conv])
+    if conv in _MULTIPLIERS:
+        return round(value / _MULTIPLIERS[conv])
+    if conv == "multoffset":
+        return round(
+            (value - (offset if offset is not None else 0.0))
+            / (factor if factor else 1.0)
+        )
+    if conv in _PLAIN:
+        return round(value)
+    raise DecodeError(f"conversion {conversion!r} cannot be written as a number")
+
+
 def decodes_to_number(conversion: str | None) -> bool:
     """Whether decode_value() turns this conversion into a number rather than text or a date.
 

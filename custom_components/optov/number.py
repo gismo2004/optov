@@ -6,6 +6,7 @@ from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import OptolinkConfigEntry
+from .decode import unscale
 from .entity import OptolinkEntity
 
 # Writes go one at a time: the controller sits on a serial line and the client queues
@@ -47,7 +48,12 @@ class OptolinkNumber(OptolinkEntity, NumberEntity):
         return self.raw_value
 
     async def async_set_native_value(self, value: float) -> None:
-        # The controller stores the scaled integer; the catalog's divisor undoes the display
-        # scaling. A 0.1-degree setpoint of 21.5 is written as 215.
-        scale = self._def.get("div_ratio", 1.0)
-        await self.coordinator.async_write_item(self._def, round(value * scale))
+        # The controller stores the raw integer; the conversion that scales it for display is
+        # undone: a 0.1-degree setpoint of 21.5 is written as 215, a x5 delay of 750 as 150.
+        raw = unscale(
+            value,
+            self._def.get("conversion"),
+            self._def.get("conversion_factor"),
+            self._def.get("conversion_offset"),
+        )
+        await self.coordinator.async_write_item(self._def, raw)
