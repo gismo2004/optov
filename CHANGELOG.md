@@ -24,6 +24,10 @@ commits.
 - Display rules on scaled readings compare the value in its shown unit, not the raw number.
 - A controller variant is chosen by its software index alone; a hardware index the catalog does not
   list no longer sends some controllers to the generic variant of their family.
+- Display rules that hide a datapoint only when several conditions hold together are evaluated as
+  such. Each condition used to count on its own, so datapoints for equipment that is present went
+  missing -- on a heat pump with internal solar control, the solar pump's switching counter. Needs a
+  catalog rebuilt with VExtractor (catalog structure 3); older catalogs keep working as before.
 
 ### Changed
 - The fault history is read in full only when its newest entry changed, which is checked about

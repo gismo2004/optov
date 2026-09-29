@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing, suppress
 from dataclasses import dataclass, field
 from typing import Any
@@ -58,7 +59,9 @@ CATALOG_FILENAME = "catalog.db"
 #
 #   1  level-name key stems on datapoint_defs, catalog_meta itself
 #   2  fa_error_codes: the fault texts of the burner automats
-CATALOG_SCHEMA_VERSION = 2
+#   3  display_condition_groups and display_conditions.group_id: rules as group trees, all six
+#      comparison operators
+CATALOG_SCHEMA_VERSION = 3
 
 # The oldest structure this code still reads. A catalog between the two works, minus what was
 # added since, and raises a repair saying so; one below this fails setup, because a query would
@@ -540,6 +543,17 @@ def get_db_connection(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    """Whether the catalog has this table -- older structure versions lack some."""
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
+            (name,),
+        ).fetchone()
+        is not None
+    )
+
+
 def get_available_languages(db_path: str) -> list[str]:
     """The language codes the catalog carries text in."""
     try:
@@ -881,6 +895,46 @@ def get_fa_error_codes(chip: str, db_path: str, culture: str = "de") -> dict[str
         return {r["code"].upper(): r["value"] for r in rows}
 
 
+def _hidden_by_rule_trees(
+    groups: list[Any], conditions: list[Any], holds: Callable[[Any], bool]
+) -> tuple[set[int], set[int]]:
+    """What a set of rule trees hides: (event type ids, group ids).
+
+    A rule is a tree of groups. One holds when all (type 1) or any (type 2) of its conditions and
+    child groups hold -- decided by the first member that disagrees with the group's own kind --
+    and a root group that holds hides its target. An empty all-group holds, an empty any-group
+    does not. `holds` answers for one condition row.
+    """
+    conditions_of: dict[int, list[Any]] = {}
+    for c in conditions:
+        conditions_of.setdefault(c["group_id"], []).append(c)
+    children_of: dict[int, list[int]] = {}
+    for g in groups:
+        if g["parent_id"] is not None:
+            children_of.setdefault(g["parent_id"], []).append(g["id"])
+    kind = {g["id"]: g["type"] for g in groups}
+
+    def group_holds(group_id: int) -> bool:
+        every = kind[group_id] == 1
+        for c in conditions_of.get(group_id, []):
+            if holds(c) != every:
+                return not every
+        for child in children_of.get(group_id, []):
+            if group_holds(child) != every:
+                return not every
+        return every
+
+    hidden_event_types: set[int] = set()
+    hidden_groups: set[int] = set()
+    for g in groups:
+        if g["parent_id"] is None and group_holds(g["id"]):
+            if g["target_event_type_id"] is not None:
+                hidden_event_types.add(g["target_event_type_id"])
+            if g["target_group_id"] is not None:
+                hidden_groups.add(g["target_group_id"])
+    return hidden_event_types, hidden_groups
+
+
 def _condition_holds(probed_value: float | None, op: str, compare: int) -> bool:
     if probed_value is None:
         return False
@@ -892,6 +946,10 @@ def _condition_holds(probed_value: float | None, op: str, compare: int) -> bool:
         return probed_value > compare
     if op == "lt":
         return probed_value < compare
+    if op == "ge":
+        return probed_value >= compare
+    if op == "le":
+        return probed_value <= compare
     return False
 
 
@@ -984,20 +1042,24 @@ def evaluate_rules(
     """Evaluate display condition rules and return (hidden_event_type_ids, hidden_group_ids)."""
     aliases = get_condition_aliases(device_id, db_path, culture)
     with closing(get_db_connection(db_path)) as conn:
+        tree = _has_table(conn, "display_condition_groups")
         rows = conn.execute(
-            """SELECT id, target_event_type_id, target_group_id, condition_event_type_id,
-                      op, compare_value, rule_type
-               FROM display_conditions
-               WHERE device_id = ?""",
+            f"""SELECT id, target_event_type_id, target_group_id, condition_event_type_id,
+                       op, compare_value, rule_type,
+                       {"group_id" if tree else "NULL AS group_id"}
+                FROM display_conditions
+                WHERE device_id = ?""",
             (device_id,),
         ).fetchall()
-
-    rules_by_target: dict[
-        tuple[int | None, int | None, int, int], list[dict[str, Any]]
-    ] = {}
-    for r in rows:
-        key = (r["id"], r["target_event_type_id"], r["target_group_id"], r["rule_type"])
-        rules_by_target.setdefault(key, []).append(dict(r))
+        groups = (
+            conn.execute(
+                """SELECT id, parent_id, type, target_event_type_id, target_group_id
+                   FROM display_condition_groups WHERE device_id = ?""",
+                (device_id,),
+            ).fetchall()
+            if tree
+            else []
+        )
 
     # A condition on a scaled datapoint states its value in the scaled unit ("above -1 C" on a
     # temperature in tenths), while the probe keeps what the controller sent. Enumerations
@@ -1035,25 +1097,32 @@ def evaluate_rules(
             return raw
         return scale(raw, conversion, factor, offset)
 
+    def holds(c: Any) -> bool:
+        return _condition_holds(
+            value_of(c["condition_event_type_id"]), c["op"], c["compare_value"]
+        )
+
     hidden_event_type_ids: set[int] = set()
     hidden_group_ids: set[int] = set()
 
-    for (_rule_id, target_et, target_g, rule_type), conds in rules_by_target.items():
-        holds_list = [
-            _condition_holds(
-                value_of(c["condition_event_type_id"]),
-                c["op"],
-                c["compare_value"],
-            )
-            for c in conds
-        ]
-        rule_holds = all(holds_list) if rule_type == 1 else any(holds_list)
+    def hide(target_et: int | None, target_g: int | None) -> None:
+        if target_et is not None:
+            hidden_event_type_ids.add(target_et)
+        if target_g is not None:
+            hidden_group_ids.add(target_g)
 
-        if rule_holds:
-            if target_et is not None:
-                hidden_event_type_ids.add(target_et)
-            if target_g is not None:
-                hidden_group_ids.add(target_g)
+    if groups:
+        return _hidden_by_rule_trees(groups, rows, holds)
+
+    # A catalog from before the trees: every condition row counts as a rule of its own.
+    rules: dict[tuple[int, int | None, int | None, int], list[Any]] = {}
+    for r in rows:
+        key = (r["id"], r["target_event_type_id"], r["target_group_id"], r["rule_type"])
+        rules.setdefault(key, []).append(r)
+    for (_rule_id, target_et, target_g, rule_type), conds in rules.items():
+        results = [holds(c) for c in conds]
+        if all(results) if rule_type == 1 else any(results):
+            hide(target_et, target_g)
 
     return hidden_event_type_ids, hidden_group_ids
 
