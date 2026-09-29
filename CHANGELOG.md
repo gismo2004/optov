@@ -19,6 +19,8 @@ commits.
 - Settings whose value cannot be written as a number (addresses, byte strings) are shown as readings.
 - Identifiers wider than four bytes (LON Neuron ID and domain, serial and MAC numbers) are shown as
   their bytes instead of a number made of the first four, and are no longer offered as settings.
+- Settings stored most significant byte first are written in that order; they used to be written
+  reversed.
 
 ### Changed
 - The fault history is read in full only when its newest entry changed, which is checked about

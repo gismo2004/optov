@@ -397,3 +397,21 @@ def test_the_fault_history_is_read_again_only_when_its_newest_entry_changed(
     full_reads, reads = asyncio.run(scenario())
     assert full_reads == [1]
     assert reads == 3  # one telegram per check
+
+
+def test_a_high_byte_first_setting_is_written_in_that_order(coordinator_module):
+    async def scenario():
+        controller = FakeController()
+        controller.memory[0x2500] = bytes(2)
+        c = _coordinator(coordinator_module, controller)
+        item = {
+            "id": "hbf",
+            "name": "hbf",
+            "address": 0x2500,
+            "bytes": 2,
+            "parameter_type": "IntHighByteFirst",
+        }
+        await c.async_write_item(item, 0x1234)
+        return controller.memory[0x2500]
+
+    assert asyncio.run(scenario()) == bytes([0x12, 0x34])

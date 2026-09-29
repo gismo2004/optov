@@ -51,6 +51,7 @@ from .conversions import (
     parse_level,
 )
 from .decode import (
+    byte_order,
     decode_int,
     decode_value,
     extract_bitfield,
@@ -1897,6 +1898,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         block = item.get("block") or width
         bit_length = item.get("bit_length") or 0
         signed = is_signed(item.get("parameter_type"))
+        # The same order the value is read in: most significant byte first for the
+        # *HighByteFirst types, least significant first for everything else.
+        order = byte_order(item.get("parameter_type"))
 
         if bit_length or block != width:
             current = await self._read_reg(
@@ -1910,11 +1914,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 position = item.get("byte_position", 0)
                 buffer = bytearray(current)
                 buffer[position : position + width] = value.to_bytes(
-                    width, "little", signed=signed
+                    width, order, signed=signed
                 )
                 payload = bytes(buffer)
         else:
-            payload = value.to_bytes(width, "little", signed=signed)
+            payload = value.to_bytes(width, order, signed=signed)
 
         # "undefined" is the catalog's way of saying it never recorded one, not a code.
         fc_write = item.get("fc_write")

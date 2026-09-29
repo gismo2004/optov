@@ -101,6 +101,12 @@ def is_signed(parameter_type: str | None) -> bool:
     return bool(spec and spec[1])
 
 
+def byte_order(parameter_type: str | None) -> str:
+    """The order a value of this parameter type is stored in: "big" for *HighByteFirst."""
+    spec = _PARAM_TYPES.get((parameter_type or "").strip().lower())
+    return "big" if spec and spec[2] else "little"
+
+
 def raw_bounds(parameter_type: str | None) -> tuple[int, int]:
     """The range the declared parameter type can hold, as raw integers.
 
