@@ -22,6 +22,8 @@ commits.
 - Settings stored most significant byte first are written in that order; they used to be written
   reversed.
 - Display rules on scaled readings compare the value in its shown unit, not the raw number.
+- A controller variant is chosen by its software index alone; a hardware index the catalog does not
+  list no longer sends some controllers to the generic variant of their family.
 
 ### Changed
 - The fault history is read in full only when its newest entry changed, which is checked about

@@ -567,12 +567,14 @@ def _select_variant(
     1. **F0**, but only when `Device` is 0xC0..0xCB *and* SoftwareIndex >= 200. Exact `f0`
        match first, then an `f0..f0_till` range. Within that range it is the only thing that
        separates several controllers declaring the same extension.
-    2. **IdentificationExtension** = `<HardwareIndex:X2><SoftwareIndex:X2>`. Exact match first,
-       then the `ident_ext..ident_ext_till` range, comparing the hardware and software bytes
-       independently rather than as one 16-bit number.
-    3. The software index on its own, but only where every candidate declares the same
-       hardware index, so that byte cannot be what separates them.
-    4. Failing those, the candidate that declares no extension at all, which acts as the
+    2. **The software index**, against the second byte of IdentificationExtension
+       (`<HardwareIndex:X2><SoftwareIndex:X2>`): exact match first, then the range to
+       `ident_ext_till`. The hardware byte is not compared. Every family driven here declares
+       one hardware index for all its variants, so the byte separates nothing, and a controller
+       reporting one the catalog never saw (0x00 where the catalog says 0x01) is still one of
+       them; the datapoint set follows the software index, which is what the model suffixes
+       name ("Softwarestand 4").
+    3. Failing those, the candidate that declares no extension at all, which acts as the
        catch-all.
     """
     if len(candidates) == 1:
@@ -596,38 +598,15 @@ def _select_variant(
             if lo is not None and hi is not None and lo >= 0 and lo <= f0 <= hi:
                 return c
 
-    # Stage 2 -- IdentificationExtension, exact then range.
-    if hw_index is not None and sw_index is not None:
+    # Stage 2 -- the software index, exact then range.
+    if sw_index is not None:
         for c in candidates:
             ext = _bytes(c["ident_ext"])
-            if ext and ext[0] == hw_index and ext[1] == sw_index:
+            if ext and ext[1] == sw_index:
                 return c
         for c in candidates:
             lo, hi = _bytes(c["ident_ext"]), _bytes(c["ident_ext_till"])
-            if lo and hi and lo[0] <= hw_index <= hi[0] and lo[1] <= sw_index <= hi[1]:
-                return c
-
-    # Stage 2b -- the software index alone, when the hardware byte cannot be telling variants
-    # apart because every candidate declares the same one. A controller reporting a hardware
-    # index the catalog never saw is then still one of these variants: the datapoint set
-    # follows the software index, which is what the model suffixes name ("Softwarestand 4").
-    # Where the hardware indices do differ -- the GWG families, where the byte names the board
-    # -- nothing is assumed and the lookup is left to fail.
-    if (
-        sw_index is not None
-        and len({(c["ident_ext"] or "")[:2] for c in candidates}) == 1
-    ):
-        for c in candidates:
-            ext, till = _bytes(c["ident_ext"]), _bytes(c["ident_ext_till"])
-            if ext and (ext[1] == sw_index or (till and ext[1] <= sw_index <= till[1])):
-                _LOGGER.warning(
-                    "Hardware index 0x%02X is not the 0x%02X that every variant of this "
-                    "System ID declares; selecting %s by software index 0x%02X alone",
-                    hw_index,
-                    ext[0],
-                    c["model"],
-                    sw_index,
-                )
+            if lo and hi and lo[1] <= sw_index <= hi[1]:
                 return c
 
     # Stage 3 -- the extension-less catch-all.

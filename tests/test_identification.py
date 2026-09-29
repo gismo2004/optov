@@ -25,14 +25,6 @@ KW2 = [
     variant("V200KW2_6", "0106", "010F"),
 ]
 
-# 0x2053, where the hardware index names the board and the software index repeats across them.
-GWG = [
-    variant("GWG_VBEM_35", "0135"),
-    variant("GWG_VBES_35", "0235"),
-    variant("GWG_VWMS_35", "0835"),
-    variant("GWG_VBT2_35", "1035"),
-]
-
 
 def test_an_exact_extension_wins():
     assert _select_variant(KW2, 0x01, 0x04, None, 0x98)["model"] == "V200KW2_4"
@@ -49,8 +41,11 @@ def test_an_unknown_hardware_index_still_resolves_by_software_index():
     assert _select_variant(KW2, 0x00, 0x01, None, 0x98)["model"] == "V200KW2"
 
 
-def test_a_hardware_index_that_names_the_board_is_not_guessed_away():
-    assert _select_variant(GWG, 0x04, 0x35, None, 0x53) is None
+def test_the_hardware_index_is_not_compared():
+    # A hardware byte the catalog never declares for this System ID changes nothing: the
+    # software index alone picks the variant, exact before range.
+    assert _select_variant(KW2, 0x07, 0x05, None, 0x98)["model"] == "V200KW2_5"
+    assert _select_variant(KW2, 0x07, 0x0C, None, 0x98)["model"] == "V200KW2_6"
 
 
 def test_the_extensionless_variant_is_the_catch_all():
