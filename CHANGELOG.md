@@ -10,26 +10,35 @@ commits.
 
 ## [Unreleased]
 
-### Changed
-- After an update, an open dashboard switches to the new cards by itself: it reloads once as soon as
-  an OptoV card is on screen, instead of running the old card until the app is restarted. If you are
-  in the middle of an edit, the card waits and shows a **Reload** button instead.
+## [0.8.0] - 2026-10-09
+
+Plan a holiday, get told about faults, and keep an eye on how often Home Assistant writes to
+your controller.
 
 ### Added
-- Holiday dates, and the other date settings a controller lets you change, can now be set from
-  Home Assistant with a date picker; before they could only be read. A date that was never set
-  shows as unknown instead of 1 January 1970. They are now date entities (`date.…`); the old
-  read-only sensors are removed by themselves.
-- The schedule card shows a heating circuit's holiday as a line above the week. Tap it to set the
-  first and last day or clear it; the card's own Save writes it, together with any programme
-  change.
-- A **Fault** event entity on the controller fires when a new fault is logged, with its code, text
-  and time, so an automation can send a message. Boilers with a burner automat also get
-  **Burner fault**. Faults already in the history when the entity first appears do not fire.
-- A **Writes today** diagnostic sensor on the gateway counts what is written to the controller.
+- **Holiday from Home Assistant.** Holiday dates, and the other dates a controller lets you change,
+  can now be set with a date picker; before they could only be read. A date that was never set
+  shows as unknown instead of 1 January 1970.
+- **Holiday in the schedule card.** A heating circuit's holiday is a line above the week. Tap it to
+  pick the first and last day or to clear it; the card's own Save writes it, together with any
+  change to the programme.
+- **Fault event.** A *Fault* event entity on the controller fires whenever a new fault is logged,
+  with its code, text and time, so an automation can send you a message. Boilers with a burner
+  automat also get *Burner fault*. Faults already in the history when the entity first appears
+  do not fire.
+- **Writes today.** A diagnostic sensor on the gateway counts what is written to the controller.
   If one setting is written more than 24 times in a day, a repair notice names it: some
-  controllers store settings in memory that wears out, so an automation writing on every change
-  or on a short timer is worth checking.
+  controllers keep settings in memory that wears out, so an automation writing on every change or
+  on a short timer is worth a look.
+
+### Changed
+- The date settings are now date entities (`date.…`). The old read-only sensors are removed by
+  themselves; an automation or dashboard that used one needs the new entity.
+- After an update, an open dashboard switches to the new cards by itself: it reloads once as soon
+  as an OptoV card is on screen, instead of running the old card until the app is restarted. If
+  you are in the middle of an edit, the card waits and offers a **Reload** button instead.
+- The schedule card's *Apply to* choice sits in its own panel above the save button, as one row
+  that fits a phone, and the days a save will go to are marked in the day row.
 
 ## [0.7.1] - 2026-09-29
 
@@ -226,7 +235,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/gismo2004/optov/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/gismo2004/optov/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/gismo2004/optov/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/gismo2004/optov/compare/v0.5.0...v0.6.0
