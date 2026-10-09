@@ -44,6 +44,8 @@ PLATFORMS = [
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SWITCH,
+    Platform.DATE,
+    Platform.EVENT,
 ]
 
 
@@ -51,3 +53,8 @@ def option(entry: ConfigEntry, key: str, default: Any) -> Any:
     """A setting of an entry, from its options or from the data of an entry made before that
     setting moved there."""
     return entry.options.get(key, entry.data.get(key, default))
+
+
+# Where the version of the dashboard cards being served is kept: the stamp in their URL. The
+# sensors the cards read publish it, so a card still running an older copy can tell.
+CARD_VERSION_KEY = f"{DOMAIN}_card_version"

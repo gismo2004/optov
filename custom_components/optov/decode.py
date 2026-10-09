@@ -8,6 +8,7 @@ Deliberately free of Home Assistant imports so the same logic can be exercised s
 against real hardware.
 """
 
+from datetime import date, datetime
 from typing import Any
 
 try:
@@ -15,11 +16,12 @@ try:
     from .conversions import (
         decode_datetime_bcd,
         decode_time53,
+        encode_datetime_bcd,
     )
 except ImportError:
     # Standalone context: a script adds the integration directory to sys.path and imports
     # this module directly, with no parent package.
-    from conversions import decode_datetime_bcd, decode_time53
+    from conversions import decode_datetime_bcd, decode_time53, encode_datetime_bcd
 
 # Integer ParameterType values as name -> (width_in_bits, signed, high_byte_first).
 #
@@ -89,6 +91,14 @@ _DECODED = {
     "daytodate",
     "multoffset",
 }
+
+
+# Conversions that hold a calendar date and nothing else, so a date can be written back into
+# them: DayToDate counts days since 1970-01-01, DateBCD is the eight-byte BCD timestamp with
+# the time left at midnight. DateTimeBCD carries a time of day as well and is not one of them.
+_DATES = {"daytodate", "datebcd"}
+
+_EPOCH = date(1970, 1, 1)
 
 
 class DecodeError(ValueError):
@@ -439,3 +449,59 @@ def _apply_enum(value: Any, enum: dict[Any, str] | None) -> Any:
     if not enum:
         return value
     return enum.get(value, enum.get(str(value), value))
+
+
+def is_date(conversion: str | None) -> bool:
+    """Whether this conversion holds a calendar date that can be read and written as one."""
+    return (conversion or "").strip().lower() in _DATES
+
+
+def decode_date(field: bytes, conversion: str | None) -> date | None:
+    """The date a DayToDate or DateBCD field holds, or None when it holds none.
+
+    A field of zeros is how the controller stores "not set": a holiday programme that was
+    never entered reads as day 0, which would otherwise show as 1 January 1970. A BCD field
+    that is not a real date (an unprogrammed 0xFF, a month 13) is not set either.
+    """
+    if not field or not any(field):
+        return None
+    conv = (conversion or "").strip().lower()
+    if conv == "daytodate":
+        days = int.from_bytes(field[:8], "little", signed=False)
+        try:
+            return date.fromordinal(_EPOCH.toordinal() + days)
+        except (OverflowError, ValueError):
+            return None
+    if conv == "datebcd":
+        text = decode_datetime_bcd(field)
+        try:
+            return date.fromisoformat(text[:10]) if text else None
+        except ValueError:
+            return None
+    raise DecodeError(f"conversion {conversion!r} does not hold a date")
+
+
+def encode_date(value: date, conversion: str | None, width: int) -> bytes:
+    """The field bytes that store `value` in a DayToDate or DateBCD datapoint of `width` bytes.
+
+    DayToDate is the day count since 1970-01-01, least significant byte first, in as many
+    bytes as the datapoint has; a date that does not fit (before 1970, or past what two bytes
+    can count) is refused rather than wrapped. DateBCD is the same eight bytes the clock is
+    set with, at midnight.
+
+    1 January 1970 is the date that reads back as "not set" (see decode_date), so it is
+    written as not set too -- all zeros, in either form. That is how a holiday is cleared.
+    """
+    conv = (conversion or "").strip().lower()
+    if conv in _DATES and value == _EPOCH:
+        return bytes(width)
+    if conv == "daytodate":
+        days = (value - _EPOCH).days
+        if days < 0 or days >= 1 << (8 * width):
+            raise DecodeError(f"{value.isoformat()} does not fit {width} bytes of days")
+        return days.to_bytes(width, "little")
+    if conv == "datebcd":
+        if width != 8:
+            raise DecodeError(f"DateBCD needs 8 bytes, the datapoint has {width}")
+        return encode_datetime_bcd(datetime(value.year, value.month, value.day))
+    raise DecodeError(f"conversion {conversion!r} cannot be written as a date")

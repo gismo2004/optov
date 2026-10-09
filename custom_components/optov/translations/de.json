@@ -106,6 +106,31 @@
       },
       "gfa_error_history": {
         "name": "Fehlerhistorie Feuerungsautomat"
+      },
+      "writes_today": {
+        "name": "Schreibvorgänge heute"
+      }
+    },
+    "event": {
+      "fault": {
+        "name": "Störung",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "fault": "Neue Störung"
+            }
+          }
+        }
+      },
+      "burner_fault": {
+        "name": "Brennerstörung",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "fault": "Neue Störung"
+            }
+          }
+        }
       }
     }
   },
@@ -172,6 +197,9 @@
     },
     "schedule_changed": {
       "message": "Das Programm {schedule} wurde seit dem letzten Lesen an der Regelung geändert ({days}). Es wurde nichts geschrieben; angezeigt wird jetzt der Stand der Regelung. Mit force erneut aufrufen, um ihn zu überschreiben."
+    },
+    "date_out_of_range": {
+      "message": "{date} kann in dieser Einstellung nicht gespeichert werden: sie fasst Daten von {first} bis {last}."
     }
   },
   "card": {
@@ -215,7 +243,15 @@
     "overwrite": "Mit meinen Änderungen überschreiben",
     "keep_controller": "Stand der Regelung behalten",
     "read_at": "Von der Regelung gelesen {time}",
-    "reread": "Neu von der Regelung lesen"
+    "reread": "Neu von der Regelung lesen",
+    "holiday": "Urlaub",
+    "holiday_none": "nicht geplant",
+    "holiday_clear": "Urlaub löschen",
+    "holiday_saved": "Urlaub gespeichert.",
+    "holiday_cleared": "Urlaub gelöscht.",
+    "holiday_invalid": "Beide Tage wählen; der letzte Tag darf nicht vor dem ersten liegen.",
+    "card_updated": "Diese Karte wurde aktualisiert.",
+    "reload": "Neu laden"
   },
   "text": {
     "no_faults": "Keine Einträge",
@@ -258,6 +294,10 @@
           }
         }
       }
+    },
+    "frequent_writes": {
+      "title": "Eine Einstellung wird sehr oft geschrieben",
+      "description": "Diese Adressen wurden heute mehr als {limit}-mal geschrieben: {addresses}.\n\nManche Regelungen speichern Einstellungen in einem Speicher, der sich mit jedem Schreibvorgang abnutzt, und der Katalog sagt nicht, welche. Mehr als ein Schreibvorgang pro Stunde auf dieselbe Einstellung kommt meist von einer Automation, die bei jeder Änderung oder in kurzem Takt schreibt. Prüfe, was diese Einstellungen schreibt, und lass es nur schreiben, wenn sich der Wert wirklich ändert.\n\nDieser Hinweis verschwindet morgen von selbst."
     }
   }
 }

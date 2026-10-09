@@ -33,6 +33,7 @@ from homeassistant.setup import async_when_setup
 
 from . import catalog_db, orphaned_statistics
 from .const import (
+    CARD_VERSION_KEY,
     CONF_CATALOG,
     CONF_DEVICE,
     CONF_ENCRYPTION_KEY,
@@ -73,9 +74,12 @@ GATEWAY_SENSORS = (
     "avg_response_time",
     "datapoint_rate",
     "catalog",
+    "writes_today",
 )
 FAULT_HISTORY_SENSOR = "fehlerhistorie"
 GFA_FAULT_HISTORY_SENSOR = "fehlerhistorie_fa"
+# The event entities that fire on a new entry in either fault history.
+FAULT_EVENTS = ("fault_event", "fault_event_fa")
 
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -580,6 +584,7 @@ def _expected_entities(
         ("numbers", "number"),
         ("selects", "select"),
         ("switches", "switch"),
+        ("dates", "date"),
     ):
         for item in getattr(profile, platform, []):
             expected[(domain, f"{prefix}{item['id']}")] = item
@@ -587,6 +592,8 @@ def _expected_entities(
         expected[("sensor", f"{prefix}schaltzeiten_{key}")] = None
     for suffix in (*GATEWAY_SENSORS, FAULT_HISTORY_SENSOR, GFA_FAULT_HISTORY_SENSOR):
         expected[("sensor", f"{prefix}{suffix}")] = None
+    for suffix in FAULT_EVENTS:
+        expected[("event", f"{prefix}{suffix}")] = None
     return expected
 
 
@@ -722,6 +729,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     )
     # The stamp makes a browser fetch the file again after an update rather than keep its copy.
     url = f"{CARD_URL}?v={int(mtime)}"
+    hass.data[CARD_VERSION_KEY] = int(mtime)
 
     async def _register(hass: HomeAssistant, _component: str) -> None:
         resources = _card_resources(hass)

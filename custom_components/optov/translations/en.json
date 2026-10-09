@@ -106,6 +106,31 @@
       },
       "gfa_error_history": {
         "name": "Burner fault history"
+      },
+      "writes_today": {
+        "name": "Writes today"
+      }
+    },
+    "event": {
+      "fault": {
+        "name": "Fault",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "fault": "New fault"
+            }
+          }
+        }
+      },
+      "burner_fault": {
+        "name": "Burner fault",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "fault": "New fault"
+            }
+          }
+        }
       }
     }
   },
@@ -172,6 +197,9 @@
     },
     "schedule_changed": {
       "message": "The programme {schedule} was changed on the controller ({days}) since it was last read. Nothing was written; the controller's version is shown now. Call again with force to write over it."
+    },
+    "date_out_of_range": {
+      "message": "{date} cannot be stored in this setting: it holds dates from {first} to {last}."
     }
   },
   "card": {
@@ -215,7 +243,15 @@
     "overwrite": "Overwrite with my changes",
     "keep_controller": "Keep the controller's",
     "read_at": "Read from the controller {time}",
-    "reread": "Read again from the controller"
+    "reread": "Read again from the controller",
+    "holiday": "Holiday",
+    "holiday_none": "none planned",
+    "holiday_clear": "Clear holiday",
+    "holiday_saved": "Holiday saved.",
+    "holiday_cleared": "Holiday cleared.",
+    "holiday_invalid": "Choose both days; the last day cannot come before the first.",
+    "card_updated": "This card was updated.",
+    "reload": "Reload"
   },
   "text": {
     "no_faults": "No entries",
@@ -258,6 +294,10 @@
           }
         }
       }
+    },
+    "frequent_writes": {
+      "title": "A setting is written very often",
+      "description": "These addresses were written more than {limit} times today: {addresses}.\n\nSome controllers keep settings in memory that wears out with every write, and the catalog does not say which ones. More than one write an hour to the same setting usually comes from an automation that writes on every change or on a short timer. Check what writes these settings and let it write only when the value really changes.\n\nThis notice goes away by itself tomorrow."
     }
   }
 }

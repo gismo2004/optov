@@ -157,6 +157,9 @@ def _coordinator(module, controller):
         update_interval=None,
         sensor_status={},
         sensor_status_raw={},
+        # Today already started, so the poll does not open a new day of write counts.
+        writes_today={},
+        _writes_day=datetime.now(UTC).date().isoformat(),
     )
     # Everything a poll does beyond reading and publishing is beside the point here.
     c._should_poll = lambda item, domain: True
@@ -415,3 +418,39 @@ def test_a_high_byte_first_setting_is_written_in_that_order(coordinator_module):
         return controller.memory[0x2500]
 
     assert asyncio.run(scenario()) == bytes([0x12, 0x34])
+
+
+def test_writes_are_counted_per_address_and_noticed(coordinator_module):
+    calls = []
+    issues = sys.modules["homeassistant.helpers.issue_registry"]
+    issues.IssueSeverity = _Constants
+    issues.async_create_issue = lambda hass, domain, issue_id, **kw: calls.append(
+        ("create", issue_id, kw["translation_placeholders"]["addresses"])
+    )
+    issues.async_delete_issue = lambda hass, domain, issue_id: calls.append(
+        ("delete", issue_id)
+    )
+    c = _coordinator(coordinator_module, FakeController())
+    c.__dict__.update(
+        hass=None,
+        config_entry=types.SimpleNamespace(entry_id="e1"),
+        _writes_day=None,
+    )
+    c._save_learned = lambda **values: None
+    c.datapoint_at = lambda address: None
+
+    for _ in range(coordinator_module.WRITES_PER_ADDRESS_NOTICE):
+        c._count_write(0x2000)
+    # At the limit itself there is no notice yet.
+    assert not [call for call in calls if call[0] == "create"]
+    c._count_write(0x2000)
+    c._count_write(0x7A07)
+    assert c.writes_today == {0x2000: 25, 0x7A07: 1}
+    assert c.writes_today_total == 26
+    created = [call for call in calls if call[0] == "create"]
+    assert created[-1] == ("create", "frequent_writes_e1", "0x2000 (25)")
+
+    # Midnight: the count starts over and the notice goes.
+    c._writes_day = "2000-01-01"
+    assert c.writes_today_total == 0
+    assert calls[-1] == ("delete", "frequent_writes_e1")

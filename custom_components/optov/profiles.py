@@ -56,7 +56,7 @@ def map_category(cat: str | None) -> EntityCategory | None:
 class DeviceProfile:
     """The entity set generated for one controller, as the platforms consume it."""
 
-    PLATFORMS = ("sensors", "binary_sensors", "numbers", "selects", "switches")
+    PLATFORMS = ("sensors", "binary_sensors", "numbers", "selects", "switches", "dates")
 
     def __init__(
         self,
@@ -79,6 +79,8 @@ class DeviceProfile:
         # How this controller expresses its daylight-saving changeovers, if it has the
         # settings at all. Roles come from the catalog's value ranges -- see catalog_db.
         self.clock_dst: dict[str, Any] = data.get("clock_dst") or {}
+        # Per circuit, the date settings that are its holiday's first and last day.
+        self.holidays: dict[str, dict[str, str]] = data.get("holidays") or {}
 
         # Programmes are keyed per datapoint; a programme tied to a circuit this unit does
         # not have (already filtered by the catalog layer) would carry a circuit key that is
@@ -97,6 +99,7 @@ class DeviceProfile:
         self.numbers: list[dict[str, Any]] = []
         self.selects: list[dict[str, Any]] = []
         self.switches: list[dict[str, Any]] = []
+        self.dates: list[dict[str, Any]] = []
         for platform in self.PLATFORMS:
             items = getattr(self, platform)
             for raw in data.get(platform, []):

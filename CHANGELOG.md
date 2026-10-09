@@ -10,6 +10,27 @@ commits.
 
 ## [Unreleased]
 
+### Changed
+- After an update, an open dashboard switches to the new cards by itself: it reloads once as soon as
+  an OptoV card is on screen, instead of running the old card until the app is restarted. If you are
+  in the middle of an edit, the card waits and shows a **Reload** button instead.
+
+### Added
+- Holiday dates, and the other date settings a controller lets you change, can now be set from
+  Home Assistant with a date picker; before they could only be read. A date that was never set
+  shows as unknown instead of 1 January 1970. They are now date entities (`date.…`); the old
+  read-only sensors are removed by themselves.
+- The schedule card shows a heating circuit's holiday as a line above the week. Tap it to set the
+  first and last day or clear it; the card's own Save writes it, together with any programme
+  change.
+- A **Fault** event entity on the controller fires when a new fault is logged, with its code, text
+  and time, so an automation can send a message. Boilers with a burner automat also get
+  **Burner fault**. Faults already in the history when the entity first appears do not fire.
+- A **Writes today** diagnostic sensor on the gateway counts what is written to the controller.
+  If one setting is written more than 24 times in a day, a repair notice names it: some
+  controllers store settings in memory that wears out, so an automation writing on every change
+  or on a short timer is worth checking.
+
 ## [0.7.1] - 2026-09-29
 
 ### Fixed

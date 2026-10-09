@@ -52,6 +52,7 @@ from .conversions import (
 )
 from .decode import (
     byte_order,
+    decode_date,
     decode_int,
     decode_value,
     extract_bitfield,
@@ -191,6 +192,11 @@ LEARNED = ("retired_items", "retired_addresses", "condition_cache", "condition_t
 # refusal, which is definitive and is remembered.
 KW_CYCLES_BEFORE_SKIPPING = 20
 _SAVE_DELAY = 10
+
+# Writes to one address in one day above which a repair notice names it: more than an
+# automation that writes every hour. Settings may be kept in memory that wears out with each
+# write, and the catalog does not say which.
+WRITES_PER_ADDRESS_NOTICE = 24
 
 # Sensor-health code meaning "this sensor is not fitted". The health nibble shares a block with
 # the value it describes, so every reading comes with it for free. 0 is healthy and 1..9 are
@@ -348,6 +354,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._retired_item_ids: set[str] = set()
         self._store: Store[dict[str, Any]] | None = None
         self._learned: dict[str, Any] = {}
+        # Writes the controller accepted today, per address, and which day "today" is (local,
+        # ISO). Kept in the store so a restart does not reset the count. See _count_write().
+        self.writes_today: dict[int, int] = {}
+        self._writes_day: str | None = None
+        client.on_write = self._count_write
         # Rotation state for the slow pool, plus the measured cost of one datapoint read and
         # the worst-case refresh interval that follows from it.
         self._read_cost: float = _DEFAULT_READ_COST
@@ -696,6 +707,82 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             int(a) for a in learned.get("retired_addresses") or []
         }
         self._unsupported_addresses |= self._retired_addresses
+        counts = learned.get("write_counts") or {}
+        if counts.get("day") == dt_util.now().date().isoformat():
+            self._writes_day = counts["day"]
+            self.writes_today = {
+                int(a): int(n) for a, n in (counts.get("addresses") or {}).items()
+            }
+            self._check_write_rate()
+
+    @callback
+    def _roll_write_day(self) -> None:
+        """Start a new day's count at local midnight, and drop yesterday's notice with it."""
+        today = dt_util.now().date().isoformat()
+        if self._writes_day == today:
+            return
+        self._writes_day = today
+        self.writes_today = {}
+        ir.async_delete_issue(
+            self.hass, DOMAIN, f"frequent_writes_{self.config_entry.entry_id}"
+        )
+
+    @callback
+    def _count_write(self, address: int) -> None:
+        """Count one write the controller accepted.
+
+        The catalog does not say which settings the controller keeps in memory that wears
+        out with every write, so every address is treated as if it did: counted, and named
+        in a repair notice once it is written more often in a day than an hourly automation
+        would. The count is in the store, so the notice also survives a restart.
+        """
+        self._roll_write_day()
+        self.writes_today[address] = self.writes_today.get(address, 0) + 1
+        self._save_learned(
+            write_counts={
+                "day": self._writes_day,
+                "addresses": {str(a): n for a, n in self.writes_today.items()},
+            }
+        )
+        self._check_write_rate()
+        self.async_update_listeners()
+
+    @callback
+    def _check_write_rate(self) -> None:
+        """Raise the frequent-writes notice for today's busiest addresses, if any."""
+        busy = sorted(
+            (
+                (address, count)
+                for address, count in self.writes_today.items()
+                if count > WRITES_PER_ADDRESS_NOTICE
+            ),
+            key=lambda pair: -pair[1],
+        )
+        if not busy:
+            return
+        listed = []
+        for address, count in busy:
+            item = self.datapoint_at(address)
+            label = f"0x{address:04X}" + (f" {item['name']}" if item else "")
+            listed.append(f"{label} ({count})")
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"frequent_writes_{self.config_entry.entry_id}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="frequent_writes",
+            translation_placeholders={
+                "addresses": ", ".join(listed),
+                "limit": str(WRITES_PER_ADDRESS_NOTICE),
+            },
+        )
+
+    @property
+    def writes_today_total(self) -> int:
+        """All writes accepted today, after starting a new day if midnight has passed."""
+        self._roll_write_day()
+        return sum(self.writes_today.values())
 
     @callback
     def _save_learned(self, **values: Any) -> None:
@@ -928,7 +1015,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if priority <= _URGENT_PRIORITY
             else _INTERVAL_READING_SLOW
         )
-        if domain in ("number", "select", "switch"):
+        if domain in ("number", "select", "switch", "date"):
             base *= _INTERVAL_PARAMETER
         return base
 
@@ -1174,6 +1261,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Fetch data dynamically for all points defined in the active profile."""
         if not self.profile:
             await self.async_init_device()
+        # A new day starts the write count over even when nothing is written.
+        self._roll_write_day()
 
         start_time = time.monotonic()
         self._polling = True
@@ -1197,6 +1286,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ("numbers", "number"),
                 ("selects", "select"),
                 ("switches", "switch"),
+                ("dates", "date"),
             )
             for item in getattr(self.profile, platform, [])
             if self._should_poll(item, domain)
@@ -1220,9 +1310,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ("numbers", "number", self._decode_number),
             ("selects", "select", self._decode_select),
             ("switches", "switch", lambda item, raw: self._raw_int(item, raw, False)),
+            ("dates", "date", self._decode_date),
         )
         for platform, domain, decode in decoders:
-            for item in getattr(self.profile, platform):
+            for item in getattr(self.profile, platform, []):
                 if not self._should_poll(item, domain):
                     continue
                 if item["id"] not in due:
@@ -1773,6 +1864,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ("numbers", "number"),
             ("selects", "select"),
             ("switches", "switch"),
+            ("dates", "date"),
         ):
             for item in getattr(self.profile, platform, []):
                 by_address.setdefault(item["address"], []).append((domain, item["id"]))
@@ -1897,6 +1989,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         )
 
+    def _decode_date(self, item: dict[str, Any], raw: bytes) -> str | None:
+        """A date setting as an ISO date, or None while the controller holds none."""
+        value = decode_date(self._slice_field(item, raw), item.get("conversion"))
+        return value.isoformat() if value else None
+
     def _decode_select(self, item: dict[str, Any], raw: bytes) -> str:
         raw_int = self._raw_int(item, raw, False)
         options = item.get("options", {})
@@ -1909,7 +2006,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_request_refresh()
         return res
 
-    async def async_write_item(self, item: dict[str, Any], value: int) -> bool:
+    async def async_write_item(self, item: dict[str, Any], value: int | bytes) -> bool:
         """Write one catalog datapoint, patching it into its block when it is not alone there.
 
         A datapoint is often a slice of a larger register rather than the whole thing -- a
@@ -1920,11 +2017,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         A rejected write is reported by the controller as an error telegram, the same mechanism
         that rejects a bad read, and surfaces as OptolinkDeviceError.
+
+        `value` is the raw integer, or for a value that is not an integer -- a date -- the
+        field's bytes exactly as they are to be stored.
         """
         async with self._write_lock:
             return await self._write_item(item, value)
 
-    async def _write_item(self, item: dict[str, Any], value: int) -> bool:
+    async def _write_item(self, item: dict[str, Any], value: int | bytes) -> bool:
         """async_write_item() under the write lock."""
         # A write must see the controller's current bytes, never this cycle's snapshot.
         self._cycle_blocks = {}
@@ -1937,6 +2037,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The same order the value is read in: most significant byte first for the
         # *HighByteFirst types, least significant first for everything else.
         order = byte_order(item.get("parameter_type"))
+        if isinstance(value, bytes):
+            if bit_length or len(value) != width:
+                raise ValueError(
+                    f"{len(value)} bytes do not fit the {width}-byte field at 0x{address:04X}"
+                )
+            field = value
+        else:
+            field = None
 
         if bit_length or block != width:
             current = await self._read_reg(
@@ -1949,12 +2057,18 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 position = item.get("byte_position", 0)
                 buffer = bytearray(current)
-                buffer[position : position + width] = value.to_bytes(
-                    width, order, signed=signed
+                buffer[position : position + width] = (
+                    field
+                    if field is not None
+                    else value.to_bytes(width, order, signed=signed)
                 )
                 payload = bytes(buffer)
         else:
-            payload = value.to_bytes(width, order, signed=signed)
+            payload = (
+                field
+                if field is not None
+                else value.to_bytes(width, order, signed=signed)
+            )
 
         # "undefined" is the catalog's way of saying it never recorded one, not a code.
         fc_write = item.get("fc_write")
@@ -1964,7 +2078,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "Writing %s (0x%04X): value=%s block=%s -> %s via %s",
             item.get("name", item["id"]),
             address,
-            value,
+            value.hex(" ") if isinstance(value, bytes) else value,
             current.hex(" ") if (bit_length or block != width) else "-",
             payload.hex(" "),
             fc_write,
@@ -2028,6 +2142,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for sw in getattr(self.profile, "switches", []):
             if _same_block(sw):
                 updated[sw["id"]] = self._raw_int(sw, raw, False)
+        for day in getattr(self.profile, "dates", []):
+            if _same_block(day):
+                updated[day["id"]] = self._decode_date(day, raw)
         if not updated:
             return
         if self._cycle_data is not None:

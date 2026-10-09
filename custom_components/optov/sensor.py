@@ -11,11 +11,13 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import catalog_db
+from .const import CARD_VERSION_KEY, DOMAIN
 from .conversions import DAYS, snap
 from .coordinator import OptolinkConfigEntry, OptolinkCoordinator
 from .entity import OptolinkEntity
@@ -50,6 +52,7 @@ async def async_setup_entry(
     entities.append(OptolinkActiveChannelsSensor(coordinator, entry))
     entities.append(OptolinkLatencySensor(coordinator, entry))
     entities.append(OptolinkDatapointRateSensor(coordinator, entry))
+    entities.append(OptolinkWritesTodaySensor(coordinator, entry))
     entities.append(
         OptolinkCatalogSensor(
             coordinator,
@@ -213,6 +216,21 @@ class OptolinkScheduleSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntit
             self._cfg.get("circuit"), self._cfg.get("name") or self._key
         )
 
+    def _holiday(self) -> dict[str, str] | None:
+        """The date entities holding this programme's circuit's holiday, for the card."""
+        profile = self.coordinator.profile
+        pair = (profile.holidays if profile else {}).get(self._cfg.get("circuit") or "")
+        if not pair:
+            return None
+        registry = er.async_get(self.hass)
+        ids = {
+            role: registry.async_get_entity_id(
+                "date", DOMAIN, f"{self.coordinator.stable_id}_{item_id}"
+            )
+            for role, item_id in pair.items()
+        }
+        return ids if all(ids.values()) else None
+
     @property
     def native_value(self) -> int | None:
         """Days with at least one switching window, or unknown before the first read."""
@@ -241,6 +259,8 @@ class OptolinkScheduleSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntit
             "days": list(DAYS),
             "base_address": f"0x{self._base_address:04X}",
             "read_at": self.coordinator.schedule_read_at.get(self._key),
+            "holiday": self._holiday(),
+            "card_version": self.hass.data.get(CARD_VERSION_KEY),
             # A copy: the attributes of the state Home Assistant has already published must
             # never share structure with the coordinator, or an update to one silently edits
             # the other and the comparison that decides whether to publish sees no change.
@@ -384,6 +404,45 @@ class OptolinkLatencySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
     def native_value(self) -> Any:
         """Average round trip on a five-millisecond grid, see OptolinkBusLoadSensor."""
         return snap(self.coordinator.avg_response_time_ms, 5)
+
+
+class OptolinkWritesTodaySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity):
+    """How many writes the controller accepted today, with the addresses as attributes.
+
+    Settings, programmes, the clock and raw writes all count. Starts over at local midnight;
+    the long-term statistics add the days up. A repair notice names an address written more
+    than WRITES_PER_ADDRESS_NOTICE times in one day.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "writes_today"
+    _attr_icon = "mdi:pencil-box-multiple-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.stable_id}_writes_today"
+        self._attr_device_info = coordinator.get_gateway_device_info()
+
+    @property
+    def object_id_hint(self) -> str:
+        """Entity id built from the model rather than the device's display name."""
+        return "optov writes today"
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.writes_today_total
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Today's writes per address, most written first. Changes only with a write."""
+        return {
+            f"0x{address:04X}": count
+            for address, count in sorted(
+                self.coordinator.writes_today.items(), key=lambda pair: -pair[1]
+            )
+        }
 
 
 class OptolinkCatalogSensor(SensorEntity):
@@ -544,6 +603,7 @@ class OptolinkErrorHistorySensor(CoordinatorEntity[OptolinkCoordinator], SensorE
             "entry_bytes": dp.get("entry_bytes"),
             "read_function": dp.get("fc_read"),
             "known_codes": self._known_codes,
+            "card_version": self.hass.data.get(CARD_VERSION_KEY),
         }
 
 

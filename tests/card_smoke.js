@@ -65,12 +65,20 @@ const sandbox = {
     }
   },
   Intl,
+  URL,
   console,
   setTimeout,
 };
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(CARD, 'utf8'), sandbox, { filename: CARD });
+// Home Assistant loads the cards as a module; here they run as a script, which has no
+// import.meta. The URL stands in for the one the integration registers, stamp included.
+const LOADED_AS = 'http://ha.local/optov/optov-cards.js?v=100';
+vm.runInContext(
+  fs.readFileSync(CARD, 'utf8').replace('import.meta.url', JSON.stringify(LOADED_AS)),
+  sandbox,
+  { filename: CARD }
+);
 
 /** The `card` section of the integration's own translations, as the websocket would return it. */
 function cardResources(language) {
@@ -322,6 +330,120 @@ async function main() {
   check('German card strings', html.includes('Übernehmen für') && html.includes('Auf Regelung speichern'));
   check('German weekday names', html.includes('Mo') && html.includes('So'));
 
+  console.log('holiday');
+  const dateState = (entityId, state, name) => ({
+    entity_id: entityId,
+    state,
+    last_updated: '2026-10-08T12:00:00Z',
+    attributes: { friendly_name: name },
+  });
+  const withHoliday = (start, end) => ({
+    ...states,
+    'sensor.schaltzeiten_hk1': scheduleSensor('sensor.schaltzeiten_hk1', 'Schaltzeiten HK1', splitWeek, {
+      holiday: { start: 'date.ferienbeginn_hk1', end: 'date.ferienende_hk1' },
+    }),
+    'date.ferienbeginn_hk1': dateState('date.ferienbeginn_hk1', start, 'Ferienbeginn HK1'),
+    'date.ferienende_hk1': dateState('date.ferienende_hk1', end, 'Ferienende HK1'),
+  });
+  const holidayHk1 = () => holidayStates['sensor.schaltzeiten_hk1'];
+  let holidayStates = withHoliday('unknown', 'unknown');
+  card = await build({ entity: 'sensor.schaltzeiten_hk1' }, holidayStates);
+  html = card.shadowRoot.innerHTML;
+  check('a paired programme shows the holiday line', html.includes('class="holiday-toggle"') && html.includes('Holiday'));
+  check('an unset holiday says so', html.includes('none planned'));
+  check('folded, the dates are not shown', !html.includes('class="holiday-start"'));
+  check('it sits above the days', html.indexOf('class="holiday-toggle"') < html.indexOf('class="tabs days"'));
+  card = await build({ entity: 'sensor.schaltzeiten_ww' }, holidayStates);
+  check('a programme without a holiday shows none', !card.shadowRoot.innerHTML.includes('class="holiday-toggle"'));
+
+  holidayStates = withHoliday('2099-12-24', '2100-01-06');
+  card = await build({ entity: 'sensor.schaltzeiten_hk1' }, holidayStates);
+  html = card.shadowRoot.innerHTML;
+  check('a planned holiday is marked', html.includes('class="holiday planned'));
+  check('folded, it shows its days', html.includes('2099') && html.includes('2100'));
+  card._holidayOpen = 'sensor.schaltzeiten_hk1';
+  card._render();
+  html = card.shadowRoot.innerHTML;
+  check('unfolded, it shows its dates', html.includes('value="2099-12-24"') && html.includes('value="2100-01-06"'));
+  check('a set holiday can be cleared', html.includes('class="holiday-clear"'));
+  check('nothing unsaved yet', !html.includes('class="button discard"'));
+
+  card._holidayEdit = { entityId: 'sensor.schaltzeiten_hk1', start: '', end: '' };
+  card._render();
+  html = card.shadowRoot.innerHTML;
+  check('a cleared holiday waits for the save', html.includes('Unsaved changes') && html.includes('class="button discard"'));
+  serviceCalls.length = 0;
+  await card._saveAll(holidayHk1());
+  check(
+    'saving a cleared holiday writes the not-set date to both, and nothing else',
+    serviceCalls.length === 2 && serviceCalls.every((c) => c.domain === 'date' && c.data.date === '1970-01-01'),
+    JSON.stringify(serviceCalls)
+  );
+  check('and folds it', card._holidayOpen === null && card._holidayEdit === null);
+
+  serviceCalls.length = 0;
+  card._holidayEdit = { entityId: 'sensor.schaltzeiten_hk1', start: '2099-12-24', end: '2100-01-10' };
+  await card._saveAll(holidayHk1());
+  check(
+    'saving writes only the day that changed',
+    serviceCalls.length === 1 && serviceCalls[0].data.entity_id === 'date.ferienende_hk1' && serviceCalls[0].data.date === '2100-01-10',
+    JSON.stringify(serviceCalls)
+  );
+
+  serviceCalls.length = 0;
+  card._holidayEdit = { entityId: 'sensor.schaltzeiten_hk1', start: '2099-12-24', end: '2100-01-10' };
+  card._edits[card._editKey(holidayHk1())] = [{ window: 1, start: '06:00', end: '08:00', mode: 2 }];
+  await card._saveAll(holidayHk1());
+  check(
+    'one save writes the holiday and the programme',
+    serviceCalls.length === 2 && serviceCalls[0].domain === 'date' && serviceCalls[1].service === 'set_schedule_day',
+    JSON.stringify(serviceCalls.map((c) => c.service))
+  );
+
+  serviceCalls.length = 0;
+  card._holidayEdit = { entityId: 'sensor.schaltzeiten_hk1', start: '2100-01-10', end: '2100-01-01' };
+  await card._saveAll(holidayHk1());
+  check('a holiday ending before it starts is refused', serviceCalls.length === 0 && card._status.kind === 'error');
+  card._holidayEdit = null;
+
+  console.log('update notice');
+  const stamped = (v) => ({
+    ...states,
+    'sensor.schaltzeiten_hk1': scheduleSensor('sensor.schaltzeiten_hk1', 'Schaltzeiten HK1', splitWeek, {
+      card_version: v,
+    }),
+  });
+  card = await build({ entity: 'sensor.schaltzeiten_hk1' }, stamped(100));
+  check('no notice while the card is the one served', !card.shadowRoot.innerHTML.includes('class="update"'));
+  card = await build({ entity: 'sensor.schaltzeiten_hk1' }, stamped(200));
+  html = card.shadowRoot.innerHTML;
+  check('a newer card served shows the notice', html.includes('class="update"') && html.includes('Reload'));
+  card = await build({ entity: 'sensor.schaltzeiten_hk1' }, states);
+  check('no stamp published, no notice', !card.shadowRoot.innerHTML.includes('class="update"'));
+
+  console.log('reloading by itself');
+  let reloads = 0;
+  const session = {};
+  sandbox.window.sessionStorage = {
+    getItem: (key) => (key in session ? session[key] : null),
+    setItem: (key, value) => (session[key] = String(value)),
+  };
+  sandbox.window.location = { reload: () => (reloads += 1) };
+  card = await build({ entity: 'sensor.schaltzeiten_hk1' }, stamped(200));
+  check('an outdated card reloads the page once', reloads === 1, `${reloads} reloads`);
+  card = await build({ entity: 'sensor.schaltzeiten_hk1' }, stamped(200));
+  check('and not again for the same version', reloads === 1, `${reloads} reloads`);
+  check('the notice stays as the fallback', card.shadowRoot.innerHTML.includes('class="update"'));
+  card = await build({ entity: 'sensor.schaltzeiten_hk1' }, stamped(300));
+  check('a further version reloads again', reloads === 2, `${reloads} reloads`);
+  card = await build({ entity: 'sensor.schaltzeiten_hk1' }, stamped(100));
+  card._holidayEdit = { entityId: 'sensor.schaltzeiten_hk1', start: '2027-01-01', end: '2027-01-02' };
+  card.hass = makeHass(stamped(400));
+  await tick();
+  check('never while something is being edited', reloads === 2, `${reloads} reloads`);
+  delete sandbox.window.sessionStorage;
+  delete sandbox.window.location;
+
   console.log('nothing to show');
   card = await build({ entity: 'sensor.missing' }, states);
   html = card.shadowRoot.innerHTML;
@@ -355,6 +477,15 @@ async function main() {
   check('finds the fault sensor by itself', html.includes('Kältekreis') && html.includes('Wärmepumpe defekt'));
   check('shows the controller and the count', html.includes('(Typ WO1A)') && html.includes('4 entries'));
   check('shows each code', html.includes('>C9<') && html.includes('>A9<'));
+  check('the fault card has no notice while current', !html.includes('class="update"'));
+  const behind = new FaultCard();
+  behind.setConfig({});
+  behind.hass = makeHass({
+    'sensor.fehlerhistorie': { ...faults, attributes: { ...faults.attributes, card_version: 200 } },
+  });
+  await tick();
+  await tick();
+  check('the fault card offers a reload when behind', behind.shadowRoot.innerHTML.includes('class="update"'));
 
   const filtered = new FaultCard();
   filtered.setConfig({ hide_codes: ['FF'] });
@@ -423,6 +554,36 @@ async function main() {
   check('the most frequent code comes first', mostFrequent.value === 'FF', JSON.stringify(mostFrequent));
 
   console.log('');
+  console.log('a newer copy takes over an older one');
+  {
+    // The copy above runs as build 100. A second copy of the same file, stamped 200 and marked
+    // so its output can be told apart, is loaded into the same page afterwards.
+    const older = new (registry['optov-schedule-card'])();
+    older.setConfig({ entity: 'sensor.schaltzeiten_hk1' });
+    older.hass = makeHass(withHoliday('unknown', 'unknown'));
+    await tick();
+    await tick();
+    check('the older copy draws its own row', !older.shadowRoot.innerHTML.includes('data-newer'));
+    const newer = fs
+      .readFileSync(CARD, 'utf8')
+      .replace('import.meta.url', JSON.stringify('http://ha.local/optov/optov-cards.js?v=200'))
+      .replace('<button class="holiday-toggle"', '<button data-newer class="holiday-toggle"');
+    // A module has a scope of its own; a block gives the script copy one.
+    vm.runInContext(`{\n${newer}\n}`, sandbox, { filename: CARD });
+    older.hass = makeHass(withHoliday('2027-01-01', '2027-01-02'));
+    await tick();
+    check('the card on the page now runs the newer code', older.shadowRoot.innerHTML.includes('data-newer'));
+    check('the element is still the one defined first', registry['optov-schedule-card'] === older.constructor);
+    const stale = fs
+      .readFileSync(CARD, 'utf8')
+      .replace('import.meta.url', JSON.stringify('http://ha.local/optov/optov-cards.js?v=50'))
+      .replace('<button class="holiday-toggle"', '<button data-stale class="holiday-toggle"');
+    vm.runInContext(`{\n${stale}\n}`, sandbox, { filename: CARD });
+    older.hass = makeHass(withHoliday('2027-01-03', '2027-01-04'));
+    await tick();
+    check('an older copy arriving later changes nothing', !older.shadowRoot.innerHTML.includes('data-stale'));
+  }
+
   if (failures.length) {
     console.log(`${failures.length} failed`);
     process.exit(1);

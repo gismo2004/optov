@@ -238,7 +238,10 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
   served from `async_setup`, not from an entry: a dashboard asking for it while Home Assistant
   is still starting, or while a controller is unreachable, would otherwise get a 404 -- and a
   browser keeps a 404 for that URL. What frees it is a new `?v=`, which is the card file's own
-  timestamp, so an update writing fresh files moves it by itself.
+  timestamp, so an update writing fresh files moves it by itself. A page that is already open
+  keeps the card it loaded, since a custom element cannot be defined twice; the sensors the
+  cards read publish the served stamp as `card_version`, and a card that is behind reloads the
+  page once (top of `optov-cards.js`).
 - **Who enabled an entity lives on the entity, not in the entry.** Home Assistant records no
   author for enabling or disabling, and restores a removed entity's enabled state and registry
   options when it is re-added, but not the config entry. `_async_track_manual_changes` marks an

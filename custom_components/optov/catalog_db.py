@@ -21,6 +21,7 @@ try:
     from .decode import (
         decodes_to_integer,
         decodes_to_number,
+        is_date,
         is_encodable,
         is_supported,
         raw_bounds,
@@ -33,6 +34,7 @@ except ImportError:
     from decode import (
         decodes_to_integer,
         decodes_to_number,
+        is_date,
         is_encodable,
         is_supported,
         raw_bounds,
@@ -1345,7 +1347,14 @@ def _schedule_level_texts(
     }
 
 
-_ENTITY_PLATFORMS = ("sensors", "binary_sensors", "numbers", "selects", "switches")
+_ENTITY_PLATFORMS = (
+    "sensors",
+    "binary_sensors",
+    "numbers",
+    "selects",
+    "switches",
+    "dates",
+)
 
 
 @dataclass
@@ -1770,6 +1779,11 @@ def _place_datapoint(
         elif enum_values:
             entry["options"] = enum_values
             profile["selects"].append(entry)
+        elif is_date(dp.get("conversion")) and not bit_length:
+            # A holiday's first and last day, a service date: a calendar date both ways. As
+            # a reading it could only be looked at; as a date it is set from a date picker.
+            entry["conversion"] = dp.get("conversion")
+            profile["dates"].append(entry)
         elif is_datetime_or_str or not is_encodable(dp.get("conversion")):
             # A value that cannot be turned back into its raw integer is shown, not set.
             entry["conversion"] = dp.get("conversion") or "NoConversion"
@@ -2119,4 +2133,31 @@ def generate_profile(
         _disambiguate_names(profile)
         profile["circuits"] = _active_circuits(profile, inputs)
         profile["schedules"] = _schedules(conn, culture, inputs, profile["circuits"])
+        profile["holidays"] = _holidays(profile)
         return profile
+
+
+def _holidays(profile: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Each circuit's holiday as its first and last day, where the catalog shows one.
+
+    Every date a controller lets you set is a holiday's departure or return day, and a circuit
+    that has a holiday has exactly those two -- the departure first in memory, the return
+    after it, across every controller in the catalog. So two dates in one circuit are its
+    holiday, in address order. Any other count (one alone, or several with no circuit to tell
+    them apart) is left unpaired: the dates stay settable, but nothing claims to know which
+    is which.
+    """
+    by_circuit: dict[str, list[dict[str, Any]]] = {}
+    for item in profile.get("dates", []):
+        if item.get("circuit"):
+            by_circuit.setdefault(item["circuit"], []).append(item)
+    holidays = {}
+    for circuit, items in by_circuit.items():
+        if len(items) != 2:
+            continue
+        first, last = sorted(
+            items,
+            key=lambda i: (int(str(i["address"]), 0), i.get("byte_position", 0)),
+        )
+        holidays[circuit] = {"start": first["id"], "end": last["id"]}
+    return holidays

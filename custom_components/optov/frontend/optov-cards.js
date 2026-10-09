@@ -27,6 +27,131 @@ const FAULT_CARD_TYPE = 'optov-fault-history-card';
 const FAULT_EDITOR_TYPE = 'optov-fault-history-card-editor';
 const DOMAIN = 'optov';
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+/* ------------------------------------------------------------------------------------------
+ * Updates. A dashboard that stays open keeps the copy of these cards it loaded, even after the
+ * integration was updated and serves a new one: a custom element cannot be defined twice in a
+ * page. The integration puts a stamp in the cards' URL and publishes the same stamp on the
+ * sensors the cards read, so a copy that is behind can say so and offer a reload -- which is
+ * all it takes, since the new stamp makes the browser fetch the new file.
+ *
+ * The reload happens by itself as soon as an outdated card is on screen, once per new version:
+ * the stamp it reloaded for is kept for the browser session, so a reload that did not bring the
+ * new file (a proxy, a stubborn cache) cannot turn into a loop. Not while something is being
+ * edited, and not where the session store is unavailable; the notice with its button is what
+ * remains then.
+ * ---------------------------------------------------------------------------------------- */
+const RELOADED_FOR = 'optov-cards-reloaded-for';
+
+const LOADED_VERSION = (() => {
+  try {
+    return new URL(import.meta.url).searchParams.get('v');
+  } catch (err) {
+    return null;
+  }
+})();
+
+// This copy's build, for telling which of two copies in one page is newer: the stamp, which is
+// the card file's own timestamp. A copy loaded without one counts as the oldest.
+const CARD_BUILD = Number(LOADED_VERSION) || 0;
+
+/*
+ * A page can end up with more than one copy of these cards: an open dashboard after an update, a
+ * copy a browser or app still holds in its cache and runs before the current one arrives. The
+ * first copy to run defines the elements, and a defined element cannot be defined again, so the
+ * current code would be ignored. Instead, a newer copy hands its methods to the classes already
+ * defined; every card on the page runs the newer code from its next update on, without a reload.
+ */
+function adopt(name, cls) {
+  const existing = customElements.get(name);
+  cls.BUILD = CARD_BUILD;
+  if (!existing) {
+    customElements.define(name, cls);
+    return;
+  }
+  if (existing === cls || !(CARD_BUILD > (Number(existing.BUILD) || 0))) return;
+  for (const key of Object.getOwnPropertyNames(cls.prototype)) {
+    if (key !== 'constructor') {
+      Object.defineProperty(existing.prototype, key, Object.getOwnPropertyDescriptor(cls.prototype, key));
+    }
+  }
+  for (const key of Object.getOwnPropertyNames(cls)) {
+    if (!['length', 'name', 'prototype'].includes(key)) {
+      Object.defineProperty(existing, key, Object.getOwnPropertyDescriptor(cls, key));
+    }
+  }
+}
+
+/**
+ * Fills in what this copy's methods expect on an instance an older copy constructed. Returns
+ * true the first time, when the instance has just come over and its config should be applied
+ * again with this copy's setConfig.
+ */
+function adoptState(instance, defaults) {
+  if (instance._build === CARD_BUILD) return false;
+  instance._build = CARD_BUILD;
+  for (const [key, value] of Object.entries(defaults())) {
+    if (instance[key] === undefined) instance[key] = value;
+  }
+  return true;
+}
+
+const SCHEDULE_DEFAULTS = () => ({
+  _config: {},
+  _activeDay: todayKey(),
+  _scope: null,
+  _selectedEntityId: null,
+  _edits: {},
+  _saving: false,
+  _status: null,
+  _conflict: null,
+  _reading: false,
+  _signature: null,
+  _strings: null,
+  _holidayEdit: null,
+  _holidayOpen: null,
+  _holidayBusy: false,
+});
+const FAULT_DEFAULTS = () => ({ _config: {}, _signature: null, _strings: null });
+const EDITOR_DEFAULTS = () => ({ _config: {}, _formReady: false, _strings: null });
+
+/** Whether Home Assistant serves a newer copy of these cards than the one running here. */
+function isOutdated(stateObj) {
+  const served = Number(stateObj && stateObj.attributes && stateObj.attributes.card_version);
+  return Boolean(served && CARD_BUILD && served > CARD_BUILD);
+}
+
+/** Reload the page for a newer card, unless `busy` or already tried for this version. */
+function reloadIfOutdated(stateObj, busy) {
+  if (busy || !isOutdated(stateObj)) return false;
+  const served = String(stateObj.attributes.card_version);
+  try {
+    if (window.sessionStorage.getItem(RELOADED_FOR) === served) return false;
+    window.sessionStorage.setItem(RELOADED_FOR, served);
+  } catch (err) {
+    return false;
+  }
+  window.location.reload();
+  return true;
+}
+
+function updateNotice(t) {
+  return `<div class="update">
+      <span>${escapeHtml(t('card_updated'))}</span>
+      <button class="button primary reload">${escapeHtml(t('reload'))}</button>
+    </div>`;
+}
+
+function bindReload(root) {
+  root.querySelectorAll('.reload').forEach((el) => el.addEventListener('click', () => window.location.reload()));
+}
+
+const UPDATE_STYLE = `
+  .update { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px;
+            margin-bottom: 12px; border-radius: 8px; border: 1px solid var(--primary-color); font-size: 0.9rem; }
+  .update .button { padding: 6px 14px; border-radius: 8px; border: 1px solid var(--primary-color); font: inherit;
+            font-weight: 500; cursor: pointer; background: var(--primary-color); color: var(--text-primary-color, #fff); }
+`;
 const MINUTES_PER_DAY = 24 * 60;
 
 /* ------------------------------------------------------------------------------------------
@@ -95,6 +220,24 @@ function weekdayNames(lang, style) {
 
 function todayKey() {
   return DAY_KEYS[(new Date().getDay() + 6) % 7];
+}
+
+/** Today as an ISO date in local time, comparable with a date entity's state. */
+function isoToday() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/** "24 Dec – 6 Jan 2027": the year only where it is not this one. Empty when neither is set. */
+function holidayRange(start, end, lang) {
+  const thisYear = new Date().getFullYear();
+  const format = (iso) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    const options = { day: 'numeric', month: 'short', ...(y !== thisYear ? { year: 'numeric' } : {}) };
+    return new Date(y, m - 1, d).toLocaleDateString(lang, options);
+  };
+  return [start, end].filter(Boolean).map(format).join(' – ');
 }
 
 function isScheduleEntity(stateObj) {
@@ -318,6 +461,8 @@ const STYLE = `
   .tab.programmed { color: var(--primary-text-color); border-color: var(--color-1, #4269d0); }
   .tab.programmed { background: color-mix(in srgb, var(--color-1, #4269d0) 14%, transparent); }
   .tab.programmed.active { background: var(--primary-color); border-color: var(--primary-color); }
+  /* The other days a save goes to, so the choice under "Apply to" shows up on the days themselves. */
+  .tab.inscope { border-color: var(--primary-color); box-shadow: inset 0 -3px 0 var(--primary-color); }
   .timeline { margin: 12px 0; }
   .bar { position: relative; height: 38px; border-radius: 6px; overflow: hidden; background: var(--secondary-background-color); }
   .segment { position: absolute; bottom: 0; display: flex; align-items: center; justify-content: center;
@@ -325,15 +470,17 @@ const STYLE = `
              background: var(--primary-color); border-radius: 3px 3px 0 0; }
   .ticks { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--secondary-text-color); margin-top: 4px; }
   .matching { font-size: 0.8rem; color: var(--secondary-text-color); margin: -6px 0 10px; }
-  .scope { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;
-           padding: 10px 12px; border-radius: 10px; background: var(--secondary-background-color); }
-  .scope .label { font-size: 0.9rem; font-weight: 500; margin-right: 4px; }
-  .scope button { padding: 7px 14px; border-radius: 16px; border: 1px solid var(--divider-color);
+  /* The label above and the choices as one segmented row, which stays on one line on a phone. */
+  .scope { display: flex; flex-direction: column; gap: 6px; }
+  .scope .label { font-size: 0.85rem; font-weight: 500; color: var(--secondary-text-color); }
+  .scope .choices { display: flex; border: 1px solid var(--divider-color); border-radius: 10px; overflow: hidden; }
+  .scope button { flex: 1 1 auto; min-width: 0; padding: 8px 6px; border: none; border-left: 1px solid var(--divider-color);
                   background: var(--card-background-color); color: var(--secondary-text-color);
-                  font: inherit; font-size: 0.88rem; cursor: pointer; white-space: nowrap; }
-  .scope button:hover { color: var(--primary-text-color); border-color: var(--primary-color); }
-  .scope button.active { background: var(--primary-color); border-color: var(--primary-color);
-                         color: var(--text-primary-color, #fff); font-weight: 500; }
+                  font: inherit; font-size: 0.85rem; cursor: pointer; white-space: nowrap;
+                  overflow: hidden; text-overflow: ellipsis; }
+  .scope button:first-child { border-left: none; }
+  .scope button:hover { color: var(--primary-text-color); }
+  .scope button.active { background: var(--primary-color); color: var(--text-primary-color, #fff); font-weight: 500; }
   .windows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
   .window { display: grid; grid-template-columns: 24px 1fr auto 1fr 1.2fr 36px; align-items: center; gap: 8px;
             padding: 6px 10px; border-radius: 8px; border: 1px solid var(--divider-color);
@@ -352,8 +499,9 @@ const STYLE = `
   .add { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 8px; border: 1px dashed var(--divider-color);
          background: none; color: var(--primary-text-color); font: inherit; font-size: 0.9rem; cursor: pointer; }
   .add:hover { border-color: var(--primary-color); }
-  .footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px;
-            border-top: 1px solid var(--divider-color); }
+  /* Which days a change goes to, right above the buttons that send it. */
+  .savebar { padding: 12px; margin-bottom: 12px; border-radius: 12px; background: var(--secondary-background-color); }
+  .footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .status { font-size: 0.9rem; color: var(--secondary-text-color); min-width: 0; }
   .status.ok { color: var(--success-color, var(--primary-color)); }
   .status.error { color: var(--error-color); }
@@ -373,6 +521,31 @@ const STYLE = `
             --mdc-icon-size: 18px; }
   .reread:hover { background: var(--secondary-background-color); }
   .reread:disabled { opacity: 0.5; cursor: default; }
+  /* The holiday sits above the week because it overrides the whole programme for its days. */
+  .holiday { margin-bottom: 12px; border: 1px solid var(--divider-color); border-radius: 10px; }
+  .holiday.planned { border-color: var(--primary-color); }
+  .holiday.planned { background: color-mix(in srgb, var(--primary-color) 8%, transparent); }
+  .holiday-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 6px 12px;
+                    box-sizing: border-box; border: none; background: none; color: var(--primary-text-color);
+                    font: inherit; text-align: left; cursor: pointer; }
+  .holiday-toggle ha-icon { flex: none; --mdc-icon-size: 20px; color: var(--secondary-text-color); }
+  .holiday.planned .holiday-toggle .icon { color: var(--primary-color); }
+  .holiday-toggle .label { font-size: 0.9rem; font-weight: 500; }
+  .holiday-toggle .value { margin-left: auto; font-size: 0.9rem; color: var(--secondary-text-color);
+                           font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .holiday.planned .holiday-toggle .value { color: var(--primary-text-color); }
+  .holiday.dirty .holiday-toggle .value::after { content: ' •'; }
+  .holiday-body { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+  .holiday-days { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+  .holiday-clear { align-self: flex-end; display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+                   border-radius: 8px; border: 1px solid var(--error-color); background: none; color: var(--error-color);
+                   font: inherit; font-size: 0.85rem; font-weight: 500; cursor: pointer; --mdc-icon-size: 18px; }
+  .holiday-clear:hover { background: color-mix(in srgb, var(--error-color) 10%, transparent); }
+  .holiday-clear:disabled { opacity: 0.5; cursor: default; }
+  .holiday input[type="date"] { width: 100%; min-width: 0; box-sizing: border-box; padding: 7px 8px; border-radius: 6px;
+             font: inherit; font-size: 0.95rem; background: var(--card-background-color); color: var(--primary-text-color);
+             border: 1px solid var(--divider-color); }
+  .holiday input[type="date"]:focus { outline: none; border-color: var(--primary-color); }
 `;
 
 class OptoVScheduleCard extends HTMLElement {
@@ -393,6 +566,13 @@ class OptoVScheduleCard extends HTMLElement {
     this._reading = false;
     this._signature = null;
     this._strings = null;
+    // Holiday dates being typed, before they are saved: { entityId, start, end } with ISO dates
+    // or '' for none. entityId is the programme on screen, whose circuit the holiday is.
+    this._holidayEdit = null;
+    // The programme whose holiday dates are unfolded; folded, the holiday is one line.
+    this._holidayOpen = null;
+    this._holidayBusy = false;
+    this._build = CARD_BUILD;
   }
 
   static getConfigElement() {
@@ -422,6 +602,7 @@ class OptoVScheduleCard extends HTMLElement {
   }
 
   set hass(hass) {
+    if (adoptState(this, SCHEDULE_DEFAULTS)) this.setConfig(this._config);
     this._hass = hass;
     if (!this._strings) {
       loadStrings(hass).then((strings) => {
@@ -447,7 +628,14 @@ class OptoVScheduleCard extends HTMLElement {
 
   _computeSignature() {
     const parts = [];
-    for (const ent of this._entities()) parts.push(ent.entity_id, ent.last_updated);
+    for (const ent of this._entities()) {
+      parts.push(ent.entity_id, ent.last_updated);
+      const holiday = ent.attributes.holiday || {};
+      for (const id of [holiday.start, holiday.end]) {
+        const s = id && this._hass.states[id];
+        if (s) parts.push(id, s.state);
+      }
+    }
     for (const id of [this._config.actual_entity, this._config.demand_entity]) {
       const s = id && this._hass.states[id];
       if (s) parts.push(id, s.state, s.attributes.unit_of_measurement);
@@ -541,18 +729,7 @@ class OptoVScheduleCard extends HTMLElement {
       // still be meaningful.
       for (const day of targets) delete this._edits[`${entity.entity_id}|${day}`];
       this._scope = null; // null = follow the pattern the week is already in
-      this._status = {
-        kind: 'ok',
-        text: t('saved', {
-          day: scopeLabel(scope, dayKeys, this._activeDay, shortNames, longNames, t),
-        }),
-      };
-      setTimeout(() => {
-        if (this._status && this._status.kind === 'ok') {
-          this._status = null;
-          this._render();
-        }
-      }, 4000);
+      this._confirm(t('saved', { day: scopeLabel(scope, dayKeys, this._activeDay, shortNames, longNames, t) }));
     } catch (err) {
       if (err && err.translation_key === 'schedule_changed') {
         // Nothing was written, and the entity already carries the controller's version. Show
@@ -568,6 +745,96 @@ class OptoVScheduleCard extends HTMLElement {
       this._saving = false;
       this._render();
     }
+  }
+
+  /**
+   * A confirmation of what this card just wrote. It answers the person who pressed the button,
+   * so it goes again by itself rather than staying on while the values change from elsewhere.
+   */
+  _confirm(text) {
+    const status = { kind: 'ok', text };
+    this._status = status;
+    setTimeout(() => {
+      if (this._status === status) {
+        this._status = null;
+        this._render();
+      }
+    }, 4000);
+  }
+
+  /** The programme's circuit's holiday as its two date entities, if the integration paired them. */
+  _holidayOf(entity) {
+    const ids = entity.attributes.holiday;
+    if (!ids || !ids.start || !ids.end) return null;
+    const start = this._hass.states[ids.start];
+    const end = this._hass.states[ids.end];
+    if (!start || !end || start.state === 'unavailable' || end.state === 'unavailable') return null;
+    const value = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s.state) ? s.state : '');
+    return { start, end, startValue: value(start), endValue: value(end) };
+  }
+
+  /** The holiday as shown: the dates being edited, else the controller's, and whether they differ. */
+  _holidayState(entity, holiday) {
+    if (!holiday) return null;
+    const edit = this._holidayEdit && this._holidayEdit.entityId === entity.entity_id ? this._holidayEdit : null;
+    const start = edit ? edit.start : holiday.startValue;
+    const end = edit ? edit.end : holiday.endValue;
+    return { start, end, dirty: start !== holiday.startValue || end !== holiday.endValue };
+  }
+
+  _holidayEditDirty(entity) {
+    const shown = this._holidayState(entity, this._holidayOf(entity));
+    return Boolean(shown && shown.dirty);
+  }
+
+  /**
+   * The card's one save: the holiday dates if they were changed, then the day's programme if it
+   * was changed or is to be copied to other days. Only what changed is written.
+   */
+  async _saveAll(entity) {
+    const t = makeTranslator(this._strings || {});
+    const holiday = this._holidayOf(entity);
+    const wanted = this._holidayState(entity, holiday);
+    const holidayDirty = Boolean(wanted && wanted.dirty);
+    const attrs = entity.attributes;
+    const dayKeys = Array.isArray(attrs.days) && attrs.days.length === 7 ? attrs.days : DAY_KEYS;
+    const scope = this._scope || detectScope(dayKeys, this._activeDay, attrs.weekly_schedule || {});
+    // A detected scope only means "keep the week's pattern"; on its own it is worth a write, but
+    // not when the save is for the holiday and the programme was left as it is.
+    const programme =
+      this._isDirty(entity, this._activeDay) || (this._scope && this._scope !== 'day') || (!holidayDirty && scope !== 'day');
+
+    if (holidayDirty) {
+      const clear = !wanted.start && !wanted.end;
+      if (!clear && (!wanted.start || !wanted.end || wanted.end < wanted.start)) {
+        this._status = { kind: 'error', text: t('holiday_invalid') };
+        this._render();
+        return;
+      }
+      // 1970-01-01 is what the controller holds for "not set", and what clears it.
+      const writes = [
+        [holiday.start.entity_id, wanted.start || '1970-01-01', holiday.startValue],
+        [holiday.end.entity_id, wanted.end || '1970-01-01', holiday.endValue],
+      ].filter(([, date, held]) => date !== (held || '1970-01-01'));
+      this._holidayBusy = true;
+      this._status = null;
+      this._render();
+      try {
+        for (const [entityId, date] of writes) {
+          await this._hass.callService('date', 'set_value', { entity_id: entityId, date });
+        }
+        this._holidayEdit = null;
+        this._holidayOpen = null;
+        this._confirm(t(clear ? 'holiday_cleared' : 'holiday_saved'));
+      } catch (err) {
+        this._status = { kind: 'error', text: t('save_failed', { err: (err && err.message) || String(err) }) };
+        return;
+      } finally {
+        this._holidayBusy = false;
+        this._render();
+      }
+    }
+    if (programme) await this._save(entity);
   }
 
   async _reread(entity) {
@@ -611,6 +878,14 @@ class OptoVScheduleCard extends HTMLElement {
       return;
     }
 
+    const editing =
+      Object.keys(this._edits).length > 0 ||
+      Boolean(this._holidayEdit) ||
+      Boolean(this._conflict) ||
+      this._saving ||
+      this._holidayBusy;
+    if (reloadIfOutdated(entity, editing)) return;
+
     const attrs = entity.attributes;
     const entities = this._entities();
     const showProgrammeTabs = entities.length > 1;
@@ -639,11 +914,20 @@ class OptoVScheduleCard extends HTMLElement {
     const scope = this._scope || detectScope(dayKeys, this._activeDay, stored);
     // A scope other than the single day is itself a change: copying today's untouched
     // programme onto the working week is the whole point of the control.
-    const canSave = dirty || scope !== 'day';
+    const canSave = dirty || scope !== 'day' || this._holidayEditDirty(entity);
+    const saveDays = scopeDays(scope, dayKeys, this._activeDay);
     const conflict = this._conflict && this._conflict.entityId === entity.entity_id ? this._conflict : null;
     const readAt = attrs.read_at
       ? new Date(attrs.read_at).toLocaleString(lang, { dateStyle: 'short', timeStyle: 'short' })
       : '';
+
+    const holiday = this._holidayOf(entity);
+    const shownHoliday = this._holidayState(entity, holiday);
+    const holidayDirty = Boolean(shownHoliday && shownHoliday.dirty);
+    const holidayOpen = Boolean(holiday) && this._holidayOpen === entity.entity_id;
+    // Planned: not over yet. A holiday that has passed stays shown, but plainly.
+    const holidayPlanned = Boolean(shownHoliday && shownHoliday.end && shownHoliday.end >= isoToday());
+    const anyDirty = dirty || holidayDirty;
 
     const title = this._config.title || attrs.device_name || t('title');
     const programmeName = (this._labels || {})[entity.entity_id] || attrs.name || '';
@@ -667,7 +951,7 @@ class OptoVScheduleCard extends HTMLElement {
         .join('')}</select>`;
 
     this.shadowRoot.innerHTML = `
-      <style>${STYLE}</style>
+      <style>${STYLE}${UPDATE_STYLE}</style>
       <ha-card>
         <div class="header">
           <ha-icon icon="mdi:calendar-clock"></ha-icon>
@@ -676,6 +960,7 @@ class OptoVScheduleCard extends HTMLElement {
             <div class="subtitle">${escapeHtml(subtitle)}</div>
           </div>
         </div>
+        ${isOutdated(entity) ? updateNotice(t) : ''}
 
         ${this._config.actual_entity || this._config.demand_entity
         ? `<div class="chips">
@@ -697,12 +982,41 @@ class OptoVScheduleCard extends HTMLElement {
         : ''
       }
 
+        ${holiday
+        ? `<div class="holiday ${holidayPlanned ? 'planned' : ''} ${holidayDirty ? 'dirty' : ''}">
+            <button class="holiday-toggle" aria-expanded="${holidayOpen}" ${this._holidayBusy ? 'disabled' : ''}>
+              <ha-icon class="icon" icon="mdi:airplane"></ha-icon>
+              <span class="label">${escapeHtml(t('holiday'))}</span>
+              <span class="value">${escapeHtml(holidayRange(shownHoliday.start, shownHoliday.end, lang) || t('holiday_none'))}</span>
+              <ha-icon icon="${holidayOpen ? 'mdi:chevron-up' : 'mdi:pencil'}"></ha-icon>
+            </button>
+            ${holidayOpen
+          ? `<div class="holiday-body">
+              <div class="holiday-days">
+                <input type="date" class="holiday-start" value="${escapeHtml(shownHoliday.start)}"
+                       title="${escapeHtml(holiday.start.attributes.friendly_name || '')}" ${this._holidayBusy ? 'disabled' : ''}>
+                <span class="sep">${escapeHtml(t('to'))}</span>
+                <input type="date" class="holiday-end" value="${escapeHtml(shownHoliday.end)}"
+                       title="${escapeHtml(holiday.end.attributes.friendly_name || '')}" ${this._holidayBusy ? 'disabled' : ''}>
+              </div>
+              ${shownHoliday.start || shownHoliday.end
+            ? `<button class="holiday-clear" ${this._holidayBusy ? 'disabled' : ''}><ha-icon icon="mdi:delete-outline"></ha-icon>${escapeHtml(t('holiday_clear'))}</button>`
+            : ''
+          }
+            </div>`
+          : ''
+        }
+          </div>`
+        : ''
+      }
+
         <div class="tabs days">${dayKeys
         .map((d) => {
           const active = d === this._activeDay ? 'active' : '';
           const isDirty = this._isDirty(entity, d) ? 'dirty' : '';
           const has = programmed.has(d) ? 'programmed' : '';
-          return `<button class="tab ${active} ${isDirty} ${has}" data-day="${d}" title="${escapeHtml(longNames[d] || d)}">${escapeHtml(shortNames[d] || d)}</button>`;
+          const inScope = !active && saveDays.includes(d) ? 'inscope' : '';
+          return `<button class="tab ${active} ${isDirty} ${has} ${inScope}" data-day="${d}" title="${escapeHtml(longNames[d] || d)}">${escapeHtml(shortNames[d] || d)}</button>`;
         })
         .join('')}</div>
 
@@ -757,15 +1071,6 @@ class OptoVScheduleCard extends HTMLElement {
         : ''
       }
 
-        <div class="scope">
-          <span class="label">${escapeHtml(t('apply_to'))}</span>
-          ${SCOPES.map((value) => {
-        const active = value === scope ? 'active' : '';
-        const label = scopeLabel(value, dayKeys, this._activeDay, shortNames, longNames, t);
-        return `<button class="${active}" data-scope="${value}">${escapeHtml(label)}</button>`;
-      }).join('')}
-        </div>
-
         ${conflict
         ? `<div class="conflict">
             <div>${escapeHtml(t('changed_on_controller', {
@@ -779,13 +1084,24 @@ class OptoVScheduleCard extends HTMLElement {
         : ''
       }
 
+        <div class="savebar">
+          <div class="scope">
+            <span class="label">${escapeHtml(t('apply_to'))}</span>
+            <div class="choices">${SCOPES.map((value) => {
+          const active = value === scope ? 'active' : '';
+          const label = scopeLabel(value, dayKeys, this._activeDay, shortNames, longNames, t);
+          return `<button class="${active}" data-scope="${value}">${escapeHtml(label)}</button>`;
+        }).join('')}</div>
+          </div>
+        </div>
+
         <div class="footer">
           <div class="status ${this._status ? this._status.kind : ''}">
-            ${escapeHtml(this._status ? this._status.text : dirty ? t('unsaved') : '')}
+            ${escapeHtml(this._status ? this._status.text : anyDirty ? t('unsaved') : '')}
           </div>
           <div class="actions">
-            ${dirty && !this._saving ? `<button class="button discard">${escapeHtml(t('discard'))}</button>` : ''}
-            <button class="button primary save" ${this._saving || this._reading || !canSave ? 'disabled' : ''}>
+            ${anyDirty && !this._saving && !this._holidayBusy ? `<button class="button discard">${escapeHtml(t('discard'))}</button>` : ''}
+            <button class="button primary save" ${this._saving || this._reading || this._holidayBusy || !canSave ? 'disabled' : ''}>
               ${escapeHtml(this._saving ? t('saving') : t('save'))}
             </button>
           </div>
@@ -806,6 +1122,7 @@ class OptoVScheduleCard extends HTMLElement {
 
   _bind(entity, levels, step) {
     const root = this.shadowRoot;
+    bindReload(root);
     const on = (selector, event, handler) =>
       root.querySelectorAll(selector).forEach((el) => el.addEventListener(event, handler));
 
@@ -872,17 +1189,40 @@ class OptoVScheduleCard extends HTMLElement {
 
     on('.discard', 'click', () => {
       delete this._edits[this._editKey(entity)];
+      if (this._holidayEdit && this._holidayEdit.entityId === entity.entity_id) this._holidayEdit = null;
       this._status = null;
       this._render();
     });
 
-    on('.save', 'click', () => this._save(entity));
+    on('.save', 'click', () => this._saveAll(entity));
     on('.overwrite', 'click', () => this._save(entity, this._conflict));
     on('.keep', 'click', () => {
       this._conflict = null;
       this._render();
     });
     on('.reread', 'click', () => this._reread(entity));
+
+    const holiday = this._holidayOf(entity);
+    const editHoliday = (field) => (e) => {
+      const current =
+        this._holidayEdit && this._holidayEdit.entityId === entity.entity_id
+          ? this._holidayEdit
+          : { entityId: entity.entity_id, start: holiday.startValue, end: holiday.endValue };
+      this._holidayEdit = { ...current, [field]: e.currentTarget.value };
+      this._status = null;
+      this._render();
+    };
+    on('.holiday-start', 'change', editHoliday('start'));
+    on('.holiday-end', 'change', editHoliday('end'));
+    on('.holiday-toggle', 'click', () => {
+      this._holidayOpen = this._holidayOpen === entity.entity_id ? null : entity.entity_id;
+      this._render();
+    });
+    on('.holiday-clear', 'click', () => {
+      this._holidayEdit = { entityId: entity.entity_id, start: '', end: '' };
+      this._status = null;
+      this._render();
+    });
   }
 }
 
@@ -907,6 +1247,7 @@ class OptoVFaultHistoryCard extends HTMLElement {
     this._config = {};
     this._signature = null;
     this._strings = null;
+    this._build = CARD_BUILD;
   }
 
   static getConfigElement() {
@@ -925,6 +1266,7 @@ class OptoVFaultHistoryCard extends HTMLElement {
   }
 
   set hass(hass) {
+    if (adoptState(this, FAULT_DEFAULTS)) this.setConfig(this._config);
     this._hass = hass;
     if (!this._strings) {
       loadStrings(hass).then((strings) => {
@@ -970,6 +1312,8 @@ class OptoVFaultHistoryCard extends HTMLElement {
       return;
     }
 
+    if (reloadIfOutdated(entity, false)) return;
+
     const attrs = entity.attributes;
     const all = Array.isArray(attrs.entries) ? attrs.entries : [];
     const shown = all.filter((e) => !this._hidden.has(String(e.code).toUpperCase()));
@@ -984,7 +1328,7 @@ class OptoVFaultHistoryCard extends HTMLElement {
       .join(' · ');
 
     this.shadowRoot.innerHTML = `
-      <style>${FAULT_STYLE}</style>
+      <style>${FAULT_STYLE}${UPDATE_STYLE}</style>
       <ha-card>
         <div class="header">
           <ha-icon icon="mdi:history"></ha-icon>
@@ -993,6 +1337,7 @@ class OptoVFaultHistoryCard extends HTMLElement {
             <div class="subtitle">${escapeHtml(subtitle)}</div>
           </div>
         </div>
+        ${isOutdated(entity) ? updateNotice(t) : ''}
         ${limited.length
         ? `<div class="faults" style="max-height: ${Number(this._config.height) || 420}px">${limited
           .map(
@@ -1007,6 +1352,7 @@ class OptoVFaultHistoryCard extends HTMLElement {
         : `<div class="empty">${escapeHtml(t('faults_none'))}</div>`
       }
       </ha-card>`;
+    bindReload(this.shadowRoot);
   }
 }
 
@@ -1018,9 +1364,11 @@ class OptoVFaultHistoryCardEditor extends HTMLElement {
     this._config = {};
     this._formReady = false;
     this._strings = null;
+    this._build = CARD_BUILD;
   }
 
   setConfig(config) {
+    adoptState(this, EDITOR_DEFAULTS);
     this._config = { ...(config || {}) };
     this._render();
   }
@@ -1162,9 +1510,11 @@ class OptoVScheduleCardEditor extends HTMLElement {
     this._config = {};
     this._formReady = false;
     this._strings = null;
+    this._build = CARD_BUILD;
   }
 
   setConfig(config) {
+    adoptState(this, EDITOR_DEFAULTS);
     this._config = { ...(config || {}) };
     this._render();
   }
@@ -1305,18 +1655,10 @@ class OptoVScheduleCardEditor extends HTMLElement {
   }
 }
 
-if (!customElements.get(CARD_TYPE)) {
-  customElements.define(CARD_TYPE, OptoVScheduleCard);
-}
-if (!customElements.get(EDITOR_TYPE)) {
-  customElements.define(EDITOR_TYPE, OptoVScheduleCardEditor);
-}
-if (!customElements.get(FAULT_CARD_TYPE)) {
-  customElements.define(FAULT_CARD_TYPE, OptoVFaultHistoryCard);
-}
-if (!customElements.get(FAULT_EDITOR_TYPE)) {
-  customElements.define(FAULT_EDITOR_TYPE, OptoVFaultHistoryCardEditor);
-}
+adopt(CARD_TYPE, OptoVScheduleCard);
+adopt(EDITOR_TYPE, OptoVScheduleCardEditor);
+adopt(FAULT_CARD_TYPE, OptoVFaultHistoryCard);
+adopt(FAULT_EDITOR_TYPE, OptoVFaultHistoryCardEditor);
 
 window.customCards = window.customCards || [];
 for (const card of [

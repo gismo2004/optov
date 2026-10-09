@@ -8,6 +8,7 @@ is put on the wire: everything above read_raw()/write_raw() is the same for both
 import asyncio
 import contextlib
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import serialx
@@ -371,6 +372,9 @@ class OptolinkClient:
         # closed on purpose, after which it must never connect again by itself.
         self._reconnect_at = 0.0
         self._closed = False
+        # Told the address of every write the controller accepted -- settings, programmes,
+        # the clock and raw writes alike, since all of them go through write_raw().
+        self.on_write: Callable[[int], None] | None = None
 
     async def connect(self):
         """Open the serial port."""
@@ -923,6 +927,8 @@ class OptolinkClient:
         """
         _LOGGER.debug("write 0x%04X fc=0x%02X data=%s", address, fc, data.hex(" "))
         await self._transact_retry(fc, address, len(data), data)
+        if self.on_write is not None:
+            self.on_write(address)
         return True
 
     async def read_block(
