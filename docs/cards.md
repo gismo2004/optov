@@ -7,7 +7,8 @@ appear in the card picker with no manual setup.
 programme the controller has; the visual editor lets you pick a subset, name the tabs, and show
 a reading and a setpoint in the header. Editing is per day, with an *apply to* choice of the
 day, the working week, the weekend or the whole week, preselected from the pattern the week is
-already in.
+already in. Where the controller has a holiday for the circuit, it is a line above the week; tap
+it to set the first and last day.
 
 <img src="schedule-card.png"
      alt="OptoV Schedule card" width="560">
