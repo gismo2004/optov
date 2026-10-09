@@ -186,6 +186,9 @@
     "no_controller": {
       "message": "Es ist keine OptoV-Regelung eingerichtet, also gibt es nichts zu tun."
     },
+    "controller_not_ready": {
+      "message": "OptoV ist noch nicht mit der Regelung verbunden: Home Assistant startet die Integration gerade, oder die Regelung ist nicht erreichbar. Erneut versuchen, sobald ihre Entitäten verfügbar sind."
+    },
     "which_controller": {
       "message": "Es ist mehr als eine Regelung eingerichtet. Bitte angeben, welche gemeint ist."
     },

@@ -186,6 +186,9 @@
     "no_controller": {
       "message": "No OptoV controller is set up, so there is nothing to do this to."
     },
+    "controller_not_ready": {
+      "message": "OptoV is not connected to the controller yet: Home Assistant is still starting it, or the controller cannot be reached. Try again once its entities are available."
+    },
     "which_controller": {
       "message": "More than one controller is set up. Say which one the call is for."
     },

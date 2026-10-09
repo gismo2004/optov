@@ -804,8 +804,17 @@ def _entries(hass: HomeAssistant, call: ServiceCall) -> list[OptolinkConfigEntry
         if not wanted or entry.entry_id == wanted
     ]
     if not found:
+        # Set up but not running yet is a different answer from not set up at all: while
+        # Home Assistant starts, or while the controller cannot be reached, a call made in
+        # that window would otherwise be told there is no controller.
+        configured = [
+            entry
+            for entry in hass.config_entries.async_entries(DOMAIN)
+            if not wanted or entry.entry_id == wanted
+        ]
         raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="no_controller"
+            translation_domain=DOMAIN,
+            translation_key="controller_not_ready" if configured else "no_controller",
         )
     return found
 

@@ -10,6 +10,11 @@ commits.
 
 ## [Unreleased]
 
+### Fixed
+- An action called while OptoV is still connecting -- right after a restart, or while the
+  controller cannot be reached -- said that no controller was set up. It now says that OptoV is
+  not connected yet.
+
 ## [0.8.0] - 2026-10-09
 
 Plan a holiday, get told about faults, and keep an eye on how often Home Assistant writes to
