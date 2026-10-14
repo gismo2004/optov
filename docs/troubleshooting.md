@@ -11,6 +11,17 @@ with `default_config`. Restart Home Assistant once after installing OptoV and it
 controller does not answer". Check that it is switched on and that the read head sits on the
 optical port. The entities come back by themselves once it answers again.
 
+**Entities are unavailable for a few seconds now and then.** Home Assistant reloads the
+integration about 30 seconds after you enable or disable an entity and after every options
+change; while it reloads, all entities are briefly unavailable. That is expected while you set
+things up. If it happens without any change on your side, see the entry above.
+
+**Uploading the catalog says "Upload failed".** The browser could not send the file to Home
+Assistant, so the catalog itself is not the problem. A reverse proxy in front of Home Assistant
+with a small request size limit is the usual cause; nginx allows 1 MB by default. Open Home
+Assistant on its local address (`http://<ip>:8123`) for the upload, or copy the `.db` file into
+`<config>/optov/` and pick it from the list in the setup dialog.
+
 **Reporting a problem.** The integration entry has a *Download diagnostics* item in its menu.
 It holds the controller, its catalog version, the generated entity set, which datapoints turned
 out not to be fitted and how the bus is doing, with the node's address and key left out.
