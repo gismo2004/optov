@@ -6,7 +6,7 @@ import logging
 import re
 import time
 from collections import deque
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -239,6 +239,17 @@ def tiers_enabled_by(options: dict[str, Any]) -> set[str]:
     if options.get(CONF_ENABLE_EXPERT, DEFAULT_ENABLE_EXPERT):
         tiers.update({"Expertlayer", "CodeAccessLevelTD"})
     return tiers
+
+
+def block_length(item: dict[str, Any]) -> int:
+    """How many bytes the controller returns at a datapoint's address: its block, else itself."""
+    return item.get("block") or item["bytes"]
+
+
+def _option(item: dict[str, Any], raw: int) -> str:
+    """An enumerated datapoint's name for a raw value; the number itself if the catalog has
+    none. Option keys are ints (profiles.DeviceProfile)."""
+    return item.get("options", {}).get(raw, str(raw))
 
 
 class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -557,26 +568,32 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         circuits = getattr(self.profile, "circuits", {}) if self.profile else {}
         return stable_object_id(model, circuits.get(circuit) if circuit else None, name)
 
-    def get_unlisted_device_info(self) -> DeviceInfo | None:
-        """The "uncategorized" sub-device: what the controller's menus do not list."""
+    def _sub_device(self, suffix: str, **extra: Any) -> DeviceInfo | None:
+        """A device under the controller, with the controller's product, variant and software.
+
+        None until the controller has been identified (device_info is set with the profile).
+        """
         if not self.device_info:
             return None
-        dev_reg = dr.async_get(self.hass)
-        parent_dev = dev_reg.async_get_device_by_identifier(
+        info: DeviceInfo = DeviceInfo(
+            identifiers={(DOMAIN, f"{self.stable_id}_{suffix}")},
+            manufacturer="Viessmann",
+            model=self.profile.device_name,
+            model_id=self.profile.model,
+            sw_version=self.profile.sw_version,
+            **extra,
+        )
+        parent_dev = dr.async_get(self.hass).async_get_device_by_identifier(
             (DOMAIN, self.stable_id),
             self.config_entry.entry_id,
-        )
-        info: DeviceInfo = DeviceInfo(
-            identifiers={(DOMAIN, f"{self.stable_id}_uncategorized")},
-            translation_key="uncategorized",
-            manufacturer="Viessmann",
-            model=self.profile.device_name if self.profile else None,
-            model_id=self.profile.model if self.profile else None,
-            sw_version=self.profile.sw_version if self.profile else None,
         )
         if parent_dev:
             info["via_device_id"] = parent_dev.id
         return info
+
+    def get_unlisted_device_info(self) -> DeviceInfo | None:
+        """The "uncategorized" sub-device: what the controller's menus do not list."""
+        return self._sub_device("uncategorized", translation_key="uncategorized")
 
     def custom_unique_ids(self) -> set[str]:
         """The unique ids of every custom entity the file currently defines."""
@@ -590,54 +607,25 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def get_custom_device_info(self) -> DeviceInfo | None:
         """The sub-device holding the custom entities the user added, next to the circuits."""
-        info = self.get_unlisted_device_info()
-        if info is None:
-            return None
-        info["identifiers"] = {(DOMAIN, f"{self.stable_id}_custom")}
-        info["translation_key"] = "custom"
-        return info
+        return self._sub_device("custom", translation_key="custom")
 
     def get_device_info(self, circuit: str | None = None) -> DeviceInfo | None:
-        """Return DeviceInfo for the main controller or a circuit sub-device.
+        """The controller's device, or the sub-device of one of its circuits.
 
-        Sub-device circuit names come directly from the device's catalog Circuits map,
-        fully localized without any hardcoded dictionary.
+        A circuit's name comes from the catalog's circuit labels, in the catalog language.
         """
-        if not self.device_info:
-            return None
         if not circuit:
             return self.device_info
-
-        circuits = getattr(self.profile, "circuits", {}) if self.profile else {}
-        circuit_label = circuits.get(circuit, circuit)
-
         host = self.config_entry.data.get(CONF_HOST, "")
-        base_model = self.profile.model if self.profile else "Optolink"
-
-        dev_reg = dr.async_get(self.hass)
-        parent_dev = dev_reg.async_get_device_by_identifier(
-            (DOMAIN, self.stable_id),
-            self.config_entry.entry_id,
-        )
-        via_device_id = parent_dev.id if parent_dev else None
-
-        info: DeviceInfo = DeviceInfo(
-            identifiers={(DOMAIN, f"{self.stable_id}_{circuit}")},
-            # The circuit alone. `via_device` puts this under the controller, and Home
-            # Assistant prepends the parent's name itself; repeating it here is what made a
-            # card read "<product> <product> Warmwasser WW Temperatur Oben".
-            name=circuit_label,
-            manufacturer="Viessmann",
-            # The same product and variant as the controller these hang off; the circuit is
-            # the name, so repeating it in the model said nothing.
-            model=self.profile.device_name if self.profile else None,
-            model_id=base_model,
-            sw_version=self.profile.sw_version if self.profile else None,
+        # The circuit alone as the name. The parent's name is prepended by Home Assistant
+        # through via_device, and the model is the controller's product and variant.
+        return self._sub_device(
+            circuit,
+            name=self.profile.circuits.get(circuit, circuit)
+            if self.profile
+            else circuit,
             configuration_url=f"http://{host}" if host else None,
         )
-        if via_device_id:
-            info["via_device_id"] = via_device_id
-        return info
 
     def get_gateway_device_info(self) -> DeviceInfo:
         """Return DeviceInfo for the Optolink Gateway/Interface device."""
@@ -716,7 +704,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if stored is None and self._learned:
             # Taken over from the entry: write it out before the entry stops carrying it, or a
             # restart in between would lose it and every unfitted datapoint would come back.
-            self._save_learned()
+            self.save_learned()
             self.hass.config_entries.async_update_entry(
                 self.config_entry,
                 data={
@@ -760,7 +748,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         self._roll_write_day()
         self.writes_today[address] = self.writes_today.get(address, 0) + 1
-        self._save_learned(
+        self.save_learned(
             write_counts={
                 "day": self._writes_day,
                 "addresses": {str(a): n for a, n in self.writes_today.items()},
@@ -807,15 +795,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return sum(self.writes_today.values())
 
     @callback
-    def _save_learned(self, **values: Any) -> None:
-        """Record what was learned. Written out shortly after, off the poll path."""
+    def save_learned(self, **values: Any) -> None:
+        """Record what was learned, here or by another module (see orphaned_statistics).
+
+        Written out shortly after, off the poll path.
+        """
         self._learned.update(values)
         if self._store is not None:
             self._store.async_delay_save(lambda: self._learned, _SAVE_DELAY)
-
-    def save_learned(self, **values: Any) -> None:
-        """The same, for facts other modules learn about this controller (see orphaned_statistics)."""
-        self._save_learned(**values)
 
     async def async_save_learned_now(self, **values: Any) -> None:
         """Record and write out at once.
@@ -825,8 +812,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         would be lost and the question asked again.
         """
         self._learned.update(values)
-        if self._store is not None:
-            await self._store.async_save(self._learned)
+        await self.async_flush_learned()
 
     async def async_flush_learned(self) -> None:
         """Write out whatever is still waiting; called when the entry unloads.
@@ -944,30 +930,19 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 len(probed_values),
                 len(targets),
             )
-            self._save_learned(
+            self.save_learned(
                 condition_cache={str(k): v for k, v in probed_values.items()},
                 condition_targets=target_ids,
             )
 
         self._dev = dev
         self._probed_values = probed_values
-        generated = await self.hass.async_add_executor_job(
-            catalog_db.generate_profile,
-            dev["id"],
-            self.db_path,
-            self._language,
-            probed_values,
-            tiers_enabled_by(self.config_entry.options),
-            optolink.reachable_function_codes(self.client.protocol),
+        profile = await self._async_build_profile(
+            sys_id, sw_version, self.config_entry.options
         )
-        total = sum(len(v) for v in generated.values() if isinstance(v, list))
-        enabled = sum(
-            1
-            for cat in generated.values()
-            if isinstance(cat, list)
-            for e in cat
-            if e.get("enabled_by_default")
-        )
+        entries = [item for item, _ in datapoints(profile)]
+        total = len(entries)
+        enabled = sum(1 for e in entries if e.get("enabled_by_default"))
         _LOGGER.info(
             "Self-configuring: generated %d entities (%d enabled by default) for %s (0x%04X)",
             total,
@@ -975,11 +950,26 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             dev["model"],
             sys_id,
         )
+        return profile
+
+    async def _async_build_profile(
+        self, sys_id: int, sw_version: str, options: Mapping[str, Any]
+    ) -> DeviceProfile:
+        """The entity set for these options, from the catalog row and probed rule inputs."""
+        generated = await self.hass.async_add_executor_job(
+            catalog_db.generate_profile,
+            self._dev["id"],
+            self.db_path,
+            self._language,
+            self._probed_values,
+            tiers_enabled_by(options),
+            optolink.reachable_function_codes(self.client.protocol),
+        )
         return DeviceProfile(
             sys_id=sys_id,
             data=generated,
             sw_version=sw_version,
-            model_name=dev["model"],
+            model_name=self._dev["model"],
         )
 
     async def async_profile_for_options(
@@ -992,20 +982,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self.profile is None or self._dev is None:
             return None
-        generated = await self.hass.async_add_executor_job(
-            catalog_db.generate_profile,
-            self._dev["id"],
-            self.db_path,
-            self._language,
-            self._probed_values,
-            tiers_enabled_by(options),
-            optolink.reachable_function_codes(self.client.protocol),
-        )
-        return DeviceProfile(
-            sys_id=self.profile.sys_id,
-            data=generated,
-            sw_version=self.profile.sw_version,
-            model_name=self._dev["model"],
+        return await self._async_build_profile(
+            self.profile.sys_id, self.profile.sw_version, options
         )
 
     def _should_poll(self, item: dict[str, Any], domain: str) -> bool:
@@ -1327,7 +1305,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         kept[item["id"]] = previous[item["id"]]
                 continue
             try:
-                block = item.get("block") or item["bytes"]
+                block = block_length(item)
                 raw = await self._read_reg(
                     item["address"],
                     block,
@@ -1498,7 +1476,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sensor_status_raw: dict[str, int],
     ) -> Any:
         """A sensor's value from the bytes read for it, filling in its health status on the way."""
-        block = s.get("block") or s["bytes"]
+        block = block_length(s)
         conv = (s.get("conversion") or "").strip().lower()
         # Sec2Hour/DayToDate/hex-string conversions need decode.py's real logic even when
         # the field isn't block-sliced (most are plain same-size counters) -- a bare
@@ -1510,25 +1488,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             or conv in EXOTIC_CONVERSIONS
             or s["bytes"] > 4
         ):
-            # Block-addressed datapoint: request the whole telegram the controller
-            # expects at this address, then slice the field out via decode.py.
-            field = (
-                raw
-                if s.get("bit_length")
-                else raw[
-                    s.get("byte_position", 0) : s.get("byte_position", 0) + s["bytes"]
-                ]
-            )
-            value = decode_value(
-                field,
-                s.get("conversion"),
-                parameter_type=s.get("parameter_type", "SInt"),
-                bit_start=s.get("bit_start", 0),
-                bit_length=s.get("bit_length", 0),
-                enum=s.get("options"),
-                factor=s.get("conversion_factor"),
-                offset=s.get("conversion_offset"),
-            )
+            # Block-addressed datapoint: the whole telegram the controller expects at this
+            # address was read; decode.py cuts the field out of it.
+            value = self.decode_datapoint(s, raw)
             # WPR3_SensorStatus_* rides along in the same block as the value (one read,
             # not a second one) -- exposed via the entity's `available` flag/attributes
             # in sensor.py, not as a separate diagnostic entity.
@@ -1549,9 +1511,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         sensor_status_raw[s["id"]] = int(raw_status)
             return value
         if "options" in s:
-            int_val = int.from_bytes(raw, "little", signed=False)
-            options = s["options"]
-            return options.get(str(int_val), options.get(int_val, str(int_val)))
+            return _option(s, int.from_bytes(raw, "little", signed=False))
         # Signed only when the declared parameter type is: a one-byte state code
         # of 200 is 200, and a 32-bit counter never wraps negative.
         int_val = decode_int(raw, s.get("parameter_type"))
@@ -1560,14 +1520,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _decode_binary(self, bs: dict[str, Any], raw: bytes) -> bool:
         """A binary sensor is on when its field holds anything but zero."""
-        block = bs.get("block") or bs["bytes"]
-        byte_position = bs.get("byte_position", 0)
-        field = (
-            raw[byte_position : byte_position + bs["bytes"]]
-            if block != bs["bytes"]
-            else raw
-        )
-        return bool(int.from_bytes(field, "little", signed=False) > 0)
+        return int.from_bytes(self._slice_field(bs, raw), "little") > 0
 
     def _start_job(
         self, name: str, job: Callable[[], Coroutine[Any, Any, Any]]
@@ -1629,7 +1582,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("This controller has no clock datapoint in the catalog")
             return None
 
-        block = item.get("block") or item["bytes"]
+        block = block_length(item)
         raw = await self._read_reg(
             item["address"], block, item.get("fc_read"), fresh=True
         )
@@ -1816,7 +1769,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         first poll would retire it again -- churning the registry on each restart and briefly
         showing entities for hardware that is not there.
         """
-        self._save_learned(
+        self.save_learned(
             retired_items=sorted(self._retired_item_ids),
             retired_addresses=sorted(self._retired_addresses),
         )
@@ -1945,7 +1898,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _slice_field(self, item: dict[str, Any], raw: bytes) -> bytes:
         """Cut the field out of the block the controller returned."""
-        block = item.get("block") or item["bytes"]
+        block = block_length(item)
         pos = item.get("byte_position", 0)
         return raw[pos : pos + item["bytes"]] if block != item["bytes"] else raw
 
@@ -1992,9 +1945,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return value.isoformat() if value else None
 
     def _decode_select(self, item: dict[str, Any], raw: bytes) -> str:
-        raw_int = self._raw_int(item, raw, False)
-        options = item.get("options", {})
-        return options.get(str(raw_int), options.get(raw_int, str(raw_int)))
+        return _option(item, self._raw_int(item, raw, False))
 
     async def async_write_custom_datapoint(self, address: int, data: bytes) -> bool:
         """Perform an ad-hoc write of any address."""
@@ -2125,7 +2076,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         def _same_block(item: dict[str, Any]) -> bool:
             return (
                 parse_address(item["address"]) == address
-                and (item.get("block") or item["bytes"]) == block
+                and block_length(item) == block
                 and item.get("fc_read") == fc_read
             )
 
@@ -2182,13 +2133,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         resolved = self.resolve_schedule(schedule)
-        keys = [resolved] if resolved else list(self.profile.schedules)
-
-        for key in keys:
-            async with self._write_lock:
-                await self._read_schedule(key)
-
-        self.async_update_listeners()
+        await self._read_schedules(
+            [resolved] if resolved else list(self.profile.schedules)
+        )
 
     def _missing_schedules(self) -> list[str]:
         """Programmes this controller has that have not been read yet."""
@@ -2199,7 +2146,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ]
 
     async def _refresh_missing_schedules(self) -> None:
-        for key in self._missing_schedules():
+        await self._read_schedules(self._missing_schedules())
+
+    async def _read_schedules(self, keys: list[str]) -> None:
+        for key in keys:
             async with self._write_lock:
                 await self._read_schedule(key)
         self.async_update_listeners()
@@ -2249,8 +2199,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     key,
                     base_addr,
                 )
-            else:
-                _LOGGER.warning("Could not refresh programme %s: %s", key, err)
+                return
+            _LOGGER.warning("Could not refresh programme %s: %s", key, err)
         except Exception as err:
             _LOGGER.warning("Could not refresh programme %s: %s", key, err)
 

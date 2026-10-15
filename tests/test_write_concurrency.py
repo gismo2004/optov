@@ -86,7 +86,8 @@ MODE = {
     "bytes": 1,
     "bit_start": 0,
     "bit_length": 4,
-    "options": {"0": "off", "2": "heat"},
+    # Int keys, as profiles.DeviceProfile turns the catalog's into.
+    "options": {0: "off", 2: "heat"},
 }
 FLAG = {
     "id": "flag",
@@ -436,7 +437,7 @@ def test_writes_are_counted_per_address_and_noticed(coordinator_module):
         config_entry=types.SimpleNamespace(entry_id="e1"),
         _writes_day=None,
     )
-    c._save_learned = lambda **values: None
+    c.save_learned = lambda **values: None
     c.datapoint_at = lambda address: None
 
     for _ in range(coordinator_module.WRITES_PER_ADDRESS_NOTICE):
