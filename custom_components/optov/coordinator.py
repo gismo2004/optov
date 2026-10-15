@@ -63,7 +63,7 @@ from .decode import (
 )
 from .errors import decode_boiler_error_history, decode_wp_error_history
 from .optolink import OptolinkClient
-from .profiles import DeviceProfile, parse_address, stable_object_id
+from .profiles import DeviceProfile, datapoints, parse_address, stable_object_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1294,15 +1294,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         pollable = [
             (item, domain)
-            for platform, domain in (
-                ("sensors", "sensor"),
-                ("binary_sensors", "binary_sensor"),
-                ("numbers", "number"),
-                ("selects", "select"),
-                ("switches", "switch"),
-                ("dates", "date"),
-            )
-            for item in getattr(self.profile, platform, [])
+            for item, domain in datapoints(self.profile)
             if self._should_poll(item, domain)
         ]
         due = self._select_due(pollable)
@@ -1310,57 +1302,47 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         full_sweep, self._force_full_sweep = self._force_full_sweep, False
         self._last_publish = time.monotonic()
 
-        # One pass per platform, in this order. They differ only in how the bytes become a
-        # value; a sensor's decoder also fills in the health status that rides along in its block.
-        decoders = (
-            (
-                "sensors",
-                "sensor",
-                lambda item, raw: self._decode_sensor(
-                    item, raw, sensor_status, sensor_status_raw
-                ),
+        # In platform order. The domains differ only in how the bytes become a value; a
+        # sensor's decoder also fills in the health status that rides along in its block.
+        decoders = {
+            **self._setting_decoders(),
+            "sensor": lambda item, raw: self._decode_sensor(
+                item, raw, sensor_status, sensor_status_raw
             ),
-            ("binary_sensors", "binary_sensor", self._decode_binary),
-            ("numbers", "number", self._decode_number),
-            ("selects", "select", self._decode_select),
-            ("switches", "switch", lambda item, raw: self._raw_int(item, raw, False)),
-            ("dates", "date", self._decode_date),
-        )
-        for platform, domain, decode in decoders:
-            for item in getattr(self.profile, platform, []):
-                if not self._should_poll(item, domain):
-                    continue
-                if item["id"] not in due:
-                    self._carry_forward(data, item["id"])
-                    # Its health code stays with it until the next read, as its value does.
-                    for kept, previous in (
-                        (sensor_status, self.sensor_status),
-                        (sensor_status_raw, self.sensor_status_raw),
-                    ):
-                        if item["id"] in previous:
-                            kept[item["id"]] = previous[item["id"]]
-                    continue
-                try:
-                    block = item.get("block") or item["bytes"]
-                    raw = await self._read_reg(
-                        item["address"],
-                        block,
-                        item.get("fc_read"),
-                        prefix=item.get("prefix_read"),
-                    )
-                    data[item["id"]] = decode(item, raw)
-                except Exception as err:
-                    self._current_failed += 1
-                    _LOGGER.debug(
-                        "Failed reading %s %s (0x%04X): %s",
-                        domain,
-                        item["id"],
-                        item["address"],
-                        err,
-                    )
-                    if self.data and item["id"] in self.data:
-                        data[item["id"]] = self.data[item["id"]]
-                self._publish_partial(data, sensor_status, sensor_status_raw)
+            "binary_sensor": self._decode_binary,
+        }
+        for item, domain in pollable:
+            decode = decoders[domain]
+            if item["id"] not in due:
+                self._carry_forward(data, item["id"])
+                # Its health code stays with it until the next read, as its value does.
+                for kept, previous in (
+                    (sensor_status, self.sensor_status),
+                    (sensor_status_raw, self.sensor_status_raw),
+                ):
+                    if item["id"] in previous:
+                        kept[item["id"]] = previous[item["id"]]
+                continue
+            try:
+                block = item.get("block") or item["bytes"]
+                raw = await self._read_reg(
+                    item["address"],
+                    block,
+                    item.get("fc_read"),
+                    prefix=item.get("prefix_read"),
+                )
+                data[item["id"]] = decode(item, raw)
+            except Exception as err:
+                self._current_failed += 1
+                _LOGGER.debug(
+                    "Failed reading %s %s (0x%04X): %s",
+                    domain,
+                    item["id"],
+                    item["address"],
+                    err,
+                )
+                self._carry_forward(data, item["id"])
+            self._publish_partial(data, sensor_status, sensor_status_raw)
 
         # The cached bytes describe this cycle only. Anything reading outside it -- a write
         # and its read-back above all -- must go to the controller, not to a snapshot that is
@@ -1875,16 +1857,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         by_address: dict[int, list[tuple[str, str]]] = {}
-        for platform, domain in (
-            ("sensors", "sensor"),
-            ("binary_sensors", "binary_sensor"),
-            ("numbers", "number"),
-            ("selects", "select"),
-            ("switches", "switch"),
-            ("dates", "date"),
-        ):
-            for item in getattr(self.profile, platform, []):
-                by_address.setdefault(item["address"], []).append((domain, item["id"]))
+        for item, domain in datapoints(self.profile):
+            by_address.setdefault(item["address"], []).append((domain, item["id"]))
 
         registry = er.async_get(self.hass)
 
@@ -1902,16 +1876,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return True
 
-        by_id = {
-            item["id"]: domain
-            for platform, domain in (
-                ("sensors", "sensor"),
-                ("binary_sensors", "binary_sensor"),
-                ("numbers", "number"),
-                ("selects", "select"),
-            )
-            for item in getattr(self.profile, platform, [])
-        }
+        by_id = {item["id"]: domain for item, domain in datapoints(self.profile)}
 
         unimplemented = 0
         for address in pending:
@@ -1952,11 +1917,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def datapoint_at(self, address: int) -> dict[str, Any] | None:
         """This controller's datapoint at an address, whichever platform it became."""
-        for platform in DeviceProfile.PLATFORMS if self.profile else ():
-            for item in getattr(self.profile, platform, []):
-                if parse_address(item["address"]) == address:
-                    return item
-        return None
+        return next(
+            (
+                item
+                for item, _ in datapoints(self.profile)
+                if parse_address(item["address"]) == address
+            ),
+            None,
+        )
 
     def decode_datapoint(self, item: dict[str, Any], raw: bytes) -> Any:
         """What a block means for one datapoint, decoded as a poll cycle decodes it."""
@@ -1977,6 +1945,15 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         block = item.get("block") or item["bytes"]
         pos = item.get("byte_position", 0)
         return raw[pos : pos + item["bytes"]] if block != item["bytes"] else raw
+
+    def _setting_decoders(self) -> dict[str, Callable[[dict[str, Any], bytes], Any]]:
+        """How the bytes of each writable domain become its value."""
+        return {
+            "number": self._decode_number,
+            "select": self._decode_select,
+            "switch": lambda item, raw: self._raw_int(item, raw, False),
+            "date": self._decode_date,
+        }
 
     def _raw_int(self, item: dict[str, Any], raw: bytes, signed: bool) -> int:
         """The datapoint's own integer, whether it is whole bytes or bits of a shared one."""
@@ -2149,19 +2126,12 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and item.get("fc_read") == fc_read
             )
 
-        updated: dict[str, Any] = {}
-        for num in self.profile.numbers:
-            if _same_block(num):
-                updated[num["id"]] = self._decode_number(num, raw)
-        for sel in self.profile.selects:
-            if _same_block(sel):
-                updated[sel["id"]] = self._decode_select(sel, raw)
-        for sw in getattr(self.profile, "switches", []):
-            if _same_block(sw):
-                updated[sw["id"]] = self._raw_int(sw, raw, False)
-        for day in getattr(self.profile, "dates", []):
-            if _same_block(day):
-                updated[day["id"]] = self._decode_date(day, raw)
+        decoders = self._setting_decoders()
+        updated = {
+            item["id"]: decoders[domain](item, raw)
+            for item, domain in datapoints(self.profile)
+            if domain in decoders and _same_block(item)
+        }
         if not updated:
             return
         if self._cycle_data is not None:

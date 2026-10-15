@@ -13,6 +13,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from .catalog_db import ENTITY_DOMAINS
 from .const import CONF_CUSTOM_FILE, DOMAIN
 from .custom_entities import (
     KEY_CURRENT,
@@ -43,7 +44,6 @@ _LOGGER = logging.getLogger(__name__)
 # Where the file can be downloaded; the link in the options dialog is signed for a few minutes.
 DOWNLOAD_URL = "/api/optov/custom/{entry_id}"
 # The domain of the entity a two-state value comes in as.
-SOURCE_DOMAIN = {"sensors": "sensor", "selects": "select"}
 
 
 def custom_file_name(stable_id: str) -> str:
@@ -116,7 +116,7 @@ def resolve_onoff(
     # entity ids are built from the model code (profiles.stable_object_id), so the id a value
     # will get is known and names it just as well.
     by_object_id = {
-        f"{SOURCE_DOMAIN[platform]}."
+        f"{ENTITY_DOMAINS[platform]}."
         f"{coordinator.object_id(item.get('circuit'), item['name'])}": item["id"]
         for platform, item in two_state_items(coordinator.profile)
     }

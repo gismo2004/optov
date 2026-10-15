@@ -64,7 +64,7 @@ from .custom_entities import (
     is_custom_unique_id,
 )
 from .optolink import OptolinkClient, OptolinkDeviceError, UnsupportedProtocol
-from .profiles import DeviceProfile, parse_address
+from .profiles import DeviceProfile, datapoints, parse_address
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -635,16 +635,8 @@ def _expected_entities(
     profile = profile or coordinator.profile
     prefix = f"{coordinator.stable_id}_"
     expected: dict[tuple[str, str], dict[str, Any] | None] = {}
-    for platform, domain in (
-        ("sensors", "sensor"),
-        ("binary_sensors", "binary_sensor"),
-        ("numbers", "number"),
-        ("selects", "select"),
-        ("switches", "switch"),
-        ("dates", "date"),
-    ):
-        for item in getattr(profile, platform, []):
-            expected[(domain, f"{prefix}{item['id']}")] = item
+    for item, domain in datapoints(profile):
+        expected[(domain, f"{prefix}{item['id']}")] = item
     for key in profile.schedules:
         expected[("sensor", f"{prefix}schaltzeiten_{key}")] = None
     for suffix in (*GATEWAY_SENSORS, FAULT_HISTORY_SENSOR, GFA_FAULT_HISTORY_SENSOR):

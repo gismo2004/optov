@@ -1319,14 +1319,17 @@ def _schedule_level_texts(
     }
 
 
-_ENTITY_PLATFORMS = (
-    "sensors",
-    "binary_sensors",
-    "numbers",
-    "selects",
-    "switches",
-    "dates",
-)
+# The profile's entity lists, in the order they are built and polled, and the Home Assistant
+# domain each one becomes.
+ENTITY_DOMAINS = {
+    "sensors": "sensor",
+    "binary_sensors": "binary_sensor",
+    "numbers": "number",
+    "selects": "select",
+    "switches": "switch",
+    "dates": "date",
+}
+_ENTITY_PLATFORMS = tuple(ENTITY_DOMAINS)
 
 
 @dataclass

@@ -1,8 +1,11 @@
 """Data models and value helpers for OptoV integration."""
 
+from collections.abc import Iterator
 from typing import Any
 
 from homeassistant.const import EntityCategory
+
+from .catalog_db import ENTITY_DOMAINS
 
 
 def parse_address(addr: Any) -> int:
@@ -56,7 +59,7 @@ def map_category(cat: str | None) -> EntityCategory | None:
 class DeviceProfile:
     """The entity set generated for one controller, as the platforms consume it."""
 
-    PLATFORMS = ("sensors", "binary_sensors", "numbers", "selects", "switches", "dates")
+    PLATFORMS = tuple(ENTITY_DOMAINS)
 
     def __init__(
         self,
@@ -108,3 +111,11 @@ class DeviceProfile:
                 if isinstance(item.get("options"), dict):
                     item["options"] = {int(k): v for k, v in item["options"].items()}
                 items.append(item)
+
+
+def datapoints(profile: Any) -> Iterator[tuple[dict[str, Any], str]]:
+    """Every catalog datapoint of a profile with the entity domain it becomes, in platform
+    order."""
+    for platform, domain in ENTITY_DOMAINS.items():
+        for item in getattr(profile, platform, []):
+            yield item, domain
