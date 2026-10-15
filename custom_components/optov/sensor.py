@@ -267,7 +267,28 @@ class OptolinkScheduleSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntit
         }
 
 
-class OptolinkBusLoadSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity):
+class _GatewaySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity):
+    """A figure about the link itself, on the gateway device.
+
+    Its unique id ends in its translation key; its entity id is built from `_object_id`
+    rather than the device's display name.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _object_id: str
+
+    def __init__(self, coordinator: OptolinkCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.stable_id}_{self._attr_translation_key}"
+        self._attr_device_info = coordinator.get_gateway_device_info()
+
+    @property
+    def object_id_hint(self) -> str:
+        return self._object_id
+
+
+class OptolinkBusLoadSensor(_GatewaySensor):
     """The share of each poll interval spent talking to the controller.
 
     The bus sensors below publish on a coarse grid (whole percent, half a second, five
@@ -277,22 +298,11 @@ class OptolinkBusLoadSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
     nobody anything. The exact figures are in the diagnostics download.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "bus_load"
     _attr_icon = "mdi:speedometer"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator: OptolinkCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.stable_id}_bus_load"
-        self._attr_device_info = coordinator.get_gateway_device_info()
-
-    @property
-    def object_id_hint(self) -> str:
-        """Entity id built from the model rather than the device's display name."""
-        return "optov bus load"
+    _object_id = "optov bus load"
 
     @property
     def native_value(self) -> Any:
@@ -314,26 +324,15 @@ class OptolinkBusLoadSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
         }
 
 
-class OptolinkPollDurationSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity):
+class OptolinkPollDurationSensor(_GatewaySensor):
     """Representation of the total polling cycle duration."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "poll_duration"
     _attr_icon = "mdi:timer-outline"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = "s"
     _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator: OptolinkCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.stable_id}_poll_duration"
-        self._attr_device_info = coordinator.get_gateway_device_info()
-
-    @property
-    def object_id_hint(self) -> str:
-        """Entity id built from the model rather than the device's display name."""
-        return "optov poll duration"
+    _object_id = "optov poll duration"
 
     @property
     def native_value(self) -> Any:
@@ -341,9 +340,7 @@ class OptolinkPollDurationSensor(CoordinatorEntity[OptolinkCoordinator], SensorE
         return snap(self.coordinator.poll_duration, 0.5)
 
 
-class OptolinkActiveChannelsSensor(
-    CoordinatorEntity[OptolinkCoordinator], SensorEntity
-):
+class OptolinkActiveChannelsSensor(_GatewaySensor):
     """How many datapoints were read in the last cycle.
 
     Deliberately without a unit. Long-term statistics are keyed by unit of measurement, so a
@@ -352,21 +349,10 @@ class OptolinkActiveChannelsSensor(
     put back. A count does not need one.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "active_channels"
     _attr_icon = "mdi:format-list-numbered"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator: OptolinkCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.stable_id}_active_channels"
-        self._attr_device_info = coordinator.get_gateway_device_info()
-
-    @property
-    def object_id_hint(self) -> str:
-        """Entity id built from the model rather than the device's display name."""
-        return "optov polled datapoints"
+    _object_id = "optov polled datapoints"
 
     @property
     def native_value(self) -> Any:
@@ -374,25 +360,14 @@ class OptolinkActiveChannelsSensor(
         return self.coordinator.active_channels
 
 
-class OptolinkLatencySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity):
+class OptolinkLatencySensor(_GatewaySensor):
     """Representation of average per-telegram round-trip response time."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "avg_response_time"
     _attr_icon = "mdi:timer-sand"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_native_unit_of_measurement = "ms"
     _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator: OptolinkCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.stable_id}_avg_response_time"
-        self._attr_device_info = coordinator.get_gateway_device_info()
-
-    @property
-    def object_id_hint(self) -> str:
-        """Entity id built from the model rather than the device's display name."""
-        return "optov telegram round trip"
+    _object_id = "optov telegram round trip"
 
     @property
     def native_value(self) -> Any:
@@ -400,7 +375,7 @@ class OptolinkLatencySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
         return snap(self.coordinator.avg_response_time_ms, 5)
 
 
-class OptolinkWritesTodaySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity):
+class OptolinkWritesTodaySensor(_GatewaySensor):
     """How many writes the controller accepted today, with the addresses as attributes.
 
     Settings, programmes, the clock and raw writes all count. Starts over at local midnight;
@@ -408,21 +383,10 @@ class OptolinkWritesTodaySensor(CoordinatorEntity[OptolinkCoordinator], SensorEn
     than WRITES_PER_ADDRESS_NOTICE times in one day.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "writes_today"
     _attr_icon = "mdi:pencil-box-multiple-outline"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
-
-    def __init__(self, coordinator: OptolinkCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.stable_id}_writes_today"
-        self._attr_device_info = coordinator.get_gateway_device_info()
-
-    @property
-    def object_id_hint(self) -> str:
-        """Entity id built from the model rather than the device's display name."""
-        return "optov writes today"
+    _object_id = "optov writes today"
 
     @property
     def native_value(self) -> int:
@@ -480,32 +444,18 @@ class OptolinkCatalogSensor(SensorEntity):
         }
 
 
-class OptolinkDatapointRateSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity):
-    """How many datapoints a second the sweep actually delivers.
+class OptolinkDatapointRateSensor(_GatewaySensor):
+    """How many datapoints a second the sweep delivers.
 
-    Telegrams per second was the obvious measure while every datapoint cost one telegram. Now
-    that neighbouring datapoints are fetched together it is the wrong way round: the better
-    the merging, the fewer telegrams a second, so the number falls as throughput rises. What
-    matters is readings delivered, which is what this counts. The telegram figure is still on
-    the bus-load sensor for anyone diagnosing the link itself.
+    Datapoints that share one block are all served from that block's single read, so readings
+    delivered, not telegrams sent, is the throughput a user sees.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "datapoint_rate"
     _attr_icon = "mdi:transfer"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_native_unit_of_measurement = "dp/s"
     _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator: OptolinkCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.stable_id}_datapoint_rate"
-        self._attr_device_info = coordinator.get_gateway_device_info()
-
-    @property
-    def object_id_hint(self) -> str:
-        """Entity id built from the model rather than the device's display name."""
-        return "optov datapoint rate"
+    _object_id = "optov datapoint rate"
 
     @property
     def native_value(self) -> Any:
