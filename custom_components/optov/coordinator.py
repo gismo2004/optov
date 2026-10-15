@@ -50,7 +50,7 @@ from .conversions import (
     encode_day_schedule,
     parse_level,
 )
-from .custom_entities import onoff_unique_id
+from .custom_entities import SECTION_ONOFF, SECTIONS, onoff_unique_id
 from .decode import (
     byte_order,
     decode_date,
@@ -258,9 +258,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Datapoints the user built a custom entity on. They are read even while their own
         # entity is disabled, since the custom entity shows the same value.
         self.custom_sources: set[str] = set()
-        self.custom_onoff: list[dict[str, Any]] = []
-        self.custom_climate: list[dict[str, Any]] = []
-        self.custom_water_heater: list[dict[str, Any]] = []
+        # The custom entities per kind (custom_entities.SECTIONS), as the platforms take them.
+        self.custom: dict[str, list[dict[str, Any]]] = {s: [] for s in SECTIONS}
         # False while the custom entities file exists but cannot be read; they are then kept.
         self.custom_file_readable = True
         # The controller's catalog row and the probed rule inputs the profile was built from,
@@ -581,9 +580,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def custom_unique_ids(self) -> set[str]:
         """The unique ids of every custom entity the file currently defines."""
-        ids = {onoff_unique_id(self.stable_id, e["source"]) for e in self.custom_onoff}
-        ids |= {e["unique_id"] for e in self.custom_climate + self.custom_water_heater}
-        return ids
+        return {
+            onoff_unique_id(self.stable_id, e["source"])
+            if section == SECTION_ONOFF
+            else e["unique_id"]
+            for section, entities in self.custom.items()
+            for e in entities
+        }
 
     def get_custom_device_info(self) -> DeviceInfo | None:
         """The sub-device holding the custom entities the user added, next to the circuits."""

@@ -10,6 +10,7 @@ from typing import Any
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import OptolinkCoordinator
+from .custom_entities import KEY_NAME, KEY_ON, is_on, onoff_unique_id
 
 
 class OptolinkEntity(CoordinatorEntity[OptolinkCoordinator]):
@@ -82,3 +83,31 @@ class OptolinkEntity(CoordinatorEntity[OptolinkCoordinator]):
         if description := self._def.get("description"):
             attrs["description"] = description
         return attrs
+
+
+class OptolinkOnOffEntity(OptolinkEntity):
+    """An on/off entity the user added for a two-state datapoint (custom_entities.py).
+
+    "On" is the raw value the user chose. It shows the datapoint's value under its own unique
+    id, on the device that holds the custom entities rather than among the values.
+    """
+
+    def __init__(
+        self, coordinator: OptolinkCoordinator, entity: dict[str, Any]
+    ) -> None:
+        super().__init__(coordinator, entity["item"])
+        self._on_value = int(entity[KEY_ON])
+        self._attr_unique_id = onoff_unique_id(coordinator.stable_id, self._def["id"])
+        self._attr_name = entity[KEY_NAME]
+        self._attr_device_info = coordinator.get_custom_device_info()
+        # The user asked for this one, so it is shown regardless of the source's tier.
+        self._attr_entity_registry_enabled_default = True
+        self._attr_entity_category = None
+
+    @property
+    def object_id_hint(self) -> str:
+        return self.coordinator.object_id(self._def.get("circuit"), self._attr_name)
+
+    @property
+    def is_on(self) -> bool | None:
+        return is_on(self.raw_value, self._def, self._on_value)

@@ -22,7 +22,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import OptolinkConfigEntry
 from .custom_assembled import AssembledEntity
-from .custom_entities import KEY_MODE, KEY_NAME, MODES, SECTION_WATER_HEATER
+from .custom_entities import KEY_MODE, MODES, SECTION_WATER_HEATER
 
 # Writes go one at a time, as for every other control of the controller.
 PARALLEL_UPDATES = 1
@@ -36,11 +36,11 @@ async def async_setup_entry(
     coordinator = entry.runtime_data.coordinator
     entities = [
         OptolinkCustomWaterHeater(coordinator, cfg)
-        for cfg in coordinator.custom_water_heater
+        for cfg in coordinator.custom[SECTION_WATER_HEATER]
     ]
     for entity in entities:
         entity.entity_id = async_generate_entity_id(
-            "water_heater.{}", coordinator.object_id(None, entity.name), hass=hass
+            "water_heater.{}", entity.object_id_hint, hass=hass
         )
     async_add_entities(entities)
 
@@ -58,7 +58,6 @@ class OptolinkCustomWaterHeater(AssembledEntity, WaterHeaterEntity):
 
     def __init__(self, coordinator, cfg: dict[str, Any]) -> None:
         super().__init__(coordinator, cfg)
-        self._attr_name = cfg[KEY_NAME]
         features = WaterHeaterEntityFeature.TARGET_TEMPERATURE
         if cfg.get(KEY_MODE):
             features |= WaterHeaterEntityFeature.OPERATION_MODE

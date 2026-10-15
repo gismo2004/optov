@@ -22,7 +22,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import OptolinkConfigEntry
 from .custom_assembled import AssembledEntity
-from .custom_entities import KEY_HEATING, KEY_NAME, MODES, PRESETS, SECTION_CLIMATE
+from .custom_entities import KEY_HEATING, MODES, PRESETS, SECTION_CLIMATE
 
 # Writes go one at a time, as for every other control of the controller.
 PARALLEL_UPDATES = 1
@@ -35,11 +35,12 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data.coordinator
     entities = [
-        OptolinkCustomClimate(coordinator, cfg) for cfg in coordinator.custom_climate
+        OptolinkCustomClimate(coordinator, cfg)
+        for cfg in coordinator.custom[SECTION_CLIMATE]
     ]
     for entity in entities:
         entity.entity_id = async_generate_entity_id(
-            "climate.{}", coordinator.object_id(None, entity.name), hass=hass
+            "climate.{}", entity.object_id_hint, hass=hass
         )
     async_add_entities(entities)
 
@@ -59,7 +60,6 @@ class OptolinkCustomClimate(AssembledEntity, ClimateEntity):
                 *(p["entity"] for p in self._presets.values()),
             ],
         )
-        self._attr_name = cfg[KEY_NAME]
         self._attr_hvac_modes = [
             HVACMode(m) for m in MODES[SECTION_CLIMATE] if m in self.mapped_modes
         ]

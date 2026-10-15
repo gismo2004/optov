@@ -14,7 +14,14 @@ from homeassistant.core import Event, EventStateChangedData, callback
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .custom_entities import KEY_CURRENT, KEY_MODE, KEY_MODES, KEY_TARGET, KEY_WRITE
+from .custom_entities import (
+    KEY_CURRENT,
+    KEY_MODE,
+    KEY_MODES,
+    KEY_NAME,
+    KEY_TARGET,
+    KEY_WRITE,
+)
 
 _MISSING = (None, STATE_UNAVAILABLE, STATE_UNKNOWN)
 
@@ -36,6 +43,8 @@ class AssembledEntity(Entity):
         self, coordinator, cfg: dict[str, Any], extra: list | None = None
     ) -> None:
         self._cfg = cfg
+        self._coordinator = coordinator
+        self._attr_name = cfg[KEY_NAME]
         self._attr_unique_id = cfg["unique_id"]
         self._attr_device_info = coordinator.get_custom_device_info()
         self._watched = [
@@ -47,6 +56,10 @@ class AssembledEntity(Entity):
         self.mapped_modes = set(cfg.get(KEY_MODES, {}).values())
         options = cfg.get("options") or {}
         self._raw_of_label = {label: raw for raw, label in options.items()}
+
+    @property
+    def object_id_hint(self) -> str:
+        return self._coordinator.object_id(None, self._attr_name)
 
     async def async_added_to_hass(self) -> None:
         @callback

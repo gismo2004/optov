@@ -134,14 +134,37 @@ def off_value(item: dict[str, Any], on_value: int) -> int:
     return next(int(v) for v in item["options"] if int(v) != int(on_value))
 
 
+def device_classes(platform: str) -> list[str]:
+    """The device classes an on/off entity of this source platform can take; first the default."""
+    if ONOFF_PLATFORM[platform] == "binary_sensor":
+        return BINARY_DEVICE_CLASSES
+    return SWITCH_DEVICE_CLASSES
+
+
 def check_device_class(platform: str, device_class: str | None) -> str:
     """The device class to use: the given one if it fits the entity's kind, else the default."""
-    allowed = (
-        BINARY_DEVICE_CLASSES
-        if ONOFF_PLATFORM[platform] == "binary_sensor"
-        else SWITCH_DEVICE_CLASSES
-    )
+    allowed = device_classes(platform)
     return device_class if device_class in allowed else allowed[0]
+
+
+def onoff_entity(
+    platform: str,
+    item: dict[str, Any],
+    value: str,
+    on: int,
+    device_class: str | None,
+    name: str | None,
+) -> dict[str, Any]:
+    """An on/off entity of a two-state datapoint, as the platforms and the file take it."""
+    return {
+        "source": item["id"],
+        "platform": platform,
+        "item": item,
+        KEY_VALUE: value,
+        KEY_ON: on,
+        KEY_DEVICE_CLASS: check_device_class(platform, device_class),
+        KEY_NAME: (name or "").strip() or item["name"],
+    }
 
 
 def parse_file(raw: Any) -> tuple[dict[str, list[dict[str, Any]]], list[str], bool]:

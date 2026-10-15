@@ -58,9 +58,7 @@ from .coordinator import (
 )
 from .custom_entities import (
     CUSTOM_DEVICE,
-    SECTION_CLIMATE,
     SECTION_ONOFF,
-    SECTION_WATER_HEATER,
     is_custom_unique_id,
 )
 from .optolink import OptolinkClient, OptolinkDeviceError, UnsupportedProtocol
@@ -216,10 +214,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
     custom, _, coordinator.custom_file_readable = await custom_file.async_load(
         hass, coordinator, entry.entry_id
     )
-    coordinator.custom_onoff = custom[SECTION_ONOFF]
-    coordinator.custom_climate = custom[SECTION_CLIMATE]
-    coordinator.custom_water_heater = custom[SECTION_WATER_HEATER]
-    coordinator.custom_sources = {e["source"] for e in coordinator.custom_onoff}
+    coordinator.custom = custom
+    coordinator.custom_sources = {e["source"] for e in custom[SECTION_ONOFF]}
     file_name = custom_file.custom_file_name(coordinator.stable_id)
     if entry.data.get(CONF_CUSTOM_FILE) != file_name:
         hass.config_entries.async_update_entry(
@@ -237,7 +233,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
         _async_migrate_identity(hass, entry, coordinator)
         _async_reconcile_registry(hass, entry, coordinator)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        _async_remove_stale_custom(hass, entry, coordinator)
         # Entities Home Assistant restored from an earlier installation of this controller
         # only reach the registry while the platforms set up; see _async_apply_enabled_states.
         _async_apply_enabled_states(hass, entry, coordinator)
@@ -389,22 +384,6 @@ def _port_url(hass: HomeAssistant, entry: OptolinkConfigEntry) -> str:
             entry, data={**entry.data, CONF_DEVICE: url}
         )
     return url
-
-
-@callback
-def _async_remove_stale_custom(
-    hass: HomeAssistant, entry: OptolinkConfigEntry, coordinator: OptolinkCoordinator
-) -> None:
-    """Remove custom entities that are no longer in the controller's custom entities file."""
-    if not coordinator.custom_file_readable:
-        # A broken file is not an empty one: keep every custom entity until it is fixed.
-        return
-    registry = er.async_get(hass)
-    current = coordinator.custom_unique_ids()
-    for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
-        uid = reg_entry.unique_id
-        if is_custom_unique_id(coordinator.stable_id, uid) and uid not in current:
-            registry.async_remove(reg_entry.entity_id)
 
 
 async def _async_options_updated(
@@ -584,7 +563,7 @@ def _async_reconcile_registry(
             and is_custom_unique_id(coordinator.stable_id, reg_entry.unique_id)
         ):
             # A custom entity the user added: not in the profile, but kept with its
-            # customisations. One no longer in the file goes in _async_remove_stale_custom.
+            # customisations. One no longer in the file is removed below like any other.
             continue
         if key not in expected:
             _LOGGER.info(

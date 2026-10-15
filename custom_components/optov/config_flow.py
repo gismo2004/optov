@@ -73,7 +73,6 @@ from .const import (
     option,
 )
 from .custom_entities import (
-    BINARY_DEVICE_CLASSES,
     KEY_CURRENT,
     KEY_DEVICE_CLASS,
     KEY_HEATING,
@@ -83,18 +82,18 @@ from .custom_entities import (
     KEY_ON,
     KEY_PRESETS,
     KEY_TARGET,
-    KEY_VALUE,
     KEY_WRITE,
     MODES,
-    ONOFF_PLATFORM,
     PRESETS_OFFERED,
     SECTION_CLIMATE,
     SECTION_ONOFF,
     SECTION_WATER_HEATER,
-    SWITCH_DEVICE_CLASSES,
+    SECTIONS,
     check_device_class,
     default_on_value,
+    device_classes,
     find_item,
+    onoff_entity,
     shared_modes,
     two_state_items,
     write_values,
@@ -837,34 +836,22 @@ class OptoVOptionsFlow(OptionsFlow):
         coordinator = self._coordinator()
         return len(coordinator.custom_unique_ids())
 
-    def _custom(self) -> dict[str, list[dict[str, Any]]]:
-        coordinator = self._coordinator()
-        return {
-            SECTION_ONOFF: list(coordinator.custom_onoff),
-            SECTION_CLIMATE: list(coordinator.custom_climate),
-            SECTION_WATER_HEATER: list(coordinator.custom_water_heater),
-        }
+    def _entities(self, section: str) -> list[dict[str, Any]]:
+        return list(self._coordinator().custom[section])
 
     async def _async_save(
-        self, onoff: list[dict[str, Any]] | None = None, **sections: list
+        self, section: str, entities: list[dict[str, Any]]
     ) -> ConfigFlowResult:
-        """Write the file with the given sections changed, the rest as they are, and reload."""
-        custom = self._custom()
-        if onoff is not None:
-            custom[SECTION_ONOFF] = onoff
-        custom.update(sections)
-        await custom_file.async_save(self.hass, self._coordinator(), custom)
+        """Write the file with one section changed, the rest as they are, and reload."""
+        coordinator = self._coordinator()
+        custom = {**coordinator.custom, section: entities}
+        await custom_file.async_save(self.hass, coordinator, custom)
         self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
         return self.async_abort(reason="custom_saved")
 
     def _onoff_schema(
         self, platform: str, item: dict[str, Any], on: int, device_class: str, name: str
     ) -> dict:
-        classes = (
-            BINARY_DEVICE_CLASSES
-            if ONOFF_PLATFORM[platform] == "binary_sensor"
-            else SWITCH_DEVICE_CLASSES
-        )
         return {
             vol.Required(KEY_ON, default=str(on)): SelectSelector(
                 SelectSelectorConfig(
@@ -877,7 +864,7 @@ class OptoVOptionsFlow(OptionsFlow):
             ),
             vol.Required(KEY_DEVICE_CLASS, default=device_class): SelectSelector(
                 SelectSelectorConfig(
-                    options=classes,
+                    options=device_classes(platform),
                     mode=SelectSelectorMode.DROPDOWN,
                     translation_key="onoff_device_class",
                 )
@@ -957,16 +944,17 @@ class OptoVOptionsFlow(OptionsFlow):
             return self.async_abort(reason="custom_not_loaded")
         platform, item = find_item(coordinator.profile, candidates[self._source][0])
         if user_input is not None:
-            entity = {
-                "source": item["id"],
-                "platform": platform,
-                "item": item,
-                KEY_VALUE: self._source,
-                KEY_ON: int(user_input[KEY_ON]),
-                KEY_DEVICE_CLASS: user_input[KEY_DEVICE_CLASS],
-                KEY_NAME: user_input[KEY_NAME].strip() or item["name"],
-            }
-            return await self._async_save([*coordinator.custom_onoff, entity])
+            entity = onoff_entity(
+                platform,
+                item,
+                self._source,
+                int(user_input[KEY_ON]),
+                user_input[KEY_DEVICE_CLASS],
+                user_input[KEY_NAME],
+            )
+            return await self._async_save(
+                SECTION_ONOFF, [*self._entities(SECTION_ONOFF), entity]
+            )
         return self.async_show_form(
             step_id="custom_onoff_details",
             data_schema=vol.Schema(
@@ -996,9 +984,7 @@ class OptoVOptionsFlow(OptionsFlow):
                 self._edit = key
                 return await self.async_step_custom_edit_onoff()
             current = next(
-                e
-                for e in getattr(coordinator, f"custom_{section}")
-                if e["unique_id"] == key
+                e for e in coordinator.custom[section] if e["unique_id"] == key
             )
             self._section, self._editing = section, key
             self._draft = {
@@ -1010,21 +996,15 @@ class OptoVOptionsFlow(OptionsFlow):
             self._draft[KEY_WRITE] = dict(current[KEY_WRITE])
             return await self.async_step_custom_assembled()
         kinds = await self._async_kind_names()
+        # An on/off entity is known by its datapoint, the others by their unique id.
         options = [
             SelectOptionDict(
-                value=f"{SECTION_ONOFF}|{entity['source']}",
-                label=f"{entity[KEY_NAME]} ({kinds[SECTION_ONOFF]})",
+                value=f"{section}|{entity['source' if section == SECTION_ONOFF else 'unique_id']}",
+                label=f"{entity[KEY_NAME]} ({kinds[section]})",
             )
-            for entity in coordinator.custom_onoff
+            for section, entities in coordinator.custom.items()
+            for entity in entities
         ]
-        for section in (SECTION_CLIMATE, SECTION_WATER_HEATER):
-            options += [
-                SelectOptionDict(
-                    value=f"{section}|{entity['unique_id']}",
-                    label=f"{entity[KEY_NAME]} ({kinds[section]})",
-                )
-                for entity in getattr(coordinator, f"custom_{section}")
-            ]
         options.sort(key=lambda o: o["label"].casefold())
         return self.async_show_form(
             step_id="custom_edit",
@@ -1043,14 +1023,14 @@ class OptoVOptionsFlow(OptionsFlow):
         """What each kind is called in the edit list, in the Home Assistant language."""
         return {
             section: await async_ui_text(self.hass, f"custom_kind_{section}")
-            for section in (SECTION_ONOFF, SECTION_CLIMATE, SECTION_WATER_HEATER)
+            for section in SECTIONS
         }
 
     async def async_step_custom_edit_onoff(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         coordinator = self._coordinator()
-        onoff = list(coordinator.custom_onoff) if coordinator else []
+        onoff = self._entities(SECTION_ONOFF) if coordinator else []
         current = next((e for e in onoff if e["source"] == self._edit), None)
         if current is None:
             return self.async_abort(reason="custom_not_loaded")
@@ -1058,14 +1038,14 @@ class OptoVOptionsFlow(OptionsFlow):
         if user_input is not None:
             rest = [e for e in onoff if e["source"] != self._edit]
             if user_input.get("remove"):
-                return await self._async_save(rest)
+                return await self._async_save(SECTION_ONOFF, rest)
             changed = {
                 **current,
                 KEY_ON: int(user_input[KEY_ON]),
                 KEY_DEVICE_CLASS: user_input[KEY_DEVICE_CLASS],
                 KEY_NAME: user_input[KEY_NAME].strip() or item["name"],
             }
-            return await self._async_save([*rest, changed])
+            return await self._async_save(SECTION_ONOFF, [*rest, changed])
         schema = self._onoff_schema(
             current["platform"],
             item,
@@ -1103,16 +1083,11 @@ class OptoVOptionsFlow(OptionsFlow):
         if not entity_id:
             return None
         coordinator = self._coordinator()
-        reg_entry = er.async_get(self.hass).async_get(entity_id)
-        prefix = f"{coordinator.stable_id}_"
-        if (
-            reg_entry is None
-            or reg_entry.config_entry_id != self.config_entry.entry_id
-            or not reg_entry.unique_id.startswith(prefix)
-        ):
-            return None
-        return custom_file.find_select(
-            coordinator.profile, reg_entry.unique_id[len(prefix) :]
+        item_id = custom_file.own_item_id(
+            self.hass, coordinator, self.config_entry.entry_id, entity_id
+        )
+        return (
+            custom_file.find_select(coordinator.profile, item_id) if item_id else None
         )
 
     async def async_step_custom_assembled(
@@ -1126,10 +1101,10 @@ class OptoVOptionsFlow(OptionsFlow):
             if user_input.get("remove") and self._editing:
                 rest = [
                     e
-                    for e in getattr(self._coordinator(), f"custom_{section}")
+                    for e in self._entities(section)
                     if e["unique_id"] != self._editing
                 ]
-                return await self._async_save(**{section: rest})
+                return await self._async_save(section, rest)
             for key in (KEY_NAME, KEY_TARGET, KEY_CURRENT, KEY_MODE, KEY_HEATING):
                 draft[key] = user_input.get(key) or None
             if draft[KEY_MODE] and self._mode_item(draft[KEY_MODE]) is None:
@@ -1316,10 +1291,10 @@ class OptoVOptionsFlow(OptionsFlow):
             )
         rest = [
             e
-            for e in getattr(coordinator, f"custom_{section}")
+            for e in self._entities(section)
             if e["unique_id"] not in (self._editing, resolved[0]["unique_id"])
         ]
-        return await self._async_save(**{section: [*rest, resolved[0]]})
+        return await self._async_save(section, [*rest, resolved[0]])
 
     async def async_step_custom_backup(
         self, user_input: dict[str, Any] | None = None

@@ -5,6 +5,7 @@ Rules and format are in custom_entities.py.
 
 import logging
 import os
+from collections.abc import Iterable
 from typing import Any
 
 import yaml
@@ -30,10 +31,10 @@ from .custom_entities import (
     SECTION_ONOFF,
     SECTION_WATER_HEATER,
     assembled_unique_id,
-    check_device_class,
     default_on_value,
     find_item,
     off_value,
+    onoff_entity,
     parse_file,
     render_file,
     two_state_items,
@@ -102,6 +103,41 @@ async def async_read(
     return parse_file(raw)
 
 
+def own_item_id(
+    hass: HomeAssistant,
+    coordinator: Any,
+    entry_id: str,
+    entity_id: str,
+    planned: dict[str, str] | None = None,
+) -> str | None:
+    """The datapoint id behind one of this controller's entities; None for any other entity.
+
+    Right after the integration was added again, the values are not registered yet. Their
+    entity ids are built from the model code (profiles.stable_object_id), so `planned` -- the
+    entity id each datapoint will get -- names them just as well.
+    """
+    reg_entry = er.async_get(hass).async_get(entity_id)
+    if reg_entry is None:
+        return (planned or {}).get(entity_id)
+    prefix = f"{coordinator.stable_id}_"
+    if reg_entry.config_entry_id != entry_id or not reg_entry.unique_id.startswith(
+        prefix
+    ):
+        return None
+    return reg_entry.unique_id[len(prefix) :]
+
+
+def _planned_ids(
+    coordinator: Any, pairs: Iterable[tuple[str, dict[str, Any]]]
+) -> dict[str, str]:
+    """The entity id each (platform, datapoint) will get, to the datapoint's id."""
+    return {
+        f"{ENTITY_DOMAINS[platform]}."
+        f"{coordinator.object_id(item.get('circuit'), item['name'])}": item["id"]
+        for platform, item in pairs
+    }
+
+
 def resolve_onoff(
     hass: HomeAssistant, coordinator: Any, entry_id: str, entries: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[str]]:
@@ -110,32 +146,13 @@ def resolve_onoff(
     An entity is keyed on the datapoint id; the entity id in the file is only how a person
     names the value. Returns the resolved entries and what was skipped.
     """
-    registry = er.async_get(hass)
-    prefix = f"{coordinator.stable_id}_"
-    # Right after the integration was added again, the values are not registered yet. Their
-    # entity ids are built from the model code (profiles.stable_object_id), so the id a value
-    # will get is known and names it just as well.
-    by_object_id = {
-        f"{ENTITY_DOMAINS[platform]}."
-        f"{coordinator.object_id(item.get('circuit'), item['name'])}": item["id"]
-        for platform, item in two_state_items(coordinator.profile)
-    }
+    planned = _planned_ids(coordinator, two_state_items(coordinator.profile))
     resolved: list[dict[str, Any]] = []
     skipped: list[str] = []
     for entry in entries:
         value = entry[KEY_VALUE]
-        reg_entry = registry.async_get(value)
-        if reg_entry is not None:
-            if (
-                reg_entry.config_entry_id != entry_id
-                or not reg_entry.unique_id.startswith(prefix)
-            ):
-                skipped.append(f"{value}: not an entity of this controller")
-                continue
-            item_id = reg_entry.unique_id[len(prefix) :]
-        elif value in by_object_id:
-            item_id = by_object_id[value]
-        else:
+        item_id = own_item_id(hass, coordinator, entry_id, value, planned)
+        if item_id is None:
             skipped.append(f"{value}: not an entity of this controller")
             continue
         found = find_item(coordinator.profile, item_id)
@@ -150,15 +167,14 @@ def resolve_onoff(
             skipped.append(f"{value}: 'on_value' must be one of {known}")
             continue
         resolved.append(
-            {
-                "source": item["id"],
-                "platform": platform,
-                "item": item,
-                KEY_VALUE: value,
-                KEY_ON: entry[KEY_ON],
-                KEY_DEVICE_CLASS: check_device_class(platform, entry[KEY_DEVICE_CLASS]),
-                KEY_NAME: entry[KEY_NAME] or item["name"],
-            }
+            onoff_entity(
+                platform,
+                item,
+                value,
+                entry[KEY_ON],
+                entry[KEY_DEVICE_CLASS],
+                entry[KEY_NAME],
+            )
         )
     return resolved, skipped
 
@@ -191,12 +207,9 @@ def resolve_assembled(
     they are read and set through Home Assistant. The mode select has to be one of this
     controller's, because the mapping is by its raw values, which only the catalog knows.
     """
-    registry = er.async_get(hass)
-    prefix = f"{coordinator.stable_id}_"
-    selects_by_object_id = {
-        f"select.{coordinator.object_id(item.get('circuit'), item['name'])}": item["id"]
-        for item in getattr(coordinator.profile, "selects", None) or []
-    }
+    planned = _planned_ids(
+        coordinator, (("selects", item) for item in coordinator.profile.selects)
+    )
     resolved: list[dict[str, Any]] = []
     skipped: list[str] = []
     for entry in entries:
@@ -219,18 +232,8 @@ def resolve_assembled(
             continue
         options: dict[int, str] = {}
         if mode := entry.get(KEY_MODE):
-            reg_entry = registry.async_get(mode)
-            if reg_entry is not None and (
-                reg_entry.config_entry_id == entry_id
-                and reg_entry.unique_id.startswith(prefix)
-            ):
-                item = find_select(
-                    coordinator.profile, reg_entry.unique_id[len(prefix) :]
-                )
-            elif reg_entry is None and mode in selects_by_object_id:
-                item = find_select(coordinator.profile, selects_by_object_id[mode])
-            else:
-                item = None
+            item_id = own_item_id(hass, coordinator, entry_id, mode, planned)
+            item = find_select(coordinator.profile, item_id) if item_id else None
             if item is None:
                 skipped.append(f"{where}: 'mode' must be a select of this controller")
                 continue
@@ -271,24 +274,14 @@ def _resolve_presets(
     A switch is simply on. A select must be a two-state setting of this controller; its "on"
     option is the one an on/off entity would preselect (raw 1, else the higher value).
     """
-    registry = er.async_get(hass)
-    prefix = f"{coordinator.stable_id}_"
     result: dict[str, dict[str, Any]] = {}
     for name, entity_id in presets.items():
         if not _entity_exists(hass, entity_id):
             return {}, f"preset {name}: {entity_id} not found"
         on_label = None
         if entity_id.startswith("select."):
-            reg_entry = registry.async_get(entity_id)
-            found = None
-            if (
-                reg_entry is not None
-                and reg_entry.config_entry_id == entry_id
-                and reg_entry.unique_id.startswith(prefix)
-            ):
-                found = find_item(
-                    coordinator.profile, reg_entry.unique_id[len(prefix) :]
-                )
+            item_id = own_item_id(hass, coordinator, entry_id, entity_id)
+            found = find_item(coordinator.profile, item_id) if item_id else None
             if found is None:
                 return (
                     {},
