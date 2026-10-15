@@ -141,13 +141,9 @@ class OptolinkSensor(OptolinkEntity, SensorEntity):
         """
         if not super().available:
             return False
+        # Code 0 is "sensor ok"; without a code (none read yet, or the read failed) it counts as ok.
         raw_code = self.coordinator.sensor_status_raw.get(self._def["id"])
-        if raw_code is not None:
-            return raw_code == 0
-        status = self.coordinator.sensor_status.get(self._def["id"])
-        if status is None:
-            return True
-        return str(status).strip().lower() in ("sensor ok", "ok", "0")
+        return raw_code is None or raw_code == 0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

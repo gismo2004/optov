@@ -1342,8 +1342,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     continue
                 if item["id"] not in due:
                     self._carry_forward(data, item["id"])
-                    if self.sensor_status and item["id"] in self.sensor_status:
-                        sensor_status[item["id"]] = self.sensor_status[item["id"]]
+                    # Its health code stays with it until the next read, as its value does.
+                    for kept, previous in (
+                        (sensor_status, self.sensor_status),
+                        (sensor_status_raw, self.sensor_status_raw),
+                    ):
+                        if item["id"] in previous:
+                            kept[item["id"]] = previous[item["id"]]
                     continue
                 try:
                     block = item.get("block") or item["bytes"]

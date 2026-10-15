@@ -23,6 +23,9 @@ commits.
   the integration entry, like the catalog.
 
 ### Fixed
+- With a catalog in a language other than German or English, a healthy temperature sensor could
+  show as unavailable between two of its reads. Its health is now taken from the controller's
+  code, never from the catalog's text.
 - An action called while OptoV is still connecting -- right after a restart, or while the
   controller cannot be reached -- said that no controller was set up. It now says that OptoV is
   not connected yet.
