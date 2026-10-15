@@ -10,6 +10,8 @@ commits.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-15
+
 ### Changed
 - A thermostat's presets can be any switch, a template switch included, also in the dialog.
 
@@ -262,7 +264,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/gismo2004/optov/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gismo2004/optov/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/gismo2004/optov/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/gismo2004/optov/compare/v0.7.0...v0.7.1
