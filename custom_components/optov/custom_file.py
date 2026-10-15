@@ -72,20 +72,21 @@ def write_text(path: str, text: str) -> None:
     os.replace(tmp, path)
 
 
-def remove_file(path: str) -> None:
-    if os.path.exists(path):
-        os.remove(path)
+def install_upload(source: str, target: str) -> None:
+    """Put an uploaded file in place of the custom entities file. Blocking I/O.
 
-
-def check_upload(text: str | None) -> bool:
-    """Whether uploaded text may replace the file: YAML holding sections."""
-    if text is None:
-        return False
+    Checked before it replaces anything, like a catalog: it has to be YAML holding sections.
+    Anything else raises ValueError and leaves the current file as it is.
+    """
     try:
+        with open(source, encoding="utf-8") as handle:
+            text = handle.read()
         raw = yaml.safe_load(text)
-    except yaml.YAMLError:
-        return False
-    return isinstance(raw, dict)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as err:
+        raise ValueError(f"not a custom entities file: {err}") from err
+    if not isinstance(raw, dict):
+        raise ValueError("not a custom entities file: no sections")
+    write_text(target, text)
 
 
 async def async_read(

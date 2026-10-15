@@ -10,7 +10,10 @@ be releasing.
 import contextlib
 import logging
 import os
+from collections.abc import Callable
 from datetime import timedelta
+from functools import partial
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -105,18 +108,24 @@ CONF_CATALOG_FILE = "catalog_file"
 CONF_DELETE = "delete"
 
 
-def _install_uploaded_catalog(
-    hass: HomeAssistant, file_id: str, config_dir: str
-) -> str:
-    """Move an uploaded file into place as a catalog and return its name. Executor only.
+def _install_upload(
+    hass: HomeAssistant, file_id: str, install: Callable[[Path], Any]
+) -> Any:
+    """Hand an uploaded file to `install`, which checks it and puts it in place. Executor only.
 
     `process_uploaded_file` hands over a path and deletes the file when the block ends, so the
-    verification and the copy both happen inside it. The name the file arrived with is kept,
-    so several catalogs can sit side by side under names their owner recognises.
+    check and the copy both happen inside it. Used for catalogs and custom entities files.
     """
     with process_uploaded_file(hass, file_id) as path:
-        installed = catalog_db.install_catalog(str(path), config_dir, path.name)
-    return os.path.basename(installed)
+        return install(path)
+
+
+def _install_catalog(config_dir: str, path: Path) -> str:
+    """Install an uploaded catalog and return its name. The name the file arrived with is
+    kept, so several catalogs can sit side by side under names their owner recognises."""
+    return os.path.basename(
+        catalog_db.install_catalog(str(path), config_dir, path.name)
+    )
 
 
 class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -422,10 +431,10 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         if file_id := user_input.get(CONF_CATALOG_FILE):
             try:
                 self._catalog = await self.hass.async_add_executor_job(
-                    _install_uploaded_catalog,
+                    _install_upload,
                     self.hass,
                     file_id,
-                    self.hass.config.path(DOMAIN),
+                    partial(_install_catalog, self.hass.config.path(DOMAIN)),
                 )
             except catalog_db.CatalogSchemaError as err:
                 return "catalog_outdated" if err.outdated else "catalog_too_new"
@@ -694,15 +703,6 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
                 ),
             },
         )
-
-
-def _read_upload(hass: HomeAssistant, file_id: str) -> str | None:
-    """The text of an uploaded file, or None if it is not text. Executor only."""
-    with process_uploaded_file(hass, file_id) as path:
-        try:
-            return path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return None
 
 
 class OptoVOptionsFlow(OptionsFlow):
@@ -1332,14 +1332,14 @@ class OptoVOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             if file_id := user_input.get("upload"):
-                text = await self.hass.async_add_executor_job(
-                    _read_upload, self.hass, file_id
-                )
-                if custom_file.check_upload(text):
+                try:
                     await self.hass.async_add_executor_job(
-                        custom_file.write_text, path, text
+                        _install_upload,
+                        self.hass,
+                        file_id,
+                        partial(custom_file.install_upload, target=path),
                     )
-                else:
+                except ValueError:
                     errors["upload"] = "custom_invalid"
             if not errors:
                 sections, problems, _ = await custom_file.async_read(

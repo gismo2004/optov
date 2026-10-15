@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from functools import partial
 from typing import Any
 from urllib.parse import urlencode
 
@@ -296,36 +297,26 @@ async def async_remove_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
     ]:
         await _async_remove_card_resource(hass)
 
-    # The custom entities file goes with the entry, as the catalog does; the options dialog
-    # offers it for download beforehand.
+    config_dir = hass.config.path(DOMAIN)
+    removals = []
+    # The custom entities file goes with the entry; the options dialog offers it for download
+    # beforehand.
     if file_name := entry.data.get(CONF_CUSTOM_FILE):
-        try:
-            await hass.async_add_executor_job(
-                custom_file.remove_file,
-                os.path.join(hass.config.path(DOMAIN), file_name),
-            )
-        except OSError as err:
-            _LOGGER.warning(
-                "Could not delete %s of the removed entry: %s", file_name, err
-            )
-
+        removals.append((os.remove, os.path.join(config_dir, file_name)))
     name = entry.data.get(CONF_CATALOG)
-    if not name or any(
+    if name and not any(
         other.data.get(CONF_CATALOG) == name
         for other in hass.config_entries.async_entries(DOMAIN)
         if other.entry_id != entry.entry_id
     ):
-        return
-    try:
-        await hass.async_add_executor_job(
-            catalog_db.remove_catalog, hass.config.path(DOMAIN), name
-        )
-    except FileNotFoundError:
-        pass
-    except (OSError, ValueError) as err:
-        _LOGGER.warning(
-            "Could not delete catalog %s of the removed entry: %s", name, err
-        )
+        removals.append((partial(catalog_db.remove_catalog, config_dir), name))
+    for remove, target in removals:
+        try:
+            await hass.async_add_executor_job(remove, target)
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as err:
+            _LOGGER.warning("Could not delete %s of the removed entry: %s", target, err)
 
 
 def _catalog_issue_id(entry: OptolinkConfigEntry) -> str:
