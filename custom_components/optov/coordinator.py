@@ -391,7 +391,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.telegrams_failed: int = 0
         self.avg_response_time_ms: float | None = None
         self.telegram_rate: float | None = None
-        # Readings delivered per second, the figure that rises when merging works.
+        # Readings delivered per second; datapoints sharing a block come from one read.
         self.datapoint_rate: float | None = None
         self.datapoints_read: int = 0
         self.bytes_transferred: int = 0
@@ -657,9 +657,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Home Assistant keeps a removed entity as a tombstone for thirty days and restores it --
         its enabled state, area, custom name, hidden flag, labels -- when an entity with the
         same unique id reappears. Matching is on the unique id alone, so anything in it that
-        changes between installations throws all of that away. The config entry id used to be
-        the prefix, and a new entry gets a new one, so removing and re-adding the integration
-        silently lost every manual change.
+        changes between installations throws all of that away. A config entry id would: a new
+        entry gets a new one, so removing and re-adding the integration would silently lose
+        every manual change.
 
         What goes in instead is the name of the ESPHome node and of its serial proxy. Both are
         written by hand in the node's own configuration, so they survive the node being replaced
@@ -1336,7 +1336,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.poll_duration = round(duration, 2)
         # Duty is the share of the *period* spent talking to the controller, so it must be
         # measured against the configured interval rather than `update_interval`: the latter is
-        # now shortened by however long the sweep took in order to hold the period steady, so
+        # shortened by however long the sweep took in order to hold the period steady, so
         # using it as the denominator divides by the idle gap and pins the figure at 100%.
         period = self.scan_interval_seconds
         self.bus_load = (
@@ -1382,14 +1382,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sensor_status = sensor_status
         self.sensor_status_raw = sensor_status_raw
 
-        # 5. Weekly programmes, in the background, until each has been read once. After that
+        # Weekly programmes, in the background, until each has been read once. After that
         # they are read only to check them before a write (see _set_day_schedule) or when
         # asked to: they change almost only through this integration, and a read costs one
         # telegram per record, up to 56 per programme.
         if self.profile.schedules and self._missing_schedules():
             self._start_job("programmes", self._refresh_missing_schedules)
 
-        # 6. Fault histories: read in full until that has worked once, then only their
+        # Fault histories: read in full until that has worked once, then only their
         # newest entry every few cycles, and in full again when it changed.
         if self._error_history_dp and not self._error_history_loaded:
             self._start_job("faults", self.async_refresh_error_history)
@@ -1447,7 +1447,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     typical * 100,
                 )
 
-        # 7. Keep the controller's clock right. The sweep has just read it, so noticing the
+        # Keep the controller's clock right. The sweep has just read it, so noticing the
         # drift is free; only the correction itself costs a telegram, and only when it is
         # both wrong enough and not been tried in the last hour.
         clock = self.clock_datapoint()
@@ -1463,7 +1463,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._check_dst_rule(data)
 
-        # 8. Retire entities the controller says it does not have.
+        # Retire entities the controller says it does not have.
         self._disable_unsupported_entities(sensor_status_raw)
 
         return data
@@ -1839,10 +1839,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for domain, item_id in by_address.get(address, []):
                 unimplemented += _disable(domain, item_id)
                 # Record the item as well as the address. The guard in async_setup_entry that
-                # stops a retired entity being re-enabled on the next start works on item ids,
-                # so storing only the address let these come back on every restart -- and then
-                # sit in the poll set permanently, because a datapoint that never yields a
-                # value counts as "never read" and is treated as always due.
+                # stops a retired entity being re-enabled on the next start works on item ids;
+                # with only the address it would come back on every restart and sit in the poll
+                # set for good, since a datapoint that never yields a value counts as "never
+                # read" and is treated as always due.
                 self._retired_item_ids.add(item_id)
             self._retired_addresses.add(address)
 
@@ -2040,7 +2040,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # last poll read until the scheduler gets round to this address again -- up to a couple
         # of cycles, because a datapoint polled recently is the least overdue thing there is.
         # In the meantime the frontend snaps the control back to the stale value, which looks
-        # exactly like a write that never happened (it has been reported as one). Reading the
+        # exactly like a write that never happened. Reading the
         # block straight back and publishing it closes that gap, refreshes every other control
         # sharing the register (operating mode, party and eco live in one byte), and is the only
         # way to notice a write the controller acknowledged but did not apply.
