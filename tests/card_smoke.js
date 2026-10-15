@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
- * Renders the schedule card outside a browser and fails on any exception.
+ * Renders the dashboard cards outside a browser and fails on any exception.
  *
- * Why this exists: `node --check` only parses. It happily accepted a `const` used a few lines
- * above its own declaration, which throws at render time; Home Assistant catches that inside
- * setConfig and paints "Configuration error" with nothing useful in any log. That cost a
- * deploy-and-look round trip to find, so the card is now driven here first.
+ * `node --check` only parses: a `const` used above its own declaration passes it and throws at
+ * render time, and Home Assistant catches that inside setConfig and paints "Configuration
+ * error" with nothing in any log. Driving the cards here finds that before a deploy.
  *
  * The DOM stub is the smallest thing the card touches. It records the rendered HTML and the
  * service calls, so the checks below can assert on what a user would actually see.

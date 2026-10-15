@@ -1,7 +1,7 @@
 /**
- * Schedule card for the OptoV integration.
+ * The OptoV dashboard cards: the schedule card and the fault history card.
  *
- * Edits the weekly programmes the integration publishes as schedule sensors. Nothing about a
+ * The schedule card edits the weekly programmes the integration publishes as schedule sensors. Nothing about a
  * controller lives in this file: which programmes exist, what they and their levels are
  * called, how many windows a day holds and on what time grid all come from the sensor's
  * attributes (and through them from the controller catalog). The card's own UI strings come from
@@ -99,16 +99,22 @@ function adoptState(instance, defaults) {
 const SCHEDULE_DEFAULTS = () => ({
   _config: {},
   _activeDay: todayKey(),
-  _scope: null,
+  _scope: null, // null = follow the pattern the week is already in
   _selectedEntityId: null,
-  _edits: {},
+  _edits: {}, // "entity_id|day" -> windows being edited
   _saving: false,
-  _status: null,
+  _status: null, // { kind: 'ok' | 'error', text }
+  // A save the controller refused because the programme was changed there since it was
+  // read: what the user wanted to write, kept for "overwrite". { entityId, windows, targets,
+  // days }. The card meanwhile shows the controller's version.
   _conflict: null,
   _reading: false,
   _signature: null,
   _strings: null,
+  // Holiday dates being typed, before they are saved: { entityId, start, end } with ISO dates
+  // or '' for none. entityId is the programme on screen, whose circuit the holiday is.
   _holidayEdit: null,
+  // The programme whose holiday dates are unfolded; folded, the holiday is one line.
   _holidayOpen: null,
   _holidayBusy: false,
 });
@@ -291,6 +297,13 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
+/** A card's header: its icon, its title and, if there is one, a line below it. */
+function header(icon, title, subtitle) {
+  const below = subtitle == null ? '' : `<div class="subtitle">${escapeHtml(subtitle)}</div>`;
+  return `<div class="header"><ha-icon icon="${icon}"></ha-icon>`
+    + `<div class="heading"><div class="title">${escapeHtml(title)}</div>${below}</div></div>`;
+}
+
 function toMinutes(time) {
   if (!time) return 0;
   const [h, m] = String(time).split(':').map((p) => parseInt(p, 10) || 0);
@@ -408,7 +421,9 @@ function discoverFaultHistories(hass) {
     .sort((a, b) => String(a.entity_id).localeCompare(String(b.entity_id)));
 }
 
-const FAULT_STYLE = `
+// What both cards look like: the card, its header with icon, title and subtitle, and the
+// dashed box that stands in for content there is none of.
+const BASE_STYLE = `
   :host { display: block; }
   ha-card { padding: 16px; box-sizing: border-box; }
   .header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
@@ -416,6 +431,11 @@ const FAULT_STYLE = `
   .heading { min-width: 0; }
   .title { font-size: 1.15rem; font-weight: 500; line-height: 1.3; }
   .subtitle { font-size: 0.82rem; color: var(--secondary-text-color); margin-top: 2px; }
+  .empty { padding: 12px; text-align: center; font-size: 0.9rem; color: var(--secondary-text-color);
+           border: 1px dashed var(--divider-color); border-radius: 8px; }
+`;
+
+const FAULT_STYLE = BASE_STYLE + `
   .faults { display: flex; flex-direction: column; overflow-y: auto; }
   .fault { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 10px;
            padding: 9px 2px; border-top: 1px solid var(--divider-color); }
@@ -426,18 +446,9 @@ const FAULT_STYLE = `
   .code { font-size: 0.75rem; font-weight: 600; padding: 2px 7px; border-radius: 10px;
           background: var(--secondary-background-color); color: var(--secondary-text-color);
           white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .empty { padding: 12px; text-align: center; font-size: 0.9rem; color: var(--secondary-text-color);
-           border: 1px dashed var(--divider-color); border-radius: 8px; }
 `;
 
-const STYLE = `
-  :host { display: block; }
-  ha-card { padding: 16px; box-sizing: border-box; }
-  .header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
-  .header > ha-icon { color: var(--primary-color); flex: none; margin-top: 2px; }
-  .heading { min-width: 0; }
-  .title { font-size: 1.15rem; font-weight: 500; line-height: 1.3; }
-  .subtitle { font-size: 0.82rem; color: var(--secondary-text-color); margin-top: 2px; }
+const STYLE = BASE_STYLE + `
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
   .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 16px;
           border: 1px solid var(--divider-color); font-size: 0.85rem; cursor: pointer; }
@@ -494,8 +505,6 @@ const STYLE = `
   .icon-button { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border: none;
                  border-radius: 50%; background: none; color: var(--error-color); cursor: pointer; }
   .icon-button:hover { background: var(--secondary-background-color); }
-  .empty { padding: 12px; text-align: center; font-size: 0.9rem; color: var(--secondary-text-color);
-           border: 1px dashed var(--divider-color); border-radius: 8px; }
   .add { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 8px; border: 1px dashed var(--divider-color);
          background: none; color: var(--primary-text-color); font: inherit; font-size: 0.9rem; cursor: pointer; }
   .add:hover { border-color: var(--primary-color); }
@@ -552,27 +561,7 @@ class OptoVScheduleCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._config = {};
-    this._activeDay = todayKey();
-    this._scope = null; // null = follow the pattern the week is already in
-    this._selectedEntityId = null;
-    this._edits = {}; // "entity_id|day" -> windows being edited
-    this._saving = false;
-    this._status = null; // { kind: 'ok' | 'error', text }
-    // A save the controller refused because the programme was changed there since it was
-    // read: what the user wanted to write, kept for "overwrite". { entityId, windows, targets,
-    // days }. The card meanwhile shows the controller's version.
-    this._conflict = null;
-    this._reading = false;
-    this._signature = null;
-    this._strings = null;
-    // Holiday dates being typed, before they are saved: { entityId, start, end } with ISO dates
-    // or '' for none. entityId is the programme on screen, whose circuit the holiday is.
-    this._holidayEdit = null;
-    // The programme whose holiday dates are unfolded; folded, the holiday is one line.
-    this._holidayOpen = null;
-    this._holidayBusy = false;
-    this._build = CARD_BUILD;
+    Object.assign(this, SCHEDULE_DEFAULTS(), { _build: CARD_BUILD });
   }
 
   static getConfigElement() {
@@ -782,11 +771,6 @@ class OptoVScheduleCard extends HTMLElement {
     return { start, end, dirty: start !== holiday.startValue || end !== holiday.endValue };
   }
 
-  _holidayEditDirty(entity) {
-    const shown = this._holidayState(entity, this._holidayOf(entity));
-    return Boolean(shown && shown.dirty);
-  }
-
   /**
    * The card's one save: the holiday dates if they were changed, then the day's programme if it
    * was changed or is to be copied to other days. Only what changed is written.
@@ -865,10 +849,7 @@ class OptoVScheduleCard extends HTMLElement {
       this.shadowRoot.innerHTML = `
         <style>${STYLE}</style>
         <ha-card>
-          <div class="header">
-            <ha-icon icon="mdi:calendar-clock"></ha-icon>
-            <div class="heading"><div class="title">${escapeHtml(this._config.title || t('title'))}</div></div>
-          </div>
+          ${header('mdi:calendar-clock', this._config.title || t('title'))}
           <div class="empty" style="margin-top: 12px;">
             ${escapeHtml(pending ? t('loading') : t('no_entity'))}
             ${configured ? `<div style="margin-top: 6px;"><code>${escapeHtml(configured)}</code></div>` : ''}
@@ -914,16 +895,16 @@ class OptoVScheduleCard extends HTMLElement {
     const scope = this._scope || detectScope(dayKeys, this._activeDay, stored);
     // A scope other than the single day is itself a change: copying today's untouched
     // programme onto the working week is the whole point of the control.
-    const canSave = dirty || scope !== 'day' || this._holidayEditDirty(entity);
+    const holiday = this._holidayOf(entity);
+    const shownHoliday = this._holidayState(entity, holiday);
+    const holidayDirty = Boolean(shownHoliday && shownHoliday.dirty);
+    const canSave = dirty || scope !== 'day' || holidayDirty;
     const saveDays = scopeDays(scope, dayKeys, this._activeDay);
     const conflict = this._conflict && this._conflict.entityId === entity.entity_id ? this._conflict : null;
     const readAt = attrs.read_at
       ? new Date(attrs.read_at).toLocaleString(lang, { dateStyle: 'short', timeStyle: 'short' })
       : '';
 
-    const holiday = this._holidayOf(entity);
-    const shownHoliday = this._holidayState(entity, holiday);
-    const holidayDirty = Boolean(shownHoliday && shownHoliday.dirty);
     const holidayOpen = Boolean(holiday) && this._holidayOpen === entity.entity_id;
     // Planned: not over yet. A holiday that has passed stays shown, but plainly.
     const holidayPlanned = Boolean(shownHoliday && shownHoliday.end && shownHoliday.end >= isoToday());
@@ -953,13 +934,7 @@ class OptoVScheduleCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${STYLE}${UPDATE_STYLE}</style>
       <ha-card>
-        <div class="header">
-          <ha-icon icon="mdi:calendar-clock"></ha-icon>
-          <div class="heading">
-            <div class="title">${escapeHtml(title)}</div>
-            <div class="subtitle">${escapeHtml(subtitle)}</div>
-          </div>
-        </div>
+        ${header('mdi:calendar-clock', title, subtitle)}
         ${isOutdated(entity) ? updateNotice(t) : ''}
 
         ${this._config.actual_entity || this._config.demand_entity
@@ -1244,10 +1219,7 @@ class OptoVFaultHistoryCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._config = {};
-    this._signature = null;
-    this._strings = null;
-    this._build = CARD_BUILD;
+    Object.assign(this, FAULT_DEFAULTS(), { _build: CARD_BUILD });
   }
 
   static getConfigElement() {
@@ -1303,10 +1275,7 @@ class OptoVFaultHistoryCard extends HTMLElement {
       this.shadowRoot.innerHTML = `
         <style>${FAULT_STYLE}</style>
         <ha-card>
-          <div class="header">
-            <ha-icon icon="mdi:history"></ha-icon>
-            <div class="heading"><div class="title">${escapeHtml(this._config.title || t('faults_title'))}</div></div>
-          </div>
+          ${header('mdi:history', this._config.title || t('faults_title'))}
           <div class="empty">${escapeHtml(t('faults_no_entity'))}</div>
         </ha-card>`;
       return;
@@ -1330,13 +1299,7 @@ class OptoVFaultHistoryCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${FAULT_STYLE}${UPDATE_STYLE}</style>
       <ha-card>
-        <div class="header">
-          <ha-icon icon="mdi:history"></ha-icon>
-          <div class="heading">
-            <div class="title">${escapeHtml(this._config.title || attrs.device_name || t('faults_title'))}</div>
-            <div class="subtitle">${escapeHtml(subtitle)}</div>
-          </div>
-        </div>
+        ${header('mdi:history', this._config.title || attrs.device_name || t('faults_title'), subtitle)}
         ${isOutdated(entity) ? updateNotice(t) : ''}
         ${limited.length
         ? `<div class="faults" style="max-height: ${Number(this._config.height) || 420}px">${limited
@@ -1357,21 +1320,17 @@ class OptoVFaultHistoryCard extends HTMLElement {
 }
 
 /** Visual editor for the fault card: the codes to hide come from the buffer itself. */
-class OptoVFaultHistoryCardEditor extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    this._config = {};
-    this._formReady = false;
-    this._strings = null;
-    this._build = CARD_BUILD;
-  }
-
+/*
+ * What both card editors do alike. Copied onto each editor's own prototype rather than
+ * inherited: adopt() hands a newer copy's methods over by the prototype's own properties, and a
+ * base class's would never reach an open page.
+ */
+const EDITOR_METHODS = {
   setConfig(config) {
     adoptState(this, EDITOR_DEFAULTS);
     this._config = { ...(config || {}) };
     this._render();
-  }
+  },
 
   set hass(hass) {
     this._hass = hass;
@@ -1382,13 +1341,15 @@ class OptoVFaultHistoryCardEditor extends HTMLElement {
       });
     }
     this._render();
-  }
+  },
 
   async _ensureForm() {
     if (this._formReady || customElements.get('ha-form')) {
       this._formReady = true;
       return;
     }
+    // ha-form ships with the dashboard editor bundle, which is loaded lazily. Asking the
+    // core entities card for its editor pulls that bundle in.
     try {
       const helpers = await window.loadCardHelpers();
       const card = await helpers.createCardElement({ type: 'entities', entities: [] });
@@ -1396,10 +1357,34 @@ class OptoVFaultHistoryCardEditor extends HTMLElement {
         await card.constructor.getConfigElement();
       }
     } catch (err) {
-      // ha-form may still arrive once the editor dialog has finished loading.
+      // Fall through: ha-form may still turn up once the editor dialog has loaded.
     }
     this._formReady = true;
     this._render();
+  },
+
+  /** The editor's ha-form, created on first use. */
+  _form() {
+    let form = this.shadowRoot.querySelector('ha-form');
+    if (!form) {
+      this.shadowRoot.innerHTML = '';
+      form = document.createElement('ha-form');
+      form.addEventListener('value-changed', (e) => this._onChange(e));
+      this.shadowRoot.appendChild(form);
+    }
+    return form;
+  },
+
+  _fire(config) {
+    this.dispatchEvent(new CustomEvent('config-changed', { bubbles: true, composed: true, detail: { config } }));
+  },
+};
+
+class OptoVFaultHistoryCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    Object.assign(this, EDITOR_DEFAULTS(), { _build: CARD_BUILD });
   }
 
   _schema(t) {
@@ -1464,13 +1449,7 @@ class OptoVFaultHistoryCardEditor extends HTMLElement {
       return;
     }
     const t = makeTranslator(this._strings);
-    let form = this.shadowRoot.querySelector('ha-form');
-    if (!form) {
-      this.shadowRoot.innerHTML = '';
-      form = document.createElement('ha-form');
-      form.addEventListener('value-changed', (e) => this._onChange(e));
-      this.shadowRoot.appendChild(form);
-    }
+    const form = this._form();
     form.hass = this._hass;
     form.schema = this._schema(t);
     form.data = {
@@ -1495,7 +1474,7 @@ class OptoVFaultHistoryCardEditor extends HTMLElement {
     if (values.height) config.height = Number(values.height);
     if (values.title) config.title = values.title;
     this._config = config;
-    this.dispatchEvent(new CustomEvent('config-changed', { bubbles: true, composed: true, detail: { config } }));
+    this._fire(config);
   }
 }
 
@@ -1507,47 +1486,7 @@ class OptoVScheduleCardEditor extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._config = {};
-    this._formReady = false;
-    this._strings = null;
-    this._build = CARD_BUILD;
-  }
-
-  setConfig(config) {
-    adoptState(this, EDITOR_DEFAULTS);
-    this._config = { ...(config || {}) };
-    this._render();
-  }
-
-  set hass(hass) {
-    this._hass = hass;
-    if (!this._strings) {
-      loadStrings(hass).then((strings) => {
-        this._strings = strings;
-        this._render();
-      });
-    }
-    this._render();
-  }
-
-  async _ensureForm() {
-    if (this._formReady || customElements.get('ha-form')) {
-      this._formReady = true;
-      return;
-    }
-    // ha-form ships with the dashboard editor bundle, which is loaded lazily. Asking the
-    // core entities card for its editor pulls that bundle in.
-    try {
-      const helpers = await window.loadCardHelpers();
-      const card = await helpers.createCardElement({ type: 'entities', entities: [] });
-      if (card && card.constructor && card.constructor.getConfigElement) {
-        await card.constructor.getConfigElement();
-      }
-    } catch (err) {
-      // Fall through: ha-form may still turn up once the editor dialog has loaded.
-    }
-    this._formReady = true;
-    this._render();
+    Object.assign(this, EDITOR_DEFAULTS(), { _build: CARD_BUILD });
   }
 
   _chosen() {
@@ -1607,13 +1546,7 @@ class OptoVScheduleCardEditor extends HTMLElement {
       return;
     }
     const t = makeTranslator(this._strings);
-    let form = this.shadowRoot.querySelector('ha-form');
-    if (!form) {
-      this.shadowRoot.innerHTML = '';
-      form = document.createElement('ha-form');
-      form.addEventListener('value-changed', (e) => this._onChange(e));
-      this.shadowRoot.appendChild(form);
-    }
+    const form = this._form();
     form.hass = this._hass;
     form.schema = this._schema(t);
     form.data = {
@@ -1651,10 +1584,13 @@ class OptoVScheduleCardEditor extends HTMLElement {
       if (values[key]) config[key] = values[key];
     }
     this._config = config;
-    this.dispatchEvent(new CustomEvent('config-changed', { bubbles: true, composed: true, detail: { config } }));
+    this._fire(config);
   }
 }
 
+for (const editor of [OptoVScheduleCardEditor, OptoVFaultHistoryCardEditor]) {
+  Object.defineProperties(editor.prototype, Object.getOwnPropertyDescriptors(EDITOR_METHODS));
+}
 adopt(CARD_TYPE, OptoVScheduleCard);
 adopt(EDITOR_TYPE, OptoVScheduleCardEditor);
 adopt(FAULT_CARD_TYPE, OptoVFaultHistoryCard);
@@ -1665,7 +1601,7 @@ for (const card of [
   {
     type: CARD_TYPE,
     name: 'OptoV Schedule',
-    description: 'View and edit the weekly programmes your controller',
+    description: 'View and edit the weekly programmes of your controller',
   },
   {
     type: FAULT_CARD_TYPE,
