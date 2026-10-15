@@ -10,25 +10,25 @@ commits.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-15
+
 ### Added
-- **Custom entities.** *OptoV options → Custom entities* builds entities of your own from the
-  controller's values, on a device of their own. An **on/off entity** is for a value with
-  two named states (Aus/Ein, Nein/Ja, OFF/ON...), which stays a sensor or a select because the
-  catalog does not say which state is "on". You pick the value and which state counts as on; a
-  reading becomes a binary sensor, a setting a switch. **Thermostat** and **water heater**
-  assemble a `climate` or `water_heater` entity from a setpoint, the operating-mode select (whose
-  modes you map to Home Assistant's) and optionally a current temperature from any sensor; a
-  thermostat can map its presets (Eco, Comfort, Away, Boost) to switches such as party mode.
-  *Backup and restore* downloads the file they are kept in and restores it; it is removed with
-  the integration entry, like the catalog.
+- **Custom entities** (*OptoV options → Custom entities*): build entities of your own from the
+  controller's values. They sit together on a device of their own.
+  - **On/off entity:** turns a value with two states (Aus/Ein, Nein/Ja, OFF/ON, ...) into a
+    binary sensor, or a writable setting into a switch. You choose which state means "on".
+  - **Thermostat and water heater:** a standard thermostat or water heater, built from a
+    setpoint, the operating mode (you choose what each controller mode means in Home Assistant)
+    and optionally a room temperature. A thermostat can also use switches such as party or
+    economy mode as its presets.
+  - **Backup and restore:** download the file they are kept in, edit it if you like, and upload
+    it again. It is deleted together with the integration, like the catalog, so keep a copy.
 
 ### Fixed
-- With a catalog in a language other than German or English, a healthy temperature sensor could
-  show as unavailable between two of its reads. Its health is now taken from the controller's
-  code, never from the catalog's text.
-- An action called while OptoV is still connecting -- right after a restart, or while the
-  controller cannot be reached -- said that no controller was set up. It now says that OptoV is
-  not connected yet.
+- With a catalog in a language other than German or English, a healthy sensor could show as
+  unavailable between two of its reads.
+- An action called while OptoV is still connecting now says so, instead of saying that no
+  controller is set up.
 
 ## [0.8.0] - 2026-10-09
 
@@ -255,7 +255,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/gismo2004/optov/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/gismo2004/optov/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/gismo2004/optov/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/gismo2004/optov/compare/v0.6.0...v0.7.0
