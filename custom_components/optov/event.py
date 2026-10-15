@@ -7,7 +7,6 @@ fault buffer -- the controller's own, and on boilers that have one the burner au
 from typing import Any
 
 from homeassistant.components.event import EventEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -28,9 +27,9 @@ async def async_setup_entry(
     coordinator = entry.runtime_data.coordinator
     entities: list[OptolinkFaultEvent] = []
     if coordinator._error_history_dp:
-        entities.append(OptolinkFaultEvent(coordinator, entry))
+        entities.append(OptolinkFaultEvent(coordinator))
     if coordinator._gfa_dp:
-        entities.append(OptolinkBurnerFaultEvent(coordinator, entry))
+        entities.append(OptolinkBurnerFaultEvent(coordinator))
     for entity in entities:
         entity.entity_id = async_generate_entity_id(
             "event.{}", entity.object_id_hint, hass=hass
@@ -59,7 +58,7 @@ class OptolinkFaultEvent(CoordinatorEntity[OptolinkCoordinator], EventEntity):
     _unique_suffix = "fault_event"
     _object_id_words = "fault"
 
-    def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: OptolinkCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.stable_id}_{self._unique_suffix}"
         self._attr_device_info = coordinator.get_device_info(None)

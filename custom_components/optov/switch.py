@@ -36,7 +36,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data.coordinator
     entities = [
-        OptolinkSwitch(coordinator, entry, definition)
+        OptolinkSwitch(coordinator, definition)
         for definition in coordinator.profile.switches
     ]
     for entity in entities:
@@ -47,7 +47,7 @@ async def async_setup_entry(
 
     # On/off entities the user added (custom_entities.py); this platform takes its kind.
     onoff = [
-        OptolinkOnOffSwitch(coordinator, entry, entity)
+        OptolinkOnOffSwitch(coordinator, entity)
         for entity in coordinator.custom_onoff
         if entity["platform"] == "selects"
     ]
@@ -76,9 +76,9 @@ class OptolinkSwitch(OptolinkEntity, SwitchEntity):
 class OptolinkOnOffSwitch(OptolinkEntity, SwitchEntity):
     """On/off control of a two-state setting; writes the raw value the user chose as "on"."""
 
-    def __init__(self, coordinator, entry, entity) -> None:
+    def __init__(self, coordinator, entity) -> None:
         definition = entity["item"]
-        super().__init__(coordinator, entry, definition)
+        super().__init__(coordinator, definition)
         self._on_value = int(entity[KEY_ON])
         self._off_value = off_value(definition, self._on_value)
         self._attr_unique_id = onoff_unique_id(coordinator.stable_id, definition["id"])

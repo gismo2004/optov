@@ -356,7 +356,7 @@ async def async_save(
         ]
         for section in (SECTION_CLIMATE, SECTION_WATER_HEATER)
     }
-    title = coordinator.profile.device_name if coordinator.profile else ""
+    title = coordinator.profile.device_name
     text = render_file(
         f"{title} ({coordinator.stable_id})",
         onoff,

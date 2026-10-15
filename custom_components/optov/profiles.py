@@ -75,7 +75,6 @@ class DeviceProfile:
         )
         self.model: str = model_name or data.get("model", f"0x{sys_id:04X}")
         self.circuits: dict[str, str] = data.get("circuits", {})
-        self.groups: list[dict[str, Any]] = data.get("groups", [])
         # How this controller expresses its daylight-saving changeovers, if it has the
         # settings at all. Roles come from the catalog's value ranges -- see catalog_db.
         self.clock_dst: dict[str, Any] = data.get("clock_dst") or {}

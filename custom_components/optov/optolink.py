@@ -856,7 +856,6 @@ class OptolinkClient:
         address: int,
         total_bytes: int,
         block_factor: int,
-        base_prefix: bytes = b"",
     ) -> bytes:
         """Read an RPC array datapoint as `block_factor` indexed sub-reads and concatenate.
 
@@ -876,7 +875,7 @@ class OptolinkClient:
         entry_len = total_bytes // block_factor
         result = bytearray()
         for index in range(block_factor):
-            data = await self.read_rpc(address, base_prefix + bytes([index]))
+            data = await self.read_rpc(address, bytes([index]))
             if len(data) != entry_len:
                 _LOGGER.debug(
                     "RPC 0x%04X entry %d returned %d bytes, expected %d",
@@ -918,7 +917,7 @@ class OptolinkClient:
 
     async def write_raw(
         self, address: int, data: bytes, fc: int = FC_VIRTUAL_WRITE
-    ) -> bool:
+    ) -> None:
         """Write bytes to a memory address.
 
         The write function code is a separate catalog field from the read one and is not
@@ -929,7 +928,6 @@ class OptolinkClient:
         await self._transact_retry(fc, address, len(data), data)
         if self.on_write is not None:
             self.on_write(address)
-        return True
 
     async def read_block(
         self,
@@ -1092,7 +1090,7 @@ class OptolinkClient:
         block_factor: int | None = None,
         step_bytes: int = 1,
         fc: int = FC_VIRTUAL_WRITE,
-    ) -> bool:
+    ) -> None:
         """Write one day of a weekly programme.
 
         A block datapoint is written the way it is read: record by record, one telegram each,
@@ -1131,7 +1129,6 @@ class OptolinkClient:
                 raw_data[i * record_size : (i + 1) * record_size],
                 fc,
             )
-        return True
 
     async def read_error_history(
         self,

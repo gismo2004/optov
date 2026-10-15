@@ -161,7 +161,6 @@ TIER_CLASSIFICATION: dict[str, str | None] = {
 # repeated because the catalog is read without the link.
 TELEGRAM_PAYLOAD = 56
 
-DAILY_TIERS = {"Overview", "PlantOverview", "Operation", "Trending", "Statistic"}
 
 # For the two kinds of reading Home Assistant has no device class for, so they are not all
 # drawn with the same default eye. Running hours get the duration device class instead.
@@ -650,12 +649,11 @@ def _variant_label(candidate: Any) -> str:
 def get_device_by_system_id(
     sys_id: int,
     db_path: str,
-    culture: str = "de",
     hw_index: int | None = None,
     sw_index: int | None = None,
     f0: int | None = None,
 ) -> dict[str, Any] | None:
-    """Look up device metadata and translated circuits by DeviceIdent.
+    """Look up the controller's catalog row (id and model) by DeviceIdent.
 
     `hw_index`/`sw_index` are DeviceIdent bytes 0x00FA/0x00FB and `f0` is register 0x00F0.
     They are optional so older callers keep working, but without them a System ID that maps to
@@ -666,7 +664,7 @@ def get_device_by_system_id(
     dec_id = str(sys_id)
     with closing(get_db_connection(db_path)) as conn:
         candidates = conn.execute(
-            "SELECT id, system_id, model, name_key, ident_ext, ident_ext_till, f0, f0_till "
+            "SELECT id, model, ident_ext, ident_ext_till, f0, f0_till "
             "FROM devices WHERE system_id = ? OR system_id = ? ORDER BY id",
             (hex_id, dec_id),
         ).fetchall()
@@ -692,33 +690,7 @@ def get_device_by_system_id(
                 f0,
             )
 
-        dev_id = row["id"]
-        model = row["model"]
-        name_key = row["name_key"]
-
-        device_name = _friendly_device_name(
-            name_key, _text(conn, culture, name_key), model
-        )
-
-        # Circuits
-        circuits: dict[str, str] = {}
-        c_rows = conn.execute(
-            f"""SELECT c.circuit, COALESCE(t.s, c.name_key) as circuit_name
-               FROM circuits c
-               {_text_join(conn, culture, "t", "c.name_key")}
-               WHERE c.device_id = ?""",
-            (dev_id,),
-        ).fetchall()
-        for r in c_rows:
-            circuits[r["circuit"]] = r["circuit_name"]
-
-        return {
-            "id": dev_id,
-            "system_id": row["system_id"],
-            "model": model,
-            "device_name": device_name,
-            "circuits": circuits,
-        }
+        return {"id": row["id"], "model": row["model"]}
 
 
 def get_probe_targets(device_id: int, db_path: str) -> list[dict[str, Any]]:
@@ -1368,7 +1340,6 @@ class _ProfileInputs:
     device_name: str
     circuits: dict[str, str]
     hidden_circuits: set[str]
-    groups: list[dict[str, Any]]
     group_ids_by_et: dict[int, list[int]]
     group_addrs_by_id: dict[int, str]
     groups_by_id: dict[int, dict[str, Any]]
@@ -1488,7 +1459,6 @@ def _load_profile_inputs(
         device_name=device_name,
         circuits=circuits,
         hidden_circuits=hidden_circuits,
-        groups=[dict(r) for r in g_rows],
         group_ids_by_et=group_ids_by_et,
         group_addrs_by_id={r["id"]: (r["address"] or "") for r in g_rows},
         groups_by_id={r["id"]: dict(r) for r in g_rows},
@@ -1708,8 +1678,6 @@ def _place_datapoint(
         # base values are read every cycle, anything an optional tier added rotates through
         # the leftover bus budget.
         "base": ((in_overview or in_trend) and is_measurement) or in_operation,
-        "_entity_category": entity_category,
-        "_sensor_category": sensor_category,
     }
     if entity_category:
         entry["entity_category"] = entity_category
@@ -2112,7 +2080,7 @@ def generate_profile(
             hidden_event_type_ids,
             hidden_group_ids,
             # Tiers switched on in the options, on top of the always-on base set. Defaults to
-            # nothing extra rather than to DAILY_TIERS: the base set is chosen from the
+            # nothing extra rather than to a list of everyday tiers: the base set is chosen from the
             # controller's own menu tree, not from tiers, so falling back to a tier list here
             # would silently re-enable a couple of hundred entities the user did not ask for.
             enabled_tiers if enabled_tiers is not None else set(),
@@ -2123,7 +2091,6 @@ def generate_profile(
             "device_name": inputs.device_name,
             "model": inputs.model,
             "circuits": inputs.circuits,
-            "groups": inputs.groups,
             "clock_dst": inputs.clock_dst,
         }
         for dp in inputs.datapoints:

@@ -77,8 +77,6 @@ def decode_wp_error_history(
     for idx in range(total_entries):
         offset = idx * entry_bytes
         entry_raw = raw_bytes[offset : offset + entry_bytes]
-        if len(entry_raw) < entry_bytes:
-            break
 
         code_val = entry_raw[5]
         if code_val == 0:
@@ -133,8 +131,6 @@ def decode_boiler_error_history(
     for idx in range(total_entries):
         offset = idx * entry_bytes
         entry_raw = raw_bytes[offset : offset + entry_bytes]
-        if len(entry_raw) < entry_bytes:
-            break
 
         code_val = entry_raw[0]
         if code_val == 0:

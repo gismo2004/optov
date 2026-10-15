@@ -20,7 +20,8 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """The controller, its catalog, what it taught us and how its bus is doing."""
     coordinator = entry.runtime_data.coordinator
-    profile: DeviceProfile | None = coordinator.profile
+    # Set up only once the controller's profile is loaded, so there always is one.
+    profile: DeviceProfile = coordinator.profile
     learned = coordinator.learned
     return {
         "entry": {
@@ -31,17 +32,15 @@ async def async_get_config_entry_diagnostics(
             catalog_db.catalog_info, coordinator.db_path
         ),
         "controller": {
-            "system_id": f"0x{profile.sys_id:04X}" if profile else None,
-            "model": profile.model if profile else None,
-            "software": profile.sw_version if profile else None,
-            "circuits": sorted(profile.circuits) if profile else [],
-            "schedules": sorted(profile.schedules) if profile else [],
+            "system_id": f"0x{profile.sys_id:04X}",
+            "model": profile.model,
+            "software": profile.sw_version,
+            "circuits": sorted(profile.circuits),
+            "schedules": sorted(profile.schedules),
             "entities": {
                 platform: len(getattr(profile, platform))
                 for platform in DeviceProfile.PLATFORMS
-            }
-            if profile
-            else {},
+            },
         },
         # Why a datapoint is not polled and why the entity set looks as it does.
         "learned": {

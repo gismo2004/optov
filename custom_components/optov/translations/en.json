@@ -49,8 +49,6 @@
       }
     },
     "error": {
-      "cannot_connect": "Could not connect to the ESPHome node.",
-      "unknown": "Unexpected error.",
       "catalog_invalid": "That file is not a controller catalog.",
       "catalog_failed": "The catalog could not be installed. Check the Home Assistant log.",
       "catalog_missing": "Choose a catalog or upload one.",

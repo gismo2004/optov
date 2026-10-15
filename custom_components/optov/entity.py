@@ -7,7 +7,6 @@ for a sensor, a number, a select and a switch, so they live here once.
 
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import OptolinkCoordinator
@@ -24,7 +23,6 @@ class OptolinkEntity(CoordinatorEntity[OptolinkCoordinator]):
     def __init__(
         self,
         coordinator: OptolinkCoordinator,
-        entry: ConfigEntry,
         definition: dict[str, Any],
     ) -> None:
         super().__init__(coordinator)

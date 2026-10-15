@@ -49,8 +49,6 @@
       }
     },
     "error": {
-      "cannot_connect": "Verbindung zum ESPHome-Knoten fehlgeschlagen.",
-      "unknown": "Unerwarteter Fehler.",
       "catalog_invalid": "Diese Datei ist kein Regelungs-Katalog.",
       "catalog_failed": "Der Katalog konnte nicht installiert werden. Siehe Home-Assistant-Protokoll.",
       "catalog_missing": "Einen Katalog auswählen oder hochladen.",

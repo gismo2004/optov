@@ -21,7 +21,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data.coordinator
     entities = [
-        OptolinkNumber(coordinator, entry, definition)
+        OptolinkNumber(coordinator, definition)
         for definition in coordinator.profile.numbers
     ]
     for entity in entities:
@@ -36,8 +36,8 @@ class OptolinkNumber(OptolinkEntity, NumberEntity):
 
     _attr_mode = NumberMode.BOX
 
-    def __init__(self, coordinator, entry, definition) -> None:
-        super().__init__(coordinator, entry, definition)
+    def __init__(self, coordinator, definition) -> None:
+        super().__init__(coordinator, definition)
         self._attr_native_min_value = float(definition.get("min", 0.0))
         self._attr_native_max_value = float(definition.get("max", 100.0))
         self._attr_native_step = float(definition.get("step", 1.0))

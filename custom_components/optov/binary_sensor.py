@@ -20,7 +20,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data.coordinator
     entities = [
-        OptolinkBinarySensor(coordinator, entry, definition)
+        OptolinkBinarySensor(coordinator, definition)
         for definition in coordinator.profile.binary_sensors
     ]
     for entity in entities:
@@ -31,7 +31,7 @@ async def async_setup_entry(
 
     # On/off entities the user added (custom_entities.py); this platform takes its kind.
     onoff = [
-        OptolinkOnOffBinarySensor(coordinator, entry, entity)
+        OptolinkOnOffBinarySensor(coordinator, entity)
         for entity in coordinator.custom_onoff
         if entity["platform"] == "sensors"
     ]
@@ -45,8 +45,8 @@ async def async_setup_entry(
 class OptolinkBinarySensor(OptolinkEntity, BinarySensorEntity):
     """A datapoint that is either set or not."""
 
-    def __init__(self, coordinator, entry, definition) -> None:
-        super().__init__(coordinator, entry, definition)
+    def __init__(self, coordinator, definition) -> None:
+        super().__init__(coordinator, definition)
         self._attr_device_class = definition.get("device_class")
 
     @property
@@ -57,9 +57,9 @@ class OptolinkBinarySensor(OptolinkEntity, BinarySensorEntity):
 class OptolinkOnOffBinarySensor(OptolinkEntity, BinarySensorEntity):
     """On/off view of a two-state reading; "on" is the state the user chose for it."""
 
-    def __init__(self, coordinator, entry, entity) -> None:
+    def __init__(self, coordinator, entity) -> None:
         definition = entity["item"]
-        super().__init__(coordinator, entry, definition)
+        super().__init__(coordinator, definition)
         self._on_value = int(entity[KEY_ON])
         self._attr_unique_id = onoff_unique_id(coordinator.stable_id, definition["id"])
         self._attr_name = entity[KEY_NAME]

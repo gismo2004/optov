@@ -84,7 +84,7 @@ def _entity(module, last_state=None):
         _error_history_loaded=False,
         error_history=[],
     )
-    entity = module.OptolinkFaultEvent(coordinator, None)
+    entity = module.OptolinkFaultEvent(coordinator)
     entity.fired = []
 
     async def last():

@@ -20,7 +20,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data.coordinator
     entities = [
-        OptolinkSelect(coordinator, entry, definition)
+        OptolinkSelect(coordinator, definition)
         for definition in coordinator.profile.selects
     ]
     for entity in entities:
@@ -33,8 +33,8 @@ async def async_setup_entry(
 class OptolinkSelect(OptolinkEntity, SelectEntity):
     """A setting chosen from the names the catalog gives its values."""
 
-    def __init__(self, coordinator, entry, definition) -> None:
-        super().__init__(coordinator, entry, definition)
+    def __init__(self, coordinator, definition) -> None:
+        super().__init__(coordinator, definition)
         options = definition.get("options", {})
         self._attr_options = list(options.values())
         self._value_of = {label: value for value, label in options.items()}

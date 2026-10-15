@@ -8,7 +8,6 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -38,21 +37,21 @@ async def async_setup_entry(
     coordinator = entry.runtime_data.coordinator
 
     entities = [
-        OptolinkSensor(coordinator, entry, sensor_def)
+        OptolinkSensor(coordinator, sensor_def)
         for sensor_def in coordinator.profile.sensors
     ]
 
     # One schedule sensor per circuit that has a weekly programme in the catalog
     for key, sched_cfg in coordinator.profile.schedules.items():
-        entities.append(OptolinkScheduleSensor(coordinator, entry, key, sched_cfg))
+        entities.append(OptolinkScheduleSensor(coordinator, key, sched_cfg))
 
     # Diagnostic bus communication sensors under Optolink Gateway
-    entities.append(OptolinkBusLoadSensor(coordinator, entry))
-    entities.append(OptolinkPollDurationSensor(coordinator, entry))
-    entities.append(OptolinkActiveChannelsSensor(coordinator, entry))
-    entities.append(OptolinkLatencySensor(coordinator, entry))
-    entities.append(OptolinkDatapointRateSensor(coordinator, entry))
-    entities.append(OptolinkWritesTodaySensor(coordinator, entry))
+    entities.append(OptolinkBusLoadSensor(coordinator))
+    entities.append(OptolinkPollDurationSensor(coordinator))
+    entities.append(OptolinkActiveChannelsSensor(coordinator))
+    entities.append(OptolinkLatencySensor(coordinator))
+    entities.append(OptolinkDatapointRateSensor(coordinator))
+    entities.append(OptolinkWritesTodaySensor(coordinator))
     entities.append(
         OptolinkCatalogSensor(
             coordinator,
@@ -65,9 +64,9 @@ async def async_setup_entry(
     # Fault history sensors under the main heating controller: the controller's own buffer,
     # and on boilers with a burner automat that automat's separate one.
     empty_text = await async_ui_text(hass, "no_faults")
-    entities.append(OptolinkErrorHistorySensor(coordinator, entry, empty_text))
+    entities.append(OptolinkErrorHistorySensor(coordinator, empty_text))
     if coordinator._gfa_dp:
-        entities.append(OptolinkGfaErrorHistorySensor(coordinator, entry, empty_text))
+        entities.append(OptolinkGfaErrorHistorySensor(coordinator, empty_text))
 
     # A stable entity id, so a reinstall lands on the same ids and keeps its history.
     for entity in entities:
@@ -81,8 +80,8 @@ async def async_setup_entry(
 class OptolinkSensor(OptolinkEntity, SensorEntity):
     """A reading. Unit, device class and enumeration texts all come from the catalog."""
 
-    def __init__(self, coordinator, entry, definition) -> None:
-        super().__init__(coordinator, entry, definition)
+    def __init__(self, coordinator, definition) -> None:
+        super().__init__(coordinator, definition)
         self._attr_native_unit_of_measurement = definition.get("unit")
         self._attr_device_class = definition.get("device_class")
         self._attr_state_class = definition.get("state_class")
@@ -193,7 +192,6 @@ class OptolinkScheduleSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntit
     def __init__(
         self,
         coordinator: OptolinkCoordinator,
-        entry: ConfigEntry,
         key: str,
         sched_cfg: dict[str, Any],
     ) -> None:
@@ -286,7 +284,7 @@ class OptolinkBusLoadSensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: OptolinkCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.stable_id}_bus_load"
         self._attr_device_info = coordinator.get_gateway_device_info()
@@ -327,7 +325,7 @@ class OptolinkPollDurationSensor(CoordinatorEntity[OptolinkCoordinator], SensorE
     _attr_native_unit_of_measurement = "s"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: OptolinkCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.stable_id}_poll_duration"
         self._attr_device_info = coordinator.get_gateway_device_info()
@@ -360,7 +358,7 @@ class OptolinkActiveChannelsSensor(
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: OptolinkCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.stable_id}_active_channels"
         self._attr_device_info = coordinator.get_gateway_device_info()
@@ -386,7 +384,7 @@ class OptolinkLatencySensor(CoordinatorEntity[OptolinkCoordinator], SensorEntity
     _attr_native_unit_of_measurement = "ms"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: OptolinkCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.stable_id}_avg_response_time"
         self._attr_device_info = coordinator.get_gateway_device_info()
@@ -416,7 +414,7 @@ class OptolinkWritesTodaySensor(CoordinatorEntity[OptolinkCoordinator], SensorEn
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
-    def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: OptolinkCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.stable_id}_writes_today"
         self._attr_device_info = coordinator.get_gateway_device_info()
@@ -499,7 +497,7 @@ class OptolinkDatapointRateSensor(CoordinatorEntity[OptolinkCoordinator], Sensor
     _attr_native_unit_of_measurement = "dp/s"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator: OptolinkCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: OptolinkCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.stable_id}_datapoint_rate"
         self._attr_device_info = coordinator.get_gateway_device_info()
@@ -532,9 +530,7 @@ class OptolinkErrorHistorySensor(CoordinatorEntity[OptolinkCoordinator], SensorE
     _unique_suffix = "fehlerhistorie"
     _object_id_words = "fault history"
 
-    def __init__(
-        self, coordinator: OptolinkCoordinator, entry: ConfigEntry, empty_text: str
-    ) -> None:
+    def __init__(self, coordinator: OptolinkCoordinator, empty_text: str) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.stable_id}_{self._unique_suffix}"
         self._attr_device_info = coordinator.get_device_info(None)

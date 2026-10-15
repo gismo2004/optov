@@ -24,7 +24,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data.coordinator
     entities = [
-        OptolinkDate(coordinator, entry, definition)
+        OptolinkDate(coordinator, definition)
         for definition in coordinator.profile.dates
     ]
     for entity in entities:

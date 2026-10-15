@@ -17,7 +17,6 @@ def _inputs(groups=(), links=None, datapoints=(), enums=None):
         device_name="Controller",
         circuits={},
         hidden_circuits=set(),
-        groups=groups,
         group_ids_by_et=links or {},
         group_addrs_by_id={g["id"]: g["address"] for g in groups},
         groups_by_id={g["id"]: g for g in groups},

@@ -140,12 +140,10 @@ _BUS_BUDGET = 0.90
 _INTERVAL_TRENDING = 1
 _INTERVAL_READING_FAST = 2  # read-only, catalog priority <= 50
 _INTERVAL_READING_SLOW = 3  # read-only, lower catalog priority
-# Writable settings used to wait twice as long again, on the argument that nobody changes them
-# often. Measured against this controller that was holding the bus back for no reason: a
-# telegram is ~63 ms, so even the full expert set of 428 datapoints is one pass in about 27 s,
-# and the budget already leaves the bus half idle. A setting changed at the controller's own
-# panel now shows up in a minute rather than two, and nothing else is any slower for it.
-_INTERVAL_PARAMETER = 1
+# Writable settings are read as often as readings. Reading them less often gains nothing
+# measurable: a telegram is ~63 ms, so even the full expert set of 428 datapoints is one pass in
+# about 27 s, and the budget already leaves the bus half idle; a setting changed at the
+# controller's own panel shows up within a minute.
 # The corridor the sweep is allowed to sit in without the budget being touched, and how many
 # cycles have to agree before it is.
 #
@@ -270,7 +268,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._dev: dict[str, Any] | None = None
         self._probed_values: dict[int, int] = {}
         self.device_info: DeviceInfo | None = None
-        self.data: dict[str, Any] = {}
         self.schedules: dict[str, dict[str, list[dict[str, Any]]]] = {}
         # When each programme was last read from the controller (ISO time), shown on its
         # entity. Programmes change almost only through this integration, so they are read
@@ -402,9 +399,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=DOMAIN,
             update_interval=timedelta(seconds=scan_interval),
         )
+        # The base class starts with None; an empty dict lets every reader skip that case.
         self.data = {}
-        self.sensor_status = {}
-        self.sensor_status_raw = {}
 
     async def async_init_device(self) -> None:
         """Detect controller System ID and load matching device profile.
@@ -463,7 +459,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             catalog_db.get_device_by_system_id,
             sys_id,
             self.db_path,
-            self._language,
             hw_index,
             sw_index,
             f0,
@@ -1029,19 +1024,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         registry_entry = registry.async_get(entity_id)
         return registry_entry is not None and not registry_entry.disabled
 
-    def _target_interval(self, item: dict[str, Any], domain: str) -> float:
+    def _target_interval(self, item: dict[str, Any]) -> float:
         """How many poll intervals this datapoint should wait between reads."""
         if (item.get("tier") or "") == "Trending":
             return _INTERVAL_TRENDING
         priority = item.get("priority") or 100
-        base = (
-            _INTERVAL_READING_FAST
-            if priority <= _URGENT_PRIORITY
-            else _INTERVAL_READING_SLOW
-        )
-        if domain in ("number", "select", "switch", "date"):
-            base *= _INTERVAL_PARAMETER
-        return base
+        if priority <= _URGENT_PRIORITY:
+            return _INTERVAL_READING_FAST
+        return _INTERVAL_READING_SLOW
 
     def _select_due(self, items: list[tuple[dict[str, Any], str]]) -> set[str]:
         """Decide which datapoints this cycle reads.
@@ -1063,7 +1053,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         capacity = max(1, int(budget_s / cost))
 
         scored: list[tuple[float, str]] = []
-        for item, domain in items:
+        for item, _domain in items:
             item_id = item["id"]
             if item_id not in self.data:
                 # Never read. Always the most overdue thing there is, so a restart fills in as
@@ -1073,7 +1063,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if parse_address(item["address"]) not in self._unsupported_addresses:
                     scored.append((float("inf"), item_id))
                 continue
-            target = self._target_interval(item, domain) * self.scan_interval_seconds
+            target = self._target_interval(item) * self.scan_interval_seconds
             scored.append(((now - self._last_read.get(item_id, 0.0)) / target, item_id))
 
         # Most overdue first. Anything not reached this cycle grows more overdue and wins the
@@ -1573,8 +1563,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     with contextlib.suppress(ValueError, TypeError):
                         sensor_status_raw[s["id"]] = int(raw_status)
             return value
-        if s.get("format") == "datetime_bcd":
-            return decode_datetime_bcd(raw)
         if "options" in s:
             int_val = int.from_bytes(raw, "little", signed=False)
             options = s["options"]
@@ -2031,9 +2019,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_write_custom_datapoint(self, address: int, data: bytes) -> bool:
         """Perform an ad-hoc write of any address."""
         async with self._write_lock:
-            res = await self.client.write_raw(address, data)
+            await self.client.write_raw(address, data)
         await self.async_request_refresh()
-        return res
+        return True
 
     async def async_write_item(self, item: dict[str, Any], value: int | bytes) -> bool:
         """Write one catalog datapoint, patching it into its block when it is not alone there.
@@ -2112,7 +2100,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             payload.hex(" "),
             fc_write,
         )
-        result = await self.client.write_raw(
+        await self.client.write_raw(
             address,
             payload,
             optolink.function_code(fc_write, optolink.FC_VIRTUAL_WRITE),
@@ -2145,7 +2133,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Leave the datapoint overdue as well, so the next regular cycle confirms the value
         # from a fresh read rather than trusting the one taken right after the write.
         self._last_read.pop(item["id"], None)
-        return result
+        return True
 
     def _publish_block(
         self, address: int, block: int, fc_read: str | None, raw: bytes
@@ -2180,11 +2168,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._cycle_data.update(updated)
         self.data = {**(self.data or {}), **updated}
         self.async_update_listeners()
-
-    @property
-    def language(self) -> str:
-        """The catalog language this entry was set up with."""
-        return self._language
 
     def resolve_schedule(self, ref: str | None) -> str | None:
         """Map a programme reference from a service call onto the profile's own key.
