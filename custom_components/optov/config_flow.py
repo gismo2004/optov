@@ -10,11 +10,13 @@ be releasing.
 import contextlib
 import logging
 import os
+from datetime import timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import voluptuous as vol
 from homeassistant.components.file_upload import process_uploaded_file
+from homeassistant.components.http.auth import async_sign_path
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
     ConfigEntry,
@@ -24,7 +26,11 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
     FileSelector,
     FileSelectorConfig,
     SelectOptionDict,
@@ -32,9 +38,10 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
     SerialPortSelector,
+    TextSelector,
 )
 
-from . import catalog_db, optolink
+from . import catalog_db, custom_file, optolink
 from .catalog_db import get_available_languages
 from .const import (
     CONF_CATALOG,
@@ -61,6 +68,33 @@ from .const import (
     DEFAULT_SYNC_CLOCK,
     DOMAIN,
     option,
+)
+from .custom_entities import (
+    BINARY_DEVICE_CLASSES,
+    KEY_CURRENT,
+    KEY_DEVICE_CLASS,
+    KEY_HEATING,
+    KEY_MODE,
+    KEY_MODES,
+    KEY_NAME,
+    KEY_ON,
+    KEY_PRESETS,
+    KEY_TARGET,
+    KEY_VALUE,
+    KEY_WRITE,
+    MODES,
+    ONOFF_PLATFORM,
+    PRESETS_OFFERED,
+    SECTION_CLIMATE,
+    SECTION_ONOFF,
+    SECTION_WATER_HEATER,
+    SWITCH_DEVICE_CLASSES,
+    check_device_class,
+    default_on_value,
+    find_item,
+    shared_modes,
+    two_state_items,
+    write_values,
 )
 from .optolink import IDENT_ADDRESS, IDENT_LENGTH, OptolinkClient
 from .translate import async_ui_text
@@ -662,10 +696,33 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
+def _read_upload(hass: HomeAssistant, file_id: str) -> str | None:
+    """The text of an uploaded file, or None if it is not text. Executor only."""
+    with process_uploaded_file(hass, file_id) as path:
+        try:
+            return path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+
+
 class OptoVOptionsFlow(OptionsFlow):
-    """Language, entity tiers, polling and housekeeping."""
+    """Settings, and the custom entities the user builds from the controller's values."""
+
+    def __init__(self) -> None:
+        self._device: str | None = None
+        self._source: str | None = None
+        self._edit: str | None = None
+        # A thermostat or water heater being added or edited.
+        self._section: str | None = None
+        self._draft: dict[str, Any] = {}
+        self._editing: str | None = None
 
     async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="init", menu_options=["settings", "custom"])
+
+    async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
@@ -714,4 +771,629 @@ class OptoVOptionsFlow(OptionsFlow):
                 ): bool,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="settings", data_schema=schema)
+
+    # --- Custom entities (custom_entities.py). They live in a file next to the catalog; every
+    # change here rewrites that file and reloads the entry, which builds the entities from it.
+
+    def _coordinator(self):
+        if self.config_entry.state is not ConfigEntryState.LOADED:
+            return None
+        return self.config_entry.runtime_data.coordinator
+
+    def _path(self) -> str:
+        return custom_file.custom_file_path(self.hass, self._coordinator().stable_id)
+
+    async def async_step_custom(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """What can be done with custom entities, and how many there are."""
+        coordinator = self._coordinator()
+        if coordinator is None:
+            return self.async_abort(reason="custom_not_loaded")
+        return self.async_show_menu(
+            step_id="custom",
+            menu_options=[
+                "custom_onoff_add",
+                "custom_climate_add",
+                "custom_water_heater_add",
+                "custom_edit",
+                "custom_backup",
+            ],
+            description_placeholders={
+                "count": str(self._count()),
+                "path": self._path(),
+            },
+        )
+
+    def _label(self, item: dict[str, Any]) -> str:
+        states = " / ".join(item["options"][v] for v in sorted(item["options"]))
+        return f"{item['name']}: {states}"
+
+    def _onoff_candidates(self) -> dict[str, tuple[str, str | None]]:
+        """Enabled two-state entities without an on/off entity: entity_id -> (datapoint, device).
+
+        Only enabled ones, because those are what the entity picker can show; a disabled value
+        can be enabled first, or named in the file.
+        """
+        coordinator = self._coordinator()
+        eligible = {item["id"] for _, item in two_state_items(coordinator.profile)}
+        prefix = f"{coordinator.stable_id}_"
+        found: dict[str, tuple[str, str | None]] = {}
+        registry = er.async_get(self.hass)
+        for reg_entry in er.async_entries_for_config_entry(
+            registry, self.config_entry.entry_id
+        ):
+            if reg_entry.domain not in ("sensor", "select") or reg_entry.disabled_by:
+                continue
+            if not reg_entry.unique_id.startswith(prefix):
+                continue
+            item_id = reg_entry.unique_id[len(prefix) :]
+            if item_id in eligible and item_id not in coordinator.custom_sources:
+                found[reg_entry.entity_id] = (item_id, reg_entry.device_id)
+        return found
+
+    def _count(self) -> int:
+        coordinator = self._coordinator()
+        return len(coordinator.custom_unique_ids())
+
+    def _custom(self) -> dict[str, list[dict[str, Any]]]:
+        coordinator = self._coordinator()
+        return {
+            SECTION_ONOFF: list(coordinator.custom_onoff),
+            SECTION_CLIMATE: list(coordinator.custom_climate),
+            SECTION_WATER_HEATER: list(coordinator.custom_water_heater),
+        }
+
+    async def _async_save(
+        self, onoff: list[dict[str, Any]] | None = None, **sections: list
+    ) -> ConfigFlowResult:
+        """Write the file with the given sections changed, the rest as they are, and reload."""
+        custom = self._custom()
+        if onoff is not None:
+            custom[SECTION_ONOFF] = onoff
+        custom.update(sections)
+        await custom_file.async_save(self.hass, self._coordinator(), custom)
+        self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
+        return self.async_abort(reason="custom_saved")
+
+    def _onoff_schema(
+        self, platform: str, item: dict[str, Any], on: int, device_class: str, name: str
+    ) -> dict:
+        classes = (
+            BINARY_DEVICE_CLASSES
+            if ONOFF_PLATFORM[platform] == "binary_sensor"
+            else SWITCH_DEVICE_CLASSES
+        )
+        return {
+            vol.Required(KEY_ON, default=str(on)): SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value=str(v), label=item["options"][v])
+                        for v in sorted(item["options"])
+                    ],
+                    mode=SelectSelectorMode.LIST,
+                )
+            ),
+            vol.Required(KEY_DEVICE_CLASS, default=device_class): SelectSelector(
+                SelectSelectorConfig(
+                    options=classes,
+                    mode=SelectSelectorMode.DROPDOWN,
+                    translation_key="onoff_device_class",
+                )
+            ),
+            vol.Required(KEY_NAME, default=name): TextSelector(),
+        }
+
+    async def async_step_custom_onoff_add(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """First the device, so the next list holds only that device's values."""
+        if self._coordinator() is None:
+            return self.async_abort(reason="custom_not_loaded")
+        candidates = self._onoff_candidates()
+        if not candidates:
+            return self.async_abort(reason="custom_onoff_none")
+        devices: dict[str, int] = {}
+        for _, device_id in candidates.values():
+            if device_id:
+                devices[device_id] = devices.get(device_id, 0) + 1
+        if user_input is not None or len(devices) <= 1:
+            self._device = (user_input or {}).get("device") or next(iter(devices), None)
+            return await self.async_step_custom_onoff_value()
+        registry = dr.async_get(self.hass)
+        options = []
+        for device_id, count in devices.items():
+            device = registry.async_get(device_id)
+            name = (device.name_by_user or device.name) if device else device_id
+            options.append(SelectOptionDict(value=device_id, label=f"{name} ({count})"))
+        options.sort(key=lambda o: o["label"].casefold())
+        return self.async_show_form(
+            step_id="custom_onoff_add",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("device"): SelectSelector(
+                        SelectSelectorConfig(
+                            options=options, mode=SelectSelectorMode.LIST
+                        )
+                    )
+                }
+            ),
+        )
+
+    async def async_step_custom_onoff_value(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """The value, from Home Assistant's own entity picker, which can be searched."""
+        candidates = self._onoff_candidates()
+        if user_input is not None and user_input.get("entity") in candidates:
+            self._source = user_input["entity"]
+            return await self.async_step_custom_onoff_details()
+        on_device = sorted(
+            entity_id
+            for entity_id, (_, device_id) in candidates.items()
+            if self._device is None or device_id == self._device
+        )
+        if not on_device:
+            return self.async_abort(reason="custom_onoff_none")
+        return self.async_show_form(
+            step_id="custom_onoff_value",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("entity"): EntitySelector(
+                        EntitySelectorConfig(include_entities=on_device)
+                    )
+                }
+            ),
+        )
+
+    async def async_step_custom_onoff_details(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Everything is preselected, so in the simplest case this is one click."""
+        coordinator = self._coordinator()
+        candidates = self._onoff_candidates() if coordinator else {}
+        if self._source not in candidates:
+            return self.async_abort(reason="custom_not_loaded")
+        platform, item = find_item(coordinator.profile, candidates[self._source][0])
+        if user_input is not None:
+            entity = {
+                "source": item["id"],
+                "platform": platform,
+                "item": item,
+                KEY_VALUE: self._source,
+                KEY_ON: int(user_input[KEY_ON]),
+                KEY_DEVICE_CLASS: user_input[KEY_DEVICE_CLASS],
+                KEY_NAME: user_input[KEY_NAME].strip() or item["name"],
+            }
+            return await self._async_save([*coordinator.custom_onoff, entity])
+        return self.async_show_form(
+            step_id="custom_onoff_details",
+            data_schema=vol.Schema(
+                self._onoff_schema(
+                    platform,
+                    item,
+                    default_on_value(item),
+                    check_device_class(platform, None),
+                    item["name"],
+                )
+            ),
+            description_placeholders={"source": self._label(item)},
+        )
+
+    async def async_step_custom_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick a custom entity to change or remove."""
+        coordinator = self._coordinator()
+        if coordinator is None:
+            return self.async_abort(reason="custom_not_loaded")
+        if not self._count():
+            return self.async_abort(reason="custom_empty")
+        if user_input is not None:
+            section, _, key = user_input["entity"].partition("|")
+            if section == SECTION_ONOFF:
+                self._edit = key
+                return await self.async_step_custom_edit_onoff()
+            current = next(
+                e
+                for e in getattr(coordinator, f"custom_{section}")
+                if e["unique_id"] == key
+            )
+            self._section, self._editing = section, key
+            self._draft = {
+                k: current.get(k)
+                for k in (KEY_NAME, KEY_TARGET, KEY_CURRENT, KEY_MODE, KEY_HEATING)
+            }
+            self._draft[KEY_PRESETS] = dict(current.get(KEY_PRESETS) or {})
+            self._draft[KEY_MODES] = dict(current[KEY_MODES])
+            self._draft[KEY_WRITE] = dict(current[KEY_WRITE])
+            return await self.async_step_custom_assembled()
+        kinds = await self._async_kind_names()
+        options = [
+            SelectOptionDict(
+                value=f"{SECTION_ONOFF}|{entity['source']}",
+                label=f"{entity[KEY_NAME]} ({kinds[SECTION_ONOFF]})",
+            )
+            for entity in coordinator.custom_onoff
+        ]
+        for section in (SECTION_CLIMATE, SECTION_WATER_HEATER):
+            options += [
+                SelectOptionDict(
+                    value=f"{section}|{entity['unique_id']}",
+                    label=f"{entity[KEY_NAME]} ({kinds[section]})",
+                )
+                for entity in getattr(coordinator, f"custom_{section}")
+            ]
+        options.sort(key=lambda o: o["label"].casefold())
+        return self.async_show_form(
+            step_id="custom_edit",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("entity"): SelectSelector(
+                        SelectSelectorConfig(
+                            options=options, mode=SelectSelectorMode.LIST
+                        )
+                    )
+                }
+            ),
+        )
+
+    async def _async_kind_names(self) -> dict[str, str]:
+        """What each kind is called in the edit list, in the Home Assistant language."""
+        return {
+            section: await async_ui_text(self.hass, f"custom_kind_{section}")
+            for section in (SECTION_ONOFF, SECTION_CLIMATE, SECTION_WATER_HEATER)
+        }
+
+    async def async_step_custom_edit_onoff(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        coordinator = self._coordinator()
+        onoff = list(coordinator.custom_onoff) if coordinator else []
+        current = next((e for e in onoff if e["source"] == self._edit), None)
+        if current is None:
+            return self.async_abort(reason="custom_not_loaded")
+        item = current["item"]
+        if user_input is not None:
+            rest = [e for e in onoff if e["source"] != self._edit]
+            if user_input.get("remove"):
+                return await self._async_save(rest)
+            changed = {
+                **current,
+                KEY_ON: int(user_input[KEY_ON]),
+                KEY_DEVICE_CLASS: user_input[KEY_DEVICE_CLASS],
+                KEY_NAME: user_input[KEY_NAME].strip() or item["name"],
+            }
+            return await self._async_save([*rest, changed])
+        schema = self._onoff_schema(
+            current["platform"],
+            item,
+            current[KEY_ON],
+            current[KEY_DEVICE_CLASS],
+            current[KEY_NAME],
+        )
+        schema[vol.Optional("remove", default=False)] = bool
+        return self.async_show_form(
+            step_id="custom_edit_onoff",
+            data_schema=vol.Schema(schema),
+            description_placeholders={"source": self._label(item)},
+        )
+
+    # --- Thermostat and water heater: entities, then modes, then (if needed) what is written.
+
+    async def async_step_custom_climate_add(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return await self._async_start_assembled(SECTION_CLIMATE)
+
+    async def async_step_custom_water_heater_add(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return await self._async_start_assembled(SECTION_WATER_HEATER)
+
+    async def _async_start_assembled(self, section: str) -> ConfigFlowResult:
+        if self._coordinator() is None:
+            return self.async_abort(reason="custom_not_loaded")
+        self._section, self._editing, self._draft = section, None, {KEY_MODES: {}}
+        return await self.async_step_custom_assembled()
+
+    def _mode_item(self, entity_id: str | None) -> dict[str, Any] | None:
+        """The select of this controller behind an entity id, or None."""
+        if not entity_id:
+            return None
+        coordinator = self._coordinator()
+        reg_entry = er.async_get(self.hass).async_get(entity_id)
+        prefix = f"{coordinator.stable_id}_"
+        if (
+            reg_entry is None
+            or reg_entry.config_entry_id != self.config_entry.entry_id
+            or not reg_entry.unique_id.startswith(prefix)
+        ):
+            return None
+        return custom_file.find_select(
+            coordinator.profile, reg_entry.unique_id[len(prefix) :]
+        )
+
+    async def async_step_custom_assembled(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Which entities the thermostat or water heater is built from."""
+        section, draft = self._section, self._draft
+        climate = section == SECTION_CLIMATE
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if user_input.get("remove") and self._editing:
+                rest = [
+                    e
+                    for e in getattr(self._coordinator(), f"custom_{section}")
+                    if e["unique_id"] != self._editing
+                ]
+                return await self._async_save(**{section: rest})
+            for key in (KEY_NAME, KEY_TARGET, KEY_CURRENT, KEY_MODE, KEY_HEATING):
+                draft[key] = user_input.get(key) or None
+            if draft[KEY_MODE] and self._mode_item(draft[KEY_MODE]) is None:
+                errors[KEY_MODE] = "custom_mode_foreign"
+            if not errors:
+                if draft[KEY_MODE]:
+                    return await self.async_step_custom_modes()
+                draft[KEY_MODES], draft[KEY_WRITE] = {}, {}
+                return await self._async_after_modes()
+        entity = EntitySelector
+        schema: dict = {
+            vol.Required(KEY_NAME, default=draft.get(KEY_NAME) or ""): TextSelector(),
+            vol.Required(
+                KEY_TARGET, description={"suggested_value": draft.get(KEY_TARGET)}
+            ): entity(EntitySelectorConfig(domain=["number", "input_number"])),
+        }
+        mode_key = vol.Required if climate else vol.Optional
+        schema[
+            mode_key(KEY_MODE, description={"suggested_value": draft.get(KEY_MODE)})
+        ] = entity(EntitySelectorConfig(integration=DOMAIN, domain="select"))
+        schema[
+            vol.Optional(
+                KEY_CURRENT, description={"suggested_value": draft.get(KEY_CURRENT)}
+            )
+        ] = entity(EntitySelectorConfig(domain="sensor", device_class="temperature"))
+        if climate:
+            schema[
+                vol.Optional(
+                    KEY_HEATING, description={"suggested_value": draft.get(KEY_HEATING)}
+                )
+            ] = entity(EntitySelectorConfig(domain="binary_sensor"))
+        if self._editing:
+            schema[vol.Optional("remove", default=False)] = bool
+        return self.async_show_form(
+            step_id="custom_climate" if climate else "custom_water_heater",
+            data_schema=vol.Schema(schema),
+            errors=errors,
+        )
+
+    async def async_step_custom_climate(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return await self.async_step_custom_assembled(user_input)
+
+    async def async_step_custom_water_heater(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return await self.async_step_custom_assembled(user_input)
+
+    async def async_step_custom_modes(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """One choice per value of the mode select: which Home Assistant mode it is."""
+        draft = self._draft
+        options = self._mode_item(draft[KEY_MODE])["options"]
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            modes = {
+                raw: user_input[label]
+                for raw, label in options.items()
+                if user_input.get(label, "unused") != "unused"
+            }
+            if not modes:
+                errors["base"] = "custom_modes_empty"
+            else:
+                draft[KEY_MODES] = modes
+                draft[KEY_WRITE] = {
+                    m: v
+                    for m, v in (draft.get(KEY_WRITE) or {}).items()
+                    if modes.get(v) == m
+                }
+                if shared_modes(modes):
+                    return await self.async_step_custom_write()
+                draft[KEY_WRITE] = write_values(modes, {})
+                return await self._async_after_modes()
+        choices = ["unused", *MODES[self._section]]
+        current = draft.get(KEY_MODES) or {}
+        schema = {
+            vol.Required(label, default=current.get(raw, "unused")): SelectSelector(
+                SelectSelectorConfig(
+                    options=choices,
+                    mode=SelectSelectorMode.DROPDOWN,
+                    translation_key="custom_mode",
+                )
+            )
+            for raw, label in sorted(options.items())
+        }
+        return self.async_show_form(
+            step_id="custom_modes", data_schema=vol.Schema(schema), errors=errors
+        )
+
+    async def async_step_custom_write(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Where several controller modes share a Home Assistant mode: which one it writes."""
+        draft = self._draft
+        options = self._mode_item(draft[KEY_MODE])["options"]
+        shared = shared_modes(draft[KEY_MODES])
+        if user_input is not None:
+            chosen = {mode: int(user_input[f"write_{mode}"]) for mode in shared}
+            draft[KEY_WRITE] = write_values(draft[KEY_MODES], chosen)
+            return await self._async_after_modes()
+        before = draft.get(KEY_WRITE) or {}
+        schema = {
+            vol.Required(f"write_{mode}", default=str(before.get(mode, values[0]))): (
+                SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            SelectOptionDict(value=str(v), label=options[v])
+                            for v in values
+                        ],
+                        mode=SelectSelectorMode.LIST,
+                    )
+                )
+            )
+            for mode, values in shared.items()
+        }
+        return self.async_show_form(
+            step_id="custom_write", data_schema=vol.Schema(schema)
+        )
+
+    async def _async_after_modes(self) -> ConfigFlowResult:
+        """A thermostat may still take presets; a water heater is complete."""
+        if self._section == SECTION_CLIMATE:
+            return await self.async_step_custom_presets()
+        return await self._async_save_assembled()
+
+    async def async_step_custom_presets(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Optional: a switch or on/off setting that turns each preset on."""
+        draft = self._draft
+        before = dict(draft.get(KEY_PRESETS) or {})
+        if user_input is not None:
+            # Presets only the file can name (home, sleep, activity) stay as they are.
+            draft[KEY_PRESETS] = {
+                name: entity_id
+                for name, entity_id in before.items()
+                if name not in PRESETS_OFFERED
+            }
+            draft[KEY_PRESETS].update(
+                {
+                    name: user_input[name]
+                    for name in PRESETS_OFFERED
+                    if user_input.get(name)
+                }
+            )
+            return await self._async_save_assembled()
+        schema = {
+            vol.Optional(
+                name, description={"suggested_value": before.get(name)}
+            ): EntitySelector(
+                EntitySelectorConfig(integration=DOMAIN, domain=["switch", "select"])
+            )
+            for name in PRESETS_OFFERED
+        }
+        return self.async_show_form(
+            step_id="custom_presets", data_schema=vol.Schema(schema)
+        )
+
+    async def _async_save_assembled(self) -> ConfigFlowResult:
+        coordinator = self._coordinator()
+        section, draft = self._section, self._draft
+        entry = {
+            KEY_NAME: (draft.get(KEY_NAME) or "").strip() or None,
+            KEY_TARGET: draft[KEY_TARGET],
+            KEY_CURRENT: draft.get(KEY_CURRENT),
+            KEY_MODE: draft.get(KEY_MODE),
+            KEY_MODES: draft.get(KEY_MODES) or {},
+            KEY_WRITE: write_values(
+                draft.get(KEY_MODES) or {}, draft.get(KEY_WRITE) or {}
+            ),
+        }
+        if section == SECTION_CLIMATE:
+            entry[KEY_HEATING] = draft.get(KEY_HEATING)
+            entry[KEY_PRESETS] = draft.get(KEY_PRESETS) or {}
+        resolved, skipped = custom_file.resolve_assembled(
+            self.hass, coordinator, self.config_entry.entry_id, section, [entry]
+        )
+        if not resolved:
+            return self.async_abort(
+                reason="custom_rejected",
+                description_placeholders={"reason": skipped[0]},
+            )
+        rest = [
+            e
+            for e in getattr(coordinator, f"custom_{section}")
+            if e["unique_id"] not in (self._editing, resolved[0]["unique_id"])
+        ]
+        return await self._async_save(**{section: [*rest, resolved[0]]})
+
+    async def async_step_custom_backup(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Download the file, restore one by uploading it, or apply it after editing."""
+        coordinator = self._coordinator()
+        if coordinator is None:
+            return self.async_abort(reason="custom_not_loaded")
+        path = self._path()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if file_id := user_input.get("upload"):
+                text = await self.hass.async_add_executor_job(
+                    _read_upload, self.hass, file_id
+                )
+                if custom_file.check_upload(text):
+                    await self.hass.async_add_executor_job(
+                        custom_file.write_text, path, text
+                    )
+                else:
+                    errors["upload"] = "custom_invalid"
+            if not errors:
+                sections, problems, _ = await custom_file.async_read(
+                    self.hass, coordinator.stable_id
+                )
+                custom, skipped = custom_file.resolve_sections(
+                    self.hass, coordinator, self.config_entry.entry_id, sections
+                )
+                count = sum(len(entities) for entities in custom.values())
+                self.hass.config_entries.async_schedule_reload(
+                    self.config_entry.entry_id
+                )
+                notes = problems + skipped
+                if not notes:
+                    return self.async_abort(
+                        reason="custom_applied",
+                        description_placeholders={"count": str(count)},
+                    )
+                return self.async_abort(
+                    reason="custom_applied_notes",
+                    description_placeholders={
+                        "count": str(count),
+                        "skipped": "\n".join(f"- {line}" for line in notes),
+                    },
+                )
+        exists = await self.hass.async_add_executor_job(os.path.exists, path)
+        link = (
+            async_sign_path(
+                self.hass,
+                custom_file.DOWNLOAD_URL.format(entry_id=self.config_entry.entry_id),
+                timedelta(minutes=10),
+            )
+            if exists
+            else ""
+        )
+        return self.async_show_form(
+            step_id="custom_backup",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional("upload"): FileSelector(
+                        FileSelectorConfig(accept=".yaml,.yml")
+                    )
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "path": path,
+                # A plain link to Home Assistant's own address is taken over by the frontend's
+                # router and lands on a dashboard. Opened in a new tab the browser fetches it
+                # itself, and the attachment header makes that a download.
+                "download": (
+                    f'<a href="{link}" target="_blank">{os.path.basename(path)}</a>'
+                    if link
+                    else "-"
+                ),
+            },
+        )

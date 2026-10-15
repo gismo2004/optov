@@ -21,6 +21,8 @@ CONF_ENABLE_COMMISSIONING = "enable_commissioning"
 CONF_ENABLE_CODING2 = "enable_coding2"
 CONF_ENABLE_EXPERT = "enable_expert"
 CONF_SYNC_CLOCK = "sync_clock"
+# The custom entities file of the controller, recorded so removing the entry can delete it.
+CONF_CUSTOM_FILE = "custom_file"
 
 DEFAULT_PORT = 6053
 # Preset, not fixed -- adjustable in the integration options. 15 s matches the cadence the
@@ -46,6 +48,8 @@ PLATFORMS = [
     Platform.SWITCH,
     Platform.DATE,
     Platform.EVENT,
+    Platform.CLIMATE,
+    Platform.WATER_HEATER,
 ]
 
 

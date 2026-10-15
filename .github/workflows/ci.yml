@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.14"
       # serialx is what the transport speaks to; it comes with Home Assistant at runtime.
-      - run: pip install pytest pyflakes ruff serialx
+      - run: pip install pytest pyflakes ruff serialx pyyaml
       - run: python -m pyflakes custom_components/optov/*.py tests/*.py
       # The rules are in ruff.toml. Both are checks; nothing is rewritten here.
       - run: ruff check custom_components/optov tests

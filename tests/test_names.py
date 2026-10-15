@@ -1,7 +1,7 @@
 """Datapoints that share a name, and how they are told apart.
 
 The catalog names a relay's state, its switching counter and its running hours all the same,
-because in the vendor's tool each sits on its own page. In Home Assistant they meet in one
+because in the catalog's menus each sits on its own page. In Home Assistant they meet in one
 entity picker, so the menu node that sets each apart is appended, and the kinds Home Assistant
 has no device class for get an icon. All of it from catalog structure and catalog text.
 """

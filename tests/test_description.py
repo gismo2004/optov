@@ -2,8 +2,8 @@
 
 A coding parameter's name says what it is called. Only the description says what changing
 it will do, and the catalog has carried that text all along -- it was read by the datapoint
-query and then dropped. These tests pin the tidying, because the text arrives with the
-vendor's layout markers in it and those mean nothing outside its service tool.
+query and then dropped. These tests pin the tidying, because the text arrives with layout
+markers in it that mean nothing in Home Assistant.
 """
 
 import catalog_db

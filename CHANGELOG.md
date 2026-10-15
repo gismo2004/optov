@@ -10,6 +10,18 @@ commits.
 
 ## [Unreleased]
 
+### Added
+- **Custom entities.** *OptoV options → Custom entities* builds entities of your own from the
+  controller's values, on a device of their own. An **on/off entity** is for a value with
+  two named states (Aus/Ein, Nein/Ja, OFF/ON...), which stays a sensor or a select because the
+  catalog does not say which state is "on". You pick the value and which state counts as on; a
+  reading becomes a binary sensor, a setting a switch. **Thermostat** and **water heater**
+  assemble a `climate` or `water_heater` entity from a setpoint, the operating-mode select (whose
+  modes you map to Home Assistant's) and optionally a current temperature from any sensor; a
+  thermostat can map its presets (Eco, Comfort, Away, Boost) to switches such as party mode.
+  *Backup and restore* downloads the file they are kept in and restores it; it is removed with
+  the integration entry, like the catalog.
+
 ### Fixed
 - An action called while OptoV is still connecting -- right after a restart, or while the
   controller cannot be reached -- said that no controller was set up. It now says that OptoV is

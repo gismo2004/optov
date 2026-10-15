@@ -2,7 +2,8 @@
 
 A datapoint lands here when the catalog says it is writable and exactly one bit wide, which
 leaves it two states and nothing else to say about them. Party mode, eco mode and the one-off
-hot water run are all of that shape.
+hot water run are all of that shape. A writable setting with two named values comes in as a
+select instead; the user can add an on/off entity for it and say which value is "on".
 """
 
 from typing import Any
@@ -13,6 +14,14 @@ from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import OptolinkConfigEntry
+from .custom_entities import (
+    KEY_DEVICE_CLASS,
+    KEY_NAME,
+    KEY_ON,
+    is_on,
+    off_value,
+    onoff_unique_id,
+)
 from .entity import OptolinkEntity
 
 # Writes go one at a time: the controller sits on a serial line and the client queues
@@ -36,6 +45,18 @@ async def async_setup_entry(
         )
     async_add_entities(entities)
 
+    # On/off entities the user added (custom_entities.py); this platform takes its kind.
+    onoff = [
+        OptolinkOnOffSwitch(coordinator, entry, entity)
+        for entity in coordinator.custom_onoff
+        if entity["platform"] == "selects"
+    ]
+    for entity in onoff:
+        entity.entity_id = async_generate_entity_id(
+            "switch.{}", entity.object_id_hint, hass=hass
+        )
+    async_add_entities(onoff)
+
 
 class OptolinkSwitch(OptolinkEntity, SwitchEntity):
     """One writable bit on the controller. The coordinator publishes the bit itself, 0 or 1."""
@@ -50,3 +71,38 @@ class OptolinkSwitch(OptolinkEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_write_item(self._def, 0)
+
+
+class OptolinkOnOffSwitch(OptolinkEntity, SwitchEntity):
+    """On/off control of a two-state setting; writes the raw value the user chose as "on"."""
+
+    def __init__(self, coordinator, entry, entity) -> None:
+        definition = entity["item"]
+        super().__init__(coordinator, entry, definition)
+        self._on_value = int(entity[KEY_ON])
+        self._off_value = off_value(definition, self._on_value)
+        self._attr_unique_id = onoff_unique_id(coordinator.stable_id, definition["id"])
+        self._attr_name = entity[KEY_NAME]
+        # Custom entities sit together on their own sub-device rather than among the values.
+        self._attr_device_info = coordinator.get_custom_device_info()
+        self._attr_device_class = entity[KEY_DEVICE_CLASS] or "switch"
+        self._attr_entity_registry_enabled_default = True
+        self._attr_entity_category = None
+
+    @property
+    def object_id_hint(self) -> str:
+        return self.coordinator.object_id(self._def.get("circuit"), self._attr_name)
+
+    @property
+    def is_on(self) -> bool | None:
+        return is_on(self.raw_value, self._def, self._on_value)
+
+    # A write only when the state actually changes: every write is a telegram, and for a
+    # stored setting a write cycle of the controller's memory.
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        if self.is_on is not True:
+            await self.coordinator.async_write_item(self._def, self._on_value)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        if self.is_on is not False:
+            await self.coordinator.async_write_item(self._def, self._off_value)

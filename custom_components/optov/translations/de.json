@@ -66,7 +66,7 @@
   },
   "options": {
     "step": {
-      "init": {
+      "settings": {
         "title": "OptoV",
         "description": "Welche Datenpunkte zu Entitäten werden und wie die Regelung abgefragt wird. Eine hier eingeschaltete Gruppe erscheint etwa 30 Sekunden nach dem Speichern, wenn Home Assistant die Integration neu lädt.",
         "data": {
@@ -78,7 +78,145 @@
           "scan_interval": "Abfrageintervall (Sekunden)",
           "sync_clock": "Uhrzeit der Regelung mit Home Assistant synchron halten"
         }
+      },
+      "init": {
+        "title": "OptoV",
+        "menu_options": {
+          "settings": "Einstellungen",
+          "custom": "Eigene Entitäten"
+        }
+      },
+      "custom": {
+        "title": "Eigene Entitäten",
+        "description": "Entitäten, die du aus den Werten dieser Steuerung baust. Derzeit {count}, gespeichert in `{path}`.",
+        "menu_options": {
+          "custom_onoff_add": "An/Aus-Entität hinzufügen",
+          "custom_climate_add": "Thermostat hinzufügen",
+          "custom_water_heater_add": "Warmwasserbereiter hinzufügen",
+          "custom_edit": "Bearbeiten oder entfernen",
+          "custom_backup": "Sichern und wiederherstellen"
+        }
+      },
+      "custom_onoff_add": {
+        "title": "An/Aus-Entität hinzufügen",
+        "description": "Für einen Wert mit zwei benannten Zuständen, etwa Aus/Ein. Aus einem Messwert wird ein Binärsensor, aus einer Einstellung ein Schalter; das Original bleibt wie es ist.\n\nWähle zuerst das Gerät.",
+        "data": {
+          "device": "Gerät"
+        }
+      },
+      "custom_onoff_value": {
+        "title": "An/Aus-Entität hinzufügen",
+        "description": "Wähle den Wert; tippen zum Suchen. Deaktivierte Werte stehen nicht in der Liste: Aktiviere einen zuerst, wenn du ihn brauchst.",
+        "data": {
+          "entity": "Wert"
+        }
+      },
+      "custom_onoff_details": {
+        "title": "An/Aus-Entität hinzufügen",
+        "description": "{source}\n\nAlles ist vorausgewählt; ändere es bei Bedarf. Die Geräteklasse bestimmt, wie Home Assistant die beiden Zustände benennt und anzeigt.",
+        "data": {
+          "on_value": "„An“ bedeutet",
+          "device_class": "Geräteklasse (device class)",
+          "name": "Name"
+        }
+      },
+      "custom_edit": {
+        "title": "Bearbeiten oder entfernen",
+        "data": {
+          "entity": "Eigene Entität"
+        }
+      },
+      "custom_edit_onoff": {
+        "title": "An/Aus-Entität bearbeiten",
+        "description": "{source}",
+        "data": {
+          "on_value": "„An“ bedeutet",
+          "device_class": "Geräteklasse (device class)",
+          "name": "Name",
+          "remove": "Diese Entität entfernen"
+        }
+      },
+      "custom_backup": {
+        "title": "Sichern und wiederherstellen",
+        "description": "**Sichern:** {download} herunterladen (Link 10 Minuten gültig). Die Datei wird mit dem Integrationseintrag gelöscht, wie der Katalog, also behalte eine Kopie.\n\n**Wiederherstellen:** Lade unten eine Sicherung hoch und bestätige.\n\n**Datei bearbeitet?** Sie liegt unter `{path}`; bestätige ohne Hochladen, um sie zu übernehmen.",
+        "data": {
+          "upload": "Sicherung zum Wiederherstellen (optional)"
+        }
+      },
+      "custom_climate": {
+        "title": "Thermostat",
+        "description": "Aus vorhandenen Entitäten gebaut; er zeigt deren Zustände und setzt sie. Die Betriebsart muss eine Auswahl dieser Steuerung sein; im nächsten Schritt ordnest du ihre Werte zu.",
+        "data": {
+          "name": "Name",
+          "target": "Sollwert (Zahl)",
+          "mode": "Betriebsart (Auswahl)",
+          "current": "Aktuelle Temperatur (optional, beliebiger Temperatursensor)",
+          "heating": "Heizt gerade (optional, Binärsensor)",
+          "remove": "Diesen Thermostat entfernen"
+        }
+      },
+      "custom_water_heater": {
+        "title": "Warmwasserbereiter",
+        "description": "Aus vorhandenen Entitäten gebaut; er zeigt deren Zustände und setzt sie. Eine Betriebsart ist optional; wählst du eine, ordnest du im nächsten Schritt ihre Werte zu.",
+        "data": {
+          "name": "Name",
+          "target": "Sollwert (Zahl)",
+          "mode": "Betriebsart (Auswahl, optional)",
+          "current": "Aktuelle Temperatur (optional, beliebiger Temperatursensor)",
+          "remove": "Diesen Warmwasserbereiter entfernen"
+        }
+      },
+      "custom_modes": {
+        "title": "Betriebsarten",
+        "description": "Wähle für jede Betriebsart der Steuerung, was sie in Home Assistant ist. Betriebsarten auf „Nicht verwendet“ werden nicht angeboten."
+      },
+      "custom_write": {
+        "title": "Welche Betriebsart gesetzt wird",
+        "description": "Mehrere Betriebsarten der Steuerung teilen sich eine in Home Assistant. Wähle, welche gesetzt wird, wenn du sie auswählst.",
+        "data": {
+          "write_off": "Aus setzt",
+          "write_heat": "Heizen setzt",
+          "write_cool": "Kühlen setzt",
+          "write_heat_cool": "Heizen/Kühlen setzt",
+          "write_auto": "Automatik (Zeitprogramm) setzt",
+          "write_eco": "Eco setzt",
+          "write_electric": "Elektrisch setzt",
+          "write_gas": "Gas setzt",
+          "write_heat_pump": "Wärmepumpe setzt",
+          "write_high_demand": "Hoher Bedarf setzt",
+          "write_performance": "Leistung setzt"
+        }
+      },
+      "custom_presets": {
+        "title": "Voreinstellungen (optional)",
+        "description": "Eine Voreinstellung ist eine Schaltfläche auf der Thermostat-Karte für eine Sonderbetriebsart, die die Steuerung als Schalter hat, zum Beispiel Party- oder Sparbetrieb. Eine Voreinstellung wählen schaltet ihren Schalter ein und die anderen aus; „Keine“ schaltet alle aus. Lass alles leer, wenn du keine Voreinstellungen brauchst.",
+        "data": {
+          "eco": "Eco",
+          "comfort": "Komfort",
+          "away": "Abwesend",
+          "boost": "Boost"
+        },
+        "data_description": {
+          "eco": "Zum Beispiel Sparbetrieb",
+          "comfort": "Zum Beispiel eine Komfort-Einstellung",
+          "away": "Zum Beispiel Ferienbetrieb",
+          "boost": "Zum Beispiel Partybetrieb"
+        }
       }
+    },
+    "abort": {
+      "custom_saved": "Gespeichert. Die Integration lädt neu, um es zu übernehmen.",
+      "custom_applied": "Übernommen: {count} eigene Entitäten. Die Integration lädt neu.",
+      "custom_applied_notes": "Übernommen: {count} eigene Entitäten. Die Integration lädt neu.\n\nNicht verwendet:\n\n{skipped}",
+      "custom_onoff_none": "Es gibt keinen aktivierten Wert mit zwei benannten Zuständen mehr, der noch keine An/Aus-Entität hat.",
+      "custom_not_loaded": "Die Steuerung ist gerade nicht eingerichtet. Versuche es erneut, sobald sie läuft.",
+      "custom_empty": "Es gibt noch keine eigenen Entitäten.",
+      "custom_rejected": "Nicht gespeichert: {reason}"
+    },
+    "error": {
+      "custom_invalid": "Das ist keine Datei für eigene Entitäten: Sie muss YAML mit Abschnitten wie onoff: sein.",
+      "custom_mode_foreign": "Wähle eine Auswahl dieser Steuerung: Über ihre Werte werden die Betriebsarten zugeordnet.",
+      "custom_modes_empty": "Ordne mindestens eine Betriebsart zu."
     }
   },
   "entity": {
@@ -143,6 +281,9 @@
     },
     "uncategorized": {
       "name": "Unkategorisiert"
+    },
+    "custom": {
+      "name": "Eigene Entitäten"
     }
   },
   "selector": {
@@ -155,6 +296,36 @@
         "fri": "Freitag",
         "sat": "Samstag",
         "sun": "Sonntag"
+      }
+    },
+    "onoff_device_class": {
+      "options": {
+        "none": "Allgemein (an/aus)",
+        "running": "Läuft",
+        "power": "Strom",
+        "heat": "Wärme",
+        "problem": "Problem",
+        "opening": "Öffnung (offen/zu)",
+        "moisture": "Feuchtigkeit",
+        "connectivity": "Verbindung",
+        "switch": "Schalter",
+        "outlet": "Steckdose"
+      }
+    },
+    "custom_mode": {
+      "options": {
+        "unused": "Nicht verwendet",
+        "off": "Aus",
+        "heat": "Heizen",
+        "cool": "Kühlen",
+        "heat_cool": "Heizen/Kühlen",
+        "auto": "Automatik (Zeitprogramm)",
+        "eco": "Eco",
+        "electric": "Elektrisch",
+        "gas": "Gas",
+        "heat_pump": "Wärmepumpe",
+        "high_demand": "Hoher Bedarf",
+        "performance": "Leistung"
       }
     }
   },
@@ -267,7 +438,10 @@
     "identify_found": "### System-ID {system_id}\nHardware {hardware}, Software {software}. Den Katalog für diese ID erzeugen.",
     "identify_found_f0": "### System-ID {system_id}\nHardware {hardware}, Software {software}, Kennungserweiterung {f0}. Den Katalog für diese ID erzeugen.",
     "identify_failed": "Die Regelung konnte nicht nach ihrer Kennung gefragt werden. Port und Verkabelung prüfen, oder weitergehen und einen Katalog für alle Regelungen erzeugen.",
-    "identify_foreign": "### System-ID {system_id}\nDiese Regelung spricht ein Protokoll, das OptoV nicht bedient; ein Katalog dafür hilft nicht. Siehe docs/protocols.md."
+    "identify_foreign": "### System-ID {system_id}\nDiese Regelung spricht ein Protokoll, das OptoV nicht bedient; ein Katalog dafür hilft nicht. Siehe docs/protocols.md.",
+    "custom_kind_onoff": "An/Aus",
+    "custom_kind_climate": "Thermostat",
+    "custom_kind_water_heater": "Warmwasserbereiter"
   },
   "issues": {
     "catalog_behind": {

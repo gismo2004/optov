@@ -1142,7 +1142,7 @@ def _slug(name: str) -> str:
     return s or "unnamed"
 
 
-# The vendor's own layout markers, which mean nothing outside its service tool.
+# Layout markers inside the catalog's texts, which mean nothing in Home Assistant.
 _TEXT_MARKERS = re.compile(r"##ecn(?:newline|tab)##")
 
 
@@ -1913,7 +1913,7 @@ def _disambiguate_names(profile: dict[str, Any]) -> None:
     """Give datapoints that share a name a way to be told apart.
 
     The catalog often names a relay's state, its switching counter and its running hours all
-    the same -- "Sekundärpumpe 1" three times -- because in the vendor's tool they sit on
+    the same -- "Sekundärpumpe 1" three times -- because in the catalog's menus they sit on
     different pages and the page says which is which. In Home Assistant they meet in one
     entity picker. So each one that collides gets the menu node that sets it apart: the node
     it is filed under that none of its namesakes share, which for the counters is the

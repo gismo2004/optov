@@ -66,7 +66,7 @@
   },
   "options": {
     "step": {
-      "init": {
+      "settings": {
         "title": "OptoV",
         "description": "Which datapoints become entities, and how the controller is polled. A group switched on here appears about 30 seconds after saving, when Home Assistant reloads the integration.",
         "data": {
@@ -78,7 +78,145 @@
           "scan_interval": "Poll interval (seconds)",
           "sync_clock": "Keep the controller clock in sync with Home Assistant"
         }
+      },
+      "init": {
+        "title": "OptoV",
+        "menu_options": {
+          "settings": "Settings",
+          "custom": "Custom entities"
+        }
+      },
+      "custom": {
+        "title": "Custom entities",
+        "description": "Entities you build from this controller's values. {count} at the moment, saved in `{path}`.",
+        "menu_options": {
+          "custom_onoff_add": "Add on/off entity",
+          "custom_climate_add": "Add thermostat",
+          "custom_water_heater_add": "Add water heater",
+          "custom_edit": "Edit or remove",
+          "custom_backup": "Backup and restore"
+        }
+      },
+      "custom_onoff_add": {
+        "title": "Add on/off entity",
+        "description": "For a value with two named states, such as Aus/Ein. A reading becomes a binary sensor, a setting a switch; the original stays as it is.\n\nChoose the device first.",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "custom_onoff_value": {
+        "title": "Add on/off entity",
+        "description": "Choose the value; type to search. Disabled values are not listed: enable one first if you need it.",
+        "data": {
+          "entity": "Value"
+        }
+      },
+      "custom_onoff_details": {
+        "title": "Add on/off entity",
+        "description": "{source}\n\nEverything is preselected; change it if needed. The device class sets how Home Assistant words and shows the two states.",
+        "data": {
+          "on_value": "\"On\" means",
+          "device_class": "Device class",
+          "name": "Name"
+        }
+      },
+      "custom_edit": {
+        "title": "Edit or remove",
+        "data": {
+          "entity": "Custom entity"
+        }
+      },
+      "custom_edit_onoff": {
+        "title": "Edit on/off entity",
+        "description": "{source}",
+        "data": {
+          "on_value": "\"On\" means",
+          "device_class": "Device class",
+          "name": "Name",
+          "remove": "Remove this entity"
+        }
+      },
+      "custom_backup": {
+        "title": "Backup and restore",
+        "description": "**Backup:** download {download} (link valid for 10 minutes). The file is deleted together with the integration entry, like the catalog, so keep a copy.\n\n**Restore:** upload a backup below and submit.\n\n**Edited the file?** It is `{path}`; submit without uploading to apply it.",
+        "data": {
+          "upload": "Backup file to restore (optional)"
+        }
+      },
+      "custom_climate": {
+        "title": "Thermostat",
+        "description": "Built from existing entities; it shows their states and sets them. The operating mode must be a select of this controller; the next step maps its values.",
+        "data": {
+          "name": "Name",
+          "target": "Setpoint (number)",
+          "mode": "Operating mode (select)",
+          "current": "Current temperature (optional, any temperature sensor)",
+          "heating": "Is heating (optional, binary sensor)",
+          "remove": "Remove this thermostat"
+        }
+      },
+      "custom_water_heater": {
+        "title": "Water heater",
+        "description": "Built from existing entities; it shows their states and sets them. An operating mode is optional; if you pick one, the next step maps its values.",
+        "data": {
+          "name": "Name",
+          "target": "Setpoint (number)",
+          "mode": "Operating mode (select, optional)",
+          "current": "Current temperature (optional, any temperature sensor)",
+          "remove": "Remove this water heater"
+        }
+      },
+      "custom_modes": {
+        "title": "Operating modes",
+        "description": "For each of the controller's modes, choose what it is in Home Assistant. Modes left on \"Not used\" are not offered."
+      },
+      "custom_write": {
+        "title": "Which mode to set",
+        "description": "Several of the controller's modes share one Home Assistant mode. Choose which one is set when you pick it.",
+        "data": {
+          "write_off": "Off sets",
+          "write_heat": "Heat sets",
+          "write_cool": "Cool sets",
+          "write_heat_cool": "Heat/cool sets",
+          "write_auto": "Auto (programme) sets",
+          "write_eco": "Eco sets",
+          "write_electric": "Electric sets",
+          "write_gas": "Gas sets",
+          "write_heat_pump": "Heat pump sets",
+          "write_high_demand": "High demand sets",
+          "write_performance": "Performance sets"
+        }
+      },
+      "custom_presets": {
+        "title": "Presets (optional)",
+        "description": "A preset is a button on the thermostat card for a special mode the controller has as a switch, for example party or economy mode. Choosing a preset turns its switch on and the others off; \"None\" turns them all off. Leave everything empty if you do not need presets.",
+        "data": {
+          "eco": "Eco",
+          "comfort": "Comfort",
+          "away": "Away",
+          "boost": "Boost"
+        },
+        "data_description": {
+          "eco": "For example economy mode",
+          "comfort": "For example a comfort setting",
+          "away": "For example holiday mode",
+          "boost": "For example party mode"
+        }
       }
+    },
+    "abort": {
+      "custom_saved": "Saved. The integration reloads to apply it.",
+      "custom_applied": "Applied: {count} custom entities. The integration reloads.",
+      "custom_applied_notes": "Applied: {count} custom entities. The integration reloads.\n\nNot used:\n\n{skipped}",
+      "custom_onoff_none": "There is no enabled value with two named states left that does not have an on/off entity.",
+      "custom_not_loaded": "The controller is not set up right now. Try again once it is running.",
+      "custom_empty": "There are no custom entities yet.",
+      "custom_rejected": "Not saved: {reason}"
+    },
+    "error": {
+      "custom_invalid": "This is not a custom entities file: it must be YAML with sections such as onoff:.",
+      "custom_mode_foreign": "Choose a select of this controller: its values are what the modes are mapped by.",
+      "custom_modes_empty": "Map at least one mode."
     }
   },
   "entity": {
@@ -143,6 +281,9 @@
     },
     "uncategorized": {
       "name": "Uncategorized"
+    },
+    "custom": {
+      "name": "Custom entities"
     }
   },
   "selector": {
@@ -155,6 +296,36 @@
         "fri": "Friday",
         "sat": "Saturday",
         "sun": "Sunday"
+      }
+    },
+    "onoff_device_class": {
+      "options": {
+        "none": "Generic (on/off)",
+        "running": "Running",
+        "power": "Power",
+        "heat": "Heat",
+        "problem": "Problem",
+        "opening": "Opening (open/closed)",
+        "moisture": "Moisture",
+        "connectivity": "Connectivity",
+        "switch": "Switch",
+        "outlet": "Outlet"
+      }
+    },
+    "custom_mode": {
+      "options": {
+        "unused": "Not used",
+        "off": "Off",
+        "heat": "Heat",
+        "cool": "Cool",
+        "heat_cool": "Heat/cool",
+        "auto": "Auto (programme)",
+        "eco": "Eco",
+        "electric": "Electric",
+        "gas": "Gas",
+        "heat_pump": "Heat pump",
+        "high_demand": "High demand",
+        "performance": "Performance"
       }
     }
   },
@@ -267,7 +438,10 @@
     "identify_found": "### System id {system_id}\nHardware {hardware}, software {software}. Build the catalog for that id.",
     "identify_found_f0": "### System id {system_id}\nHardware {hardware}, software {software}, identification extension {f0}. Build the catalog for that id.",
     "identify_failed": "The controller could not be asked which one it is. Check the port and the wiring, or carry on and build a catalog for all controllers.",
-    "identify_foreign": "### System id {system_id}\nThis controller speaks a protocol OptoV does not drive, so a catalog for it would not help. See docs/protocols.md."
+    "identify_foreign": "### System id {system_id}\nThis controller speaks a protocol OptoV does not drive, so a catalog for it would not help. See docs/protocols.md.",
+    "custom_kind_onoff": "on/off",
+    "custom_kind_climate": "thermostat",
+    "custom_kind_water_heater": "water heater"
   },
   "issues": {
     "catalog_behind": {

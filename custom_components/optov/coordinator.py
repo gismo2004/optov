@@ -50,6 +50,7 @@ from .conversions import (
     encode_day_schedule,
     parse_level,
 )
+from .custom_entities import onoff_unique_id
 from .decode import (
     byte_order,
     decode_date,
@@ -256,6 +257,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.client = client
         self.config_entry = config_entry
         self.profile: DeviceProfile | None = None
+        # Datapoints the user built a custom entity on. They are read even while their own
+        # entity is disabled, since the custom entity shows the same value.
+        self.custom_sources: set[str] = set()
+        self.custom_onoff: list[dict[str, Any]] = []
+        self.custom_climate: list[dict[str, Any]] = []
+        self.custom_water_heater: list[dict[str, Any]] = []
+        # False while the custom entities file exists but cannot be read; they are then kept.
+        self.custom_file_readable = True
         # The controller's catalog row and the probed rule inputs the profile was built from,
         # kept so the entity set for other options can be derived without probing again.
         self._dev: dict[str, Any] | None = None
@@ -573,6 +582,21 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if parent_dev:
             info["via_device_id"] = parent_dev.id
+        return info
+
+    def custom_unique_ids(self) -> set[str]:
+        """The unique ids of every custom entity the file currently defines."""
+        ids = {onoff_unique_id(self.stable_id, e["source"]) for e in self.custom_onoff}
+        ids |= {e["unique_id"] for e in self.custom_climate + self.custom_water_heater}
+        return ids
+
+    def get_custom_device_info(self) -> DeviceInfo | None:
+        """The sub-device holding the custom entities the user added, next to the circuits."""
+        info = self.get_unlisted_device_info()
+        if info is None:
+            return None
+        info["identifiers"] = {(DOMAIN, f"{self.stable_id}_custom")}
+        info["translation_key"] = "custom"
         return info
 
     def get_device_info(self, circuit: str | None = None) -> DeviceInfo | None:
@@ -995,7 +1019,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         registry rather than the static default: an entity the user switches on later starts
         being read at the next cycle, not at the next restart.
         """
-        if item.get("enabled_by_default", True):
+        if item.get("enabled_by_default", True) or item["id"] in self.custom_sources:
             return True
         registry = er.async_get(self.hass)
         unique_id = f"{self.stable_id}_{item['id']}"
