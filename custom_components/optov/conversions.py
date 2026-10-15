@@ -30,63 +30,30 @@ MINUTES_PER_DAY = 24 * 60
 #   bitmap   7 days x 24 bytes, four 2-bit levels per byte, one per quarter hour
 #
 # `colors` runs parallel to `levels`; the names are CSS colours.
+_PHASE2 = {
+    "format": "phase2",
+    "levels": [0, 1],
+    "colors": ["gray", "darkred"],
+    "default": 0,
+    "windows": 4,
+    "step": 10,
+}
+_FOUR_LEVELS = {
+    "levels": [0, 1, 2, 3],
+    "colors": ["gray", "darkblue", "darkred", "darkorange"],
+    "default": 0,
+    "windows": 8,
+}
+_PHASE3 = {"format": "phase3", **_FOUR_LEVELS, "step": 10}
+# Shared between numbers; read only, every consumer copies what it keeps.
 SCHEDULE_TYPES: dict[int, dict[str, Any]] = {
-    1: {
-        "format": "phase2",
-        "levels": [0, 1],
-        "colors": ["gray", "darkred"],
-        "default": 0,
-        "windows": 4,
-        "step": 10,
-    },
-    9: {
-        "format": "phase2",
-        "levels": [0, 1],
-        "colors": ["gray", "darkred"],
-        "default": 0,
-        "windows": 4,
-        "step": 10,
-    },
-    2: {
-        "format": "bitmap",
-        "levels": [0, 1, 2, 3],
-        "colors": ["gray", "darkblue", "darkred", "darkorange"],
-        "default": 0,
-        "windows": 8,
-        "step": 15,
-    },
-    5: {
-        "format": "phase3",
-        "levels": [0, 1, 2, 3],
-        "colors": ["gray", "darkblue", "darkred", "darkorange"],
-        "default": 0,
-        "windows": 8,
-        "step": 10,
-    },
-    6: {
-        "format": "phase3",
-        "levels": [0, 1, 2, 3],
-        "colors": ["gray", "darkblue", "darkred", "darkorange"],
-        "default": 0,
-        "windows": 8,
-        "step": 10,
-    },
-    7: {
-        "format": "phase3",
-        "levels": [0, 1, 2, 3],
-        "colors": ["gray", "darkblue", "darkred", "darkorange"],
-        "default": 0,
-        "windows": 8,
-        "step": 10,
-    },
-    8: {
-        "format": "phase3",
-        "levels": [0, 1, 2, 3],
-        "colors": ["gray", "darkblue", "darkred", "darkorange"],
-        "default": 0,
-        "windows": 8,
-        "step": 10,
-    },
+    1: _PHASE2,
+    9: _PHASE2,
+    2: {"format": "bitmap", **_FOUR_LEVELS, "step": 15},
+    5: _PHASE3,
+    6: _PHASE3,
+    7: _PHASE3,
+    8: _PHASE3,
     10: {
         "format": "phase3",
         "levels": [2, 3, 4],

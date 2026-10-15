@@ -21,6 +21,7 @@ Binary buffer layouts, as used by the controller families this integration suppo
 """
 
 import logging
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -54,6 +55,21 @@ def get_error_description(code_hex: str, error_codes: dict[str, str]) -> str:
     return f"0x{code_clean}"
 
 
+def _written_entries(
+    raw_bytes: bytes, entry_bytes: int, code_at: int
+) -> Iterator[tuple[int, bytes, str]]:
+    """Each written entry of a fault buffer: its index, its bytes and its code in hex.
+
+    A code of 0x00 ends the list; it is not a skippable gap, so everything after the first
+    empty slot is unwritten buffer, not more history.
+    """
+    for idx in range(len(raw_bytes) // entry_bytes):
+        entry_raw = raw_bytes[idx * entry_bytes : (idx + 1) * entry_bytes]
+        if entry_raw[code_at] == 0:
+            return
+        yield idx, entry_raw, f"{entry_raw[code_at]:02X}"
+
+
 def decode_wp_error_history(
     raw_bytes: bytes,
     entry_bytes: int = 8,
@@ -70,19 +86,7 @@ def decode_wp_error_history(
       first empty slot is unwritten buffer, not more history.
     """
     entries: list[dict[str, Any]] = []
-    if len(raw_bytes) < entry_bytes:
-        return entries
-
-    total_entries = len(raw_bytes) // entry_bytes
-    for idx in range(total_entries):
-        offset = idx * entry_bytes
-        entry_raw = raw_bytes[offset : offset + entry_bytes]
-
-        code_val = entry_raw[5]
-        if code_val == 0:
-            break  # end of written history
-
-        code_hex = f"{code_val:02X}"
+    for idx, entry_raw, code_hex in _written_entries(raw_bytes, entry_bytes, 5):
         ts_sec = int.from_bytes(entry_raw[1:5], "little", signed=False)
 
         timestamp_iso: str | None = None
@@ -126,17 +130,7 @@ def decode_boiler_error_history(
       (year = bytes 1+2, month = 3, day = 4, hour = 6, minute = 7, second = 8)
     """
     entries: list[dict[str, Any]] = []
-    total_entries = len(raw_bytes) // entry_bytes
-
-    for idx in range(total_entries):
-        offset = idx * entry_bytes
-        entry_raw = raw_bytes[offset : offset + entry_bytes]
-
-        code_val = entry_raw[0]
-        if code_val == 0:
-            break  # end of written history
-
-        code_hex = f"{code_val:02X}"
+    for idx, entry_raw, code_hex in _written_entries(raw_bytes, entry_bytes, 0):
         dt_str = decode_datetime_bcd(entry_raw[1:9])
         description = get_error_description(code_hex, error_codes)
 

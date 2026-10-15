@@ -8,7 +8,7 @@ Deliberately free of Home Assistant imports so the same logic can be exercised s
 against real hardware.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 try:
@@ -105,15 +105,25 @@ class DecodeError(ValueError):
     """Raised when raw bytes cannot be decoded as the catalog describes."""
 
 
+def _conv(conversion: str | None) -> str:
+    """A conversion name as the tables here key it."""
+    return (conversion or "").strip().lower()
+
+
+def _spec(parameter_type: str | None) -> Any:
+    """The width and sign of a declared parameter type, or None if it is not one."""
+    return _PARAM_TYPES.get((parameter_type or "").strip().lower())
+
+
 def is_signed(parameter_type: str | None) -> bool:
     """Whether a catalog ParameterType denotes a signed integer."""
-    spec = _PARAM_TYPES.get((parameter_type or "").strip().lower())
+    spec = _spec(parameter_type)
     return bool(spec and spec[1])
 
 
 def byte_order(parameter_type: str | None) -> str:
     """The order a value of this parameter type is stored in: "big" for *HighByteFirst."""
-    spec = _PARAM_TYPES.get((parameter_type or "").strip().lower())
+    spec = _spec(parameter_type)
     return "big" if spec and spec[2] else "little"
 
 
@@ -123,7 +133,7 @@ def raw_bounds(parameter_type: str | None) -> tuple[int, int]:
     For a setting the catalog states no limits for: what the wire allows is a better answer
     than a guessed one. The controller refuses whatever it does not want, and says so.
     """
-    spec = _PARAM_TYPES.get((parameter_type or "").strip().lower())
+    spec = _spec(parameter_type)
     width, signed = (spec[0], spec[1]) if spec else (16, False)
     if signed:
         return -(1 << (width - 1)), (1 << (width - 1)) - 1
@@ -135,7 +145,7 @@ def is_supported(conversion: str | None) -> bool:
 
     A datapoint with any other conversion would fail on every read, so it is not made an entity.
     """
-    conv = (conversion or "").strip().lower()
+    conv = _conv(conversion)
     return (
         conv in _PLAIN or conv in _DECODED or conv in DIVISORS or conv in _MULTIPLIERS
     )
@@ -147,7 +157,7 @@ def is_encodable(conversion: str | None) -> bool:
     Only then can a setting be offered as a number: the plain integer, a divisor, a multiplier
     and MultOffset. Anything else -- dates, addresses, byte strings -- stays a reading.
     """
-    conv = (conversion or "").strip().lower()
+    conv = _conv(conversion)
     return (
         conv in _PLAIN
         or conv in DIVISORS
@@ -163,7 +173,7 @@ def scale(
     offset: float | None = None,
 ) -> float:
     """A raw integer in the unit its conversion gives it; see is_encodable()."""
-    conv = (conversion or "").strip().lower()
+    conv = _conv(conversion)
     if conv in DIVISORS:
         return round(raw / DIVISORS[conv], 6)
     if conv in _MULTIPLIERS:
@@ -184,7 +194,7 @@ def unscale(
     offset: float | None = None,
 ) -> int:
     """The raw integer that scale() turns into `value`, rounded to the controller's grid."""
-    conv = (conversion or "").strip().lower()
+    conv = _conv(conversion)
     if conv in DIVISORS:
         return round(value * DIVISORS[conv])
     if conv in _MULTIPLIERS:
@@ -206,7 +216,7 @@ def decodes_to_number(conversion: str | None) -> bool:
     float are numbers. The BCD timestamps, dates, byte dumps, addresses and strings are not, and
     neither is a conversion this module does not implement, which never yields a value at all.
     """
-    conv = (conversion or "").strip().lower()
+    conv = _conv(conversion)
     return (
         conv in _PLAIN
         or conv in ("multoffset", "convert4bytestofloat")
@@ -217,7 +227,7 @@ def decodes_to_number(conversion: str | None) -> bool:
 
 def decodes_to_integer(conversion: str | None) -> bool:
     """Whether the number decode_value() produces for this conversion is always whole."""
-    conv = (conversion or "").strip().lower()
+    conv = _conv(conversion)
     return conv in _PLAIN or conv in _MULTIPLIERS
 
 
@@ -241,7 +251,7 @@ def decode_int(raw: bytes, parameter_type: str | None) -> int:
 
     An unknown or non-integer ParameterType falls back to plain unsigned little-endian.
     """
-    spec = _PARAM_TYPES.get((parameter_type or "").strip().lower())
+    spec = _spec(parameter_type)
     if spec is None:
         return int.from_bytes(raw[:4], "little", signed=False)
 
@@ -256,6 +266,16 @@ def decode_int(raw: bytes, parameter_type: str | None) -> int:
         if value >= 1 << (width - 1):
             value -= 1 << width
     return value
+
+
+def _check_bitfield(raw: bytes, bit_start: int, bit_length: int) -> None:
+    """The field has to lie inside the block."""
+    if bit_length <= 0:
+        raise DecodeError("bit_length must be positive")
+    if bit_start + bit_length > len(raw) * 8:
+        raise DecodeError(
+            f"bit-field {bit_start}+{bit_length} does not fit in {len(raw)} bytes"
+        )
 
 
 def extract_bitfield(raw: bytes, bit_start: int, bit_length: int) -> int:
@@ -275,12 +295,7 @@ def extract_bitfield(raw: bytes, bit_start: int, bit_length: int) -> int:
 
     `raw` must be the whole block (`BlockLength` bytes), not the sliced field.
     """
-    if bit_length <= 0:
-        raise DecodeError("bit_length must be positive")
-    if bit_start + bit_length > len(raw) * 8:
-        raise DecodeError(
-            f"bit-field {bit_start}+{bit_length} does not fit in {len(raw)} bytes"
-        )
+    _check_bitfield(raw, bit_start, bit_length)
 
     value = 0
     for k in range(bit_start, bit_start + bit_length):
@@ -297,12 +312,7 @@ def insert_bitfield(raw: bytes, bit_start: int, bit_length: int, value: int) -> 
     mode, party and eco all live in the same register -- so writing a bare value to that
     address would put the field in the wrong bits and clear its neighbours.
     """
-    if bit_length <= 0:
-        raise DecodeError("bit_length must be positive")
-    if bit_start + bit_length > len(raw) * 8:
-        raise DecodeError(
-            f"bit-field {bit_start}+{bit_length} does not fit in {len(raw)} bytes"
-        )
+    _check_bitfield(raw, bit_start, bit_length)
 
     out = bytearray(raw)
     for k in range(bit_length):
@@ -411,10 +421,9 @@ def decode_value(
     if conv == "daytodate":
         # DayToDate: zero-pad to 8 bytes, read as a 64-bit integer, add days to
         # 1970-01-01. The result is a date, not a scaled number.
-        from datetime import date, timedelta
 
         days = int.from_bytes(raw[:8], "little", signed=False)
-        return (date(1970, 1, 1) + timedelta(days=days)).isoformat()
+        return (_EPOCH + timedelta(days=days)).isoformat()
 
     if len(raw) > 4 and conv in _PLAIN:
         # Wider than any integer type: an identifier, shown as its bytes.
@@ -453,7 +462,7 @@ def _apply_enum(value: Any, enum: dict[Any, str] | None) -> Any:
 
 def is_date(conversion: str | None) -> bool:
     """Whether this conversion holds a calendar date that can be read and written as one."""
-    return (conversion or "").strip().lower() in _DATES
+    return _conv(conversion) in _DATES
 
 
 def decode_date(field: bytes, conversion: str | None) -> date | None:
@@ -465,7 +474,7 @@ def decode_date(field: bytes, conversion: str | None) -> date | None:
     """
     if not field or not any(field):
         return None
-    conv = (conversion or "").strip().lower()
+    conv = _conv(conversion)
     if conv == "daytodate":
         days = int.from_bytes(field[:8], "little", signed=False)
         try:
@@ -492,7 +501,7 @@ def encode_date(value: date, conversion: str | None, width: int) -> bytes:
     1 January 1970 is the date that reads back as "not set" (see decode_date), so it is
     written as not set too -- all zeros, in either form. That is how a holiday is cleared.
     """
-    conv = (conversion or "").strip().lower()
+    conv = _conv(conversion)
     if conv in _DATES and value == _EPOCH:
         return bytes(width)
     if conv == "daytodate":

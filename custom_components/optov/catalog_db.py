@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import sqlite3
+from collections import Counter
 from collections.abc import Callable
 from contextlib import closing, suppress
 from dataclasses import dataclass, field
@@ -218,11 +219,7 @@ _DIV_RATIOS = {"div2": 2.0, "div10": 10.0, "div100": 100.0, "div1000": 1000.0}
 
 def _culture_column(conn: sqlite3.Connection, culture: str | None) -> str:
     """A quoted `translations_p` column for a language, validated against the table itself."""
-    columns = {
-        r[1]
-        for r in conn.execute("PRAGMA table_info(translations_p)")
-        if r[1] != "text_key"
-    }
+    columns = set(_languages(conn))
     wanted = (culture or "en").strip().lower()
     if wanted not in columns:
         # English, then German, then whatever the catalog was built with: a catalog built for
@@ -242,6 +239,15 @@ def _text_join(
         f"LEFT JOIN translations_p {alias}_p ON {alias}_p.text_key = {key_expr} "
         f"LEFT JOIN strings {alias} ON {alias}.id = {alias}_p.{column}"
     )
+
+
+def _languages(conn: sqlite3.Connection) -> list[str]:
+    """The catalog's languages: the columns of its translation table."""
+    return [
+        r[1]
+        for r in conn.execute("PRAGMA table_info(translations_p)")
+        if r[1] != "text_key"
+    ]
 
 
 def _text(conn: sqlite3.Connection, culture: str | None, key: str | None) -> str | None:
@@ -303,11 +309,7 @@ def list_catalogs(config_dir: str) -> list[dict[str, Any]]:
         try:
             with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
                 devices = conn.execute("SELECT count(*) FROM devices").fetchone()[0]
-                languages = [
-                    r[1]
-                    for r in conn.execute("PRAGMA table_info(translations_p)")
-                    if r[1] != "text_key"
-                ]
+                languages = _languages(conn)
                 version = _schema_version(conn)
         except sqlite3.DatabaseError:
             continue
@@ -380,7 +382,7 @@ def install_catalog(source: str, config_dir: str, filename: str | None = None) -
             _unpack_to(source, candidate)
         else:
             shutil.copyfile(source, candidate)
-        _verify(candidate)
+        check_catalog(candidate)
         _settle_journal(candidate)
         os.replace(candidate, target)
     _LOGGER.info(
@@ -419,8 +421,12 @@ def _catalog_name(filename: str) -> str:
     return name
 
 
-def _verify(path: str) -> int:
+def check_catalog(path: str) -> int:
     """Raise unless this is a controller catalog this code can read; else its structure version.
+
+    Blocking I/O; use an executor. Installing checks too, but a catalog can also be copied in
+    by hand and an integration update can move the goalposts under one that was fine yesterday,
+    so it is checked again every time an entry starts.
 
     ValueError for something that is not a catalog at all, CatalogSchemaError for one that is
     but was built to a different structure. The caller tells them apart to say something
@@ -484,28 +490,13 @@ def catalog_info(path: str) -> dict[str, Any]:
     with closing(get_db_connection(path)) as conn:
         meta = dict(conn.execute("SELECT key, value FROM catalog_meta").fetchall())
         controllers = conn.execute("SELECT count(*) FROM devices").fetchone()[0]
-        languages = sorted(
-            r[1]
-            for r in conn.execute("PRAGMA table_info(translations_p)")
-            if r[1] != "text_key"
-        )
+        languages = sorted(_languages(conn))
     return {
         "file": os.path.basename(path),
         "meta": meta,
         "controllers": controllers,
         "languages": languages,
     }
-
-
-def check_catalog(path: str) -> int:
-    """Raise if this catalog cannot be read by this code; else return its structure version.
-
-    Blocking I/O; use an executor. Installing verifies too, but a catalog can also be copied in
-    by hand and an integration update can move the goalposts under one that was fine yesterday,
-    so it is checked again every time an entry starts. The version comes back so the caller can
-    say when a readable catalog is behind.
-    """
-    return _verify(path)
 
 
 def _settle_journal(path: str) -> None:
@@ -567,8 +558,7 @@ def get_available_languages(db_path: str) -> list[str]:
     """The language codes the catalog carries text in."""
     try:
         with closing(get_db_connection(db_path)) as conn:
-            columns = [r[1] for r in conn.execute("PRAGMA table_info(translations_p)")]
-            return sorted(c for c in columns if c != "text_key") or ["de", "en"]
+            return sorted(_languages(conn)) or ["de", "en"]
     except Exception as err:
         _LOGGER.debug("Could not read available languages from db: %s", err)
         return ["de", "en"]
@@ -693,6 +683,13 @@ def get_device_by_system_id(
         return {"id": row["id"], "model": row["model"]}
 
 
+# What reading a rule input takes: where it is, how it is cut out of its block, how it is read.
+_PROBE_COLUMNS = (
+    "dp.id, dp.address, dp.byte_length, dp.block_length, dp.byte_position, dp.bit_start, "
+    "dp.bit_length, dp.parameter_type, dp.name, dp.fc_read, dp.prefix_read"
+)
+
+
 def get_probe_targets(device_id: int, db_path: str) -> list[dict[str, Any]]:
     """Return distinct equipment configuration registers for self-configuration probe.
 
@@ -701,9 +698,7 @@ def get_probe_targets(device_id: int, db_path: str) -> list[dict[str, Any]]:
     """
     with closing(get_db_connection(db_path)) as conn:
         rows = conn.execute(
-            """SELECT DISTINCT dp.id, dp.address, dp.byte_length, dp.block_length,
-                      dp.byte_position, dp.bit_start, dp.bit_length, dp.parameter_type,
-                      dp.name, dp.fc_read, dp.prefix_read
+            f"""SELECT DISTINCT {_PROBE_COLUMNS}
                FROM display_conditions dc
                JOIN datapoints dp
                  ON dc.condition_event_type_id = dp.id AND dp.device_id = dc.device_id
@@ -721,9 +716,7 @@ def get_probe_targets(device_id: int, db_path: str) -> list[dict[str, Any]]:
             if local_id in targets:
                 continue
             row = conn.execute(
-                """SELECT dp.id, dp.address, dp.byte_length, dp.block_length,
-                          dp.byte_position, dp.bit_start, dp.bit_length, dp.parameter_type,
-                          dp.name, dp.fc_read, dp.prefix_read
+                f"""SELECT {_PROBE_COLUMNS}
                    FROM datapoints dp WHERE dp.device_id = ? AND dp.id = ?""",
                 (device_id, local_id),
             ).fetchone()
@@ -1633,6 +1626,8 @@ def _place_datapoint(
     sensor_category = "diagnostic" if entity_category == "config" else entity_category
     if unlisted:
         sensor_category = None
+    # The base set: what the controller itself puts in front of its user.
+    base = ((in_overview or in_trend) and is_measurement) or in_operation
 
     entry: dict[str, Any] = {
         "id": _slug(dp["name"]),
@@ -1668,19 +1663,14 @@ def _place_datapoint(
         "tier": tier,
         # The controller's own words for this datapoint, shown as a state attribute.
         "description": _description(dp),
-        # Base set: what the controller itself puts in front of its user. Plus whichever
-        # optional tiers the options have switched on, so diagnostics or coding channels
-        # can be brought in for a debugging session and dropped again afterwards.
-        "enabled_by_default": (
-            ((in_overview or in_trend) and is_measurement)
-            or in_operation
-            or (tier in inputs.active_tiers)
-        ),
-        # The base set is what the controller itself puts in front of its user. It is kept
-        # separate from enabled_by_default because the poll scheduler treats it differently:
+        # Enabled: the base set, plus whichever optional tiers the options have switched on,
+        # so diagnostics or coding channels can be brought in for a debugging session and
+        # dropped again afterwards.
+        "enabled_by_default": base or tier in inputs.active_tiers,
+        # Kept apart from enabled_by_default because the poll scheduler treats it differently:
         # base values are read every cycle, anything an optional tier added rotates through
         # the leftover bus budget.
-        "base": ((in_overview or in_trend) and is_measurement) or in_operation,
+        "base": base,
     }
     if entity_category:
         entry["entity_category"] = entity_category
@@ -1862,12 +1852,7 @@ def _drop_unlisted_repeats(profile: dict[str, Any]) -> None:
             and inner[3] + inner[4] <= outer[3] + outer[4]
         )
 
-    shown = [
-        span(e)
-        for plat in _ENTITY_PLATFORMS
-        for e in profile.get(plat, [])
-        if not e.get("unlisted")
-    ]
+    shown = [span(e) for e in _entries(profile) if not e.get("unlisted")]
     for plat in _ENTITY_PLATFORMS:
         kept = []
         for e in profile.get(plat, []):
@@ -1878,6 +1863,11 @@ def _drop_unlisted_repeats(profile: dict[str, Any]) -> None:
                 shown.append(mine)
             kept.append(e)
         profile[plat] = kept
+
+
+def _entries(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every entity entry of a profile under construction, in platform order."""
+    return [e for plat in _ENTITY_PLATFORMS for e in profile.get(plat, [])]
 
 
 def _disambiguate_names(profile: dict[str, Any]) -> None:
@@ -1895,7 +1885,7 @@ def _disambiguate_names(profile: dict[str, Any]) -> None:
     Datapoints the menus do not list take no part in that: they must not rename a controller
     entity that had its name long before they were offered. They carry their address instead.
     """
-    everything = [e for plat in _ENTITY_PLATFORMS for e in profile.get(plat, [])]
+    everything = _entries(profile)
     entries = [e for e in everything if not e.get("unlisted")]
     by_name: dict[str, list[dict[str, Any]]] = {}
     for entry in entries:
@@ -1924,9 +1914,7 @@ def _disambiguate_names(profile: dict[str, Any]) -> None:
             )
             if label:
                 entry["name"] = f"{name} · {label}"
-    counts: dict[str, int] = {}
-    for entry in entries:
-        counts[entry["name"]] = counts.get(entry["name"], 0) + 1
+    counts = Counter(entry["name"] for entry in entries)
     for entry in entries:
         if counts[entry["name"]] > 1:
             entry["name"] = f"{entry['name']} · {entry['address']}"
@@ -1936,9 +1924,7 @@ def _disambiguate_names(profile: dict[str, Any]) -> None:
     for e in unlisted:
         e["name"] = f"{e['name']} · {e['address']}"
     taken = {e["name"] for e in entries}
-    seen: dict[str, int] = {}
-    for e in unlisted:
-        seen[e["name"]] = seen.get(e["name"], 0) + 1
+    seen = Counter(e["name"] for e in unlisted)
     for e in unlisted:
         if e["name"] in taken or seen[e["name"]] > 1:
             e["name"] = f"{e['name']}/{e.get('byte_position') or 0}"
@@ -1948,10 +1934,8 @@ def _disambiguate_names(profile: dict[str, Any]) -> None:
 
 def _dedupe_ids(profile: dict[str, Any]) -> None:
     """Two datapoints with one name: both ids get their address appended."""
-    all_entries = [e for plat in _ENTITY_PLATFORMS for e in profile.get(plat, [])]
-    counts: dict[str, int] = {}
-    for entry in all_entries:
-        counts[entry["id"]] = counts.get(entry["id"], 0) + 1
+    all_entries = _entries(profile)
+    counts = Counter(entry["id"] for entry in all_entries)
     for entry in all_entries:
         if counts[entry["id"]] > 1:
             entry["id"] = f"{entry['id']}_{entry['address'].lower().replace('0x', '')}"
@@ -1959,12 +1943,7 @@ def _dedupe_ids(profile: dict[str, Any]) -> None:
 
 def _active_circuits(profile: dict[str, Any], inputs: _ProfileInputs) -> dict[str, str]:
     """Only the circuits that have entities and are not hidden."""
-    active = {
-        e["circuit"]
-        for plat in _ENTITY_PLATFORMS
-        for e in profile.get(plat, [])
-        if e.get("circuit")
-    }
+    active = {e["circuit"] for e in _entries(profile) if e.get("circuit")}
     return {
         k: v
         for k, v in inputs.circuits.items()
