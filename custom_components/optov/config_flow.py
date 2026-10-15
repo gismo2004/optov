@@ -104,7 +104,15 @@ from .translate import async_ui_text
 _LOGGER = logging.getLogger(__name__)
 
 CONF_CATALOG_FILE = "catalog_file"
+# Seconds between two poll cycles, as the setup and the settings take it.
+_SCAN_INTERVAL = vol.All(int, vol.Range(min=5, max=600))
 CONF_DELETE = "delete"
+
+
+async def _async_catalog_languages(hass: HomeAssistant, catalog: str | None) -> list:
+    """The languages a catalog carries text in, which are the ones it can be shown in."""
+    path = os.path.join(hass.config.path(DOMAIN), catalog or "")
+    return await hass.async_add_executor_job(get_available_languages, path)
 
 
 def _install_upload(
@@ -155,8 +163,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         Which languages are on offer is a property of the catalog, not of the integration: a
         catalog built for two languages can only be shown in those two.
         """
-        path = os.path.join(self.hass.config.path(DOMAIN), self._catalog or "")
-        return await self.hass.async_add_executor_job(get_available_languages, path)
+        return await _async_catalog_languages(self.hass, self._catalog)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -209,7 +216,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(
                     CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
-                ): vol.All(int, vol.Range(min=5, max=600)),
+                ): _SCAN_INTERVAL,
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
@@ -465,6 +472,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> vol.Schema:
         """The form: pick from what is here, upload, and when reconfiguring, tick to delete."""
         schema: dict[Any, Any] = {}
+        labels = {c["name"]: await self._async_catalog_label(c) for c in catalogs}
         if catalogs:
             names = [c["name"] for c in catalogs]
             current = (
@@ -473,10 +481,8 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
                 else None
             )
             options = [
-                SelectOptionDict(
-                    value=c["name"], label=await self._async_catalog_label(c)
-                )
-                for c in catalogs
+                SelectOptionDict(value=name, label=label)
+                for name, label in labels.items()
             ]
             default = current if current in names else names[0]
             schema[vol.Optional(CONF_CATALOG, default=default)] = SelectSelector(
@@ -490,7 +496,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._reconfiguring and catalogs:
             deletable = []
             for c in catalogs:
-                label = await self._async_catalog_label(c)
+                label = labels[c["name"]]
                 if c["name"] in users:
                     in_use = await async_ui_text(
                         self.hass,
@@ -659,7 +665,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_SCAN_INTERVAL,
                     default=given.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-                ): vol.All(int, vol.Range(min=5, max=600)),
+                ): _SCAN_INTERVAL,
             }
         )
         return self.async_show_form(step_id="manual", data_schema=schema)
@@ -731,46 +737,28 @@ class OptoVOptionsFlow(OptionsFlow):
         # Entries created before language and interval moved into options carry them in data.
         language = option(self.config_entry, CONF_LANGUAGE, DEFAULT_LANGUAGE)
         interval = option(self.config_entry, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-        languages = await self.hass.async_add_executor_job(
-            get_available_languages,
-            os.path.join(
-                self.hass.config.path(DOMAIN),
-                self.config_entry.data.get(CONF_CATALOG, ""),
-            ),
+        languages = await _async_catalog_languages(
+            self.hass, self.config_entry.data.get(CONF_CATALOG)
         )
-        schema = vol.Schema(
-            {
-                vol.Optional(CONF_LANGUAGE, default=language): vol.In(languages),
-                vol.Optional(
-                    CONF_ENABLE_DIAGNOSTICS,
-                    default=current.get(
-                        CONF_ENABLE_DIAGNOSTICS, DEFAULT_ENABLE_DIAGNOSTICS
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_COMMISSIONING,
-                    default=current.get(
-                        CONF_ENABLE_COMMISSIONING, DEFAULT_ENABLE_COMMISSIONING
-                    ),
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_CODING2,
-                    default=current.get(CONF_ENABLE_CODING2, DEFAULT_ENABLE_CODING2),
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_EXPERT,
-                    default=current.get(CONF_ENABLE_EXPERT, DEFAULT_ENABLE_EXPERT),
-                ): bool,
-                vol.Optional(CONF_SCAN_INTERVAL, default=interval): vol.All(
-                    int, vol.Range(min=5, max=600)
-                ),
-                vol.Optional(
-                    CONF_SYNC_CLOCK,
-                    default=current.get(CONF_SYNC_CLOCK, DEFAULT_SYNC_CLOCK),
-                ): bool,
-            }
-        )
-        return self.async_show_form(step_id="settings", data_schema=schema)
+        schema: dict[Any, Any] = {
+            vol.Optional(CONF_LANGUAGE, default=language): vol.In(languages)
+        }
+        # The optional tiers, in the order the form shows them.
+        for key, default in (
+            (CONF_ENABLE_DIAGNOSTICS, DEFAULT_ENABLE_DIAGNOSTICS),
+            (CONF_ENABLE_COMMISSIONING, DEFAULT_ENABLE_COMMISSIONING),
+            (CONF_ENABLE_CODING2, DEFAULT_ENABLE_CODING2),
+            (CONF_ENABLE_EXPERT, DEFAULT_ENABLE_EXPERT),
+        ):
+            schema[vol.Optional(key, default=current.get(key, default))] = bool
+        schema[vol.Optional(CONF_SCAN_INTERVAL, default=interval)] = _SCAN_INTERVAL
+        schema[
+            vol.Optional(
+                CONF_SYNC_CLOCK,
+                default=current.get(CONF_SYNC_CLOCK, DEFAULT_SYNC_CLOCK),
+            )
+        ] = bool
+        return self.async_show_form(step_id="settings", data_schema=vol.Schema(schema))
 
     # --- Custom entities (custom_entities.py). They live in a file next to the catalog; every
     # change here rewrites that file and reloads the entry, which builds the entities from it.

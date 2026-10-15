@@ -314,6 +314,11 @@ async def async_remove_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) ->
             _LOGGER.warning("Could not delete %s of the removed entry: %s", target, err)
 
 
+def _is_card_resource(item: dict[str, Any]) -> bool:
+    """Whether a dashboard resource is the cards' file, whatever version it was added at."""
+    return str(item.get("url", "")).split("?")[0] == CARD_URL
+
+
 def _catalog_issue_id(entry: OptolinkConfigEntry) -> str:
     return f"catalog_behind_{entry.entry_id}"
 
@@ -767,11 +772,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
         try:
             await resources.async_get_info()  # loads the collection from storage
             ours = next(
-                (
-                    item
-                    for item in resources.async_items()
-                    if str(item.get("url", "")).split("?")[0] == CARD_URL
-                ),
+                (item for item in resources.async_items() if _is_card_resource(item)),
                 None,
             )
             if ours is None:
@@ -810,7 +811,7 @@ async def _async_remove_card_resource(hass: HomeAssistant) -> None:
     try:
         await resources.async_get_info()
         for item in list(resources.async_items()):
-            if str(item.get("url", "")).split("?")[0] == CARD_URL:
+            if _is_card_resource(item):
                 await resources.async_delete_item(item["id"])
                 _LOGGER.info("Removed the dashboard resource of the cards")
     except Exception as err:
