@@ -1245,7 +1245,14 @@ class OptoVOptionsFlow(OptionsFlow):
             vol.Optional(
                 name, description={"suggested_value": before.get(name)}
             ): EntitySelector(
-                EntitySelectorConfig(integration=DOMAIN, domain=["switch", "select"])
+                # Any switch, a template switch included; a select only of this controller,
+                # since its "on" value comes from the catalog.
+                EntitySelectorConfig(
+                    filter=[
+                        {"domain": "switch"},
+                        {"integration": DOMAIN, "domain": "select"},
+                    ]
+                )
             )
             for name in PRESETS_OFFERED
         }

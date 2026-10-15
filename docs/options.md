@@ -52,11 +52,11 @@ used" are not offered. Where several share one, for example two that both mean o
 which one is set. Only Home Assistant's own features are used, each mapped to an entity: target
 and current temperature, operating mode, on/off from the same mapping, and for a thermostat
 whether it is heating. A thermostat can also take **presets**, the buttons Home Assistant shows
-as Eco, Comfort, Away and Boost: give each one a switch or an on/off setting of the controller,
-for example party mode for Boost. Choosing a preset turns its entity on and the other presets
-off; "None" turns them all off. The new entity shows the states of the entities it was built
-from and sets them the same way as when they are changed directly; it does not regulate anything
-itself.
+as Eco, Comfort, Away and Boost: give each one any switch (a template switch too) or an on/off
+setting of the controller, for example party mode for Boost. Choosing a preset turns its entity
+on and the other presets off; "None" turns them all off. The new entity shows the states of the
+entities it was built from and sets them the same way as when they are changed directly; it does
+not regulate anything itself.
 
 ### Backup and restore
 

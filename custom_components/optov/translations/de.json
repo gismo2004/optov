@@ -187,7 +187,7 @@
       },
       "custom_presets": {
         "title": "Voreinstellungen (optional)",
-        "description": "Eine Voreinstellung ist eine Schaltfläche auf der Thermostat-Karte für eine Sonderbetriebsart, die die Steuerung als Schalter hat, zum Beispiel Party- oder Sparbetrieb. Eine Voreinstellung wählen schaltet ihren Schalter ein und die anderen aus; „Keine“ schaltet alle aus. Lass alles leer, wenn du keine Voreinstellungen brauchst.",
+        "description": "Eine Voreinstellung ist eine Schaltfläche auf der Thermostat-Karte für eine Sonderbetriebsart, zum Beispiel Party- oder Sparbetrieb: ein beliebiger Schalter oder eine Ein/Aus-Einstellung dieser Steuerung. Eine Voreinstellung wählen schaltet ihren Schalter ein und die anderen aus; „Keine“ schaltet alle aus. Lass alles leer, wenn du keine Voreinstellungen brauchst.",
         "data": {
           "eco": "Eco",
           "comfort": "Komfort",

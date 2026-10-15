@@ -10,6 +10,13 @@ commits.
 
 ## [Unreleased]
 
+### Changed
+- A thermostat's presets can be any switch, a template switch included, also in the dialog.
+
+### Fixed
+- A custom water heater showed its setpoint with a decimal (51.0) although it is set in whole
+  degrees.
+
 ## [0.9.0] - 2026-10-15
 
 ### Added

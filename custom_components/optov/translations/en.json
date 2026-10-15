@@ -187,7 +187,7 @@
       },
       "custom_presets": {
         "title": "Presets (optional)",
-        "description": "A preset is a button on the thermostat card for a special mode the controller has as a switch, for example party or economy mode. Choosing a preset turns its switch on and the others off; \"None\" turns them all off. Leave everything empty if you do not need presets.",
+        "description": "A preset is a button on the thermostat card for a special mode, for example party or economy mode: any switch, or an on/off setting of this controller. Choosing a preset turns its switch on and the others off; \"None\" turns them all off. Leave everything empty if you do not need presets.",
         "data": {
           "eco": "Eco",
           "comfort": "Comfort",

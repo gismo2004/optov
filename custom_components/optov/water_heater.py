@@ -74,6 +74,10 @@ class OptolinkCustomWaterHeater(AssembledEntity, WaterHeaterEntity):
         self._attr_supported_features = features
 
     @property
+    def target_temperature_step(self) -> float | None:
+        return self.target_step
+
+    @property
     def current_operation(self) -> str | None:
         # A water heater's state is its operation. Without a mode select there is none to
         # report, and "unknown" would read like a fault; it is simply running.
