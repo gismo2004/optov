@@ -214,6 +214,8 @@ KW_IDLE = 0.4
 # A KW answer has no header to recognise and no checksum to check -- there is nothing to wait for
 # but the byte count, so waiting long buys nothing and costs a cycle.
 KW_TIMEOUT = 1.0
+# How long a P300 controller may take for each part of its answer (ACK, header, body).
+P300_TIMEOUT = 2.5
 
 
 def _reason(err: BaseException) -> str:
@@ -320,6 +322,30 @@ class _Link(asyncio.Protocol):
 # catalog's `mapping_type` for the datapoint; the numbers are the catalog's own.
 _STEP_PER_RECORD_TYPES = {2}
 _STEP_PER_THREE_BYTES_TYPES = {5, 6, 7, 8}
+
+
+def _record_address(base: int, index: int, record_size: int, step_bytes: int) -> int:
+    """Where record `index` of a block datapoint sits; the address advances per `step_bytes`.
+
+    Reads and writes of a weekly programme both go through here, so they address the same
+    records.
+    """
+    return base + index * record_size // step_bytes
+
+
+def _day_records(day_index: int, day_bytes: int, record_size: int) -> range:
+    """The record indexes that hold one day of a weekly programme."""
+    per_day = day_bytes // record_size
+    return range(day_index * per_day, (day_index + 1) * per_day)
+
+
+def _header(msgid: int, function_code: int, address: int, data_length: int) -> bytes:
+    """The five bytes before the data: message id, function code, address, data length."""
+    return (
+        bytes([msgid, function_code])
+        + (address & 0xFFFF).to_bytes(2, "big")
+        + bytes([data_length])
+    )
 
 
 def address_step_bytes(mapping_type: int | None, record_size: int) -> int:
@@ -464,7 +490,7 @@ class OptolinkClient:
         while not self.rx_queue.empty():
             self.rx_queue.get_nowait()
 
-    async def _read_exact(self, count: int, timeout: float = 3.0) -> bytes:
+    async def _read_exact(self, count: int, timeout: float) -> bytes:
         buf = bytearray()
         for _ in range(count):
             b = await asyncio.wait_for(self.rx_queue.get(), timeout=timeout)
@@ -656,18 +682,7 @@ class OptolinkClient:
         if not 0 <= data_length <= 0xFF:
             raise ValueError(f"DataLength {data_length} does not fit in one byte")
 
-        payload = (
-            bytes(
-                [
-                    0x00,
-                    function_code,
-                    (address >> 8) & 0xFF,
-                    address & 0xFF,
-                    data_length,
-                ]
-            )
-            + data
-        )
+        payload = _header(0x00, function_code, address, data_length) + data
         t_len = len(payload)
         chk = calc_checksum(bytes([t_len]) + payload)
         tx = bytes([START_BYTE, t_len]) + payload + bytes([chk])
@@ -678,20 +693,20 @@ class OptolinkClient:
         # The controller acknowledges the telegram before answering it. A NACK immediately
         # followed by an ACK is tolerated rather than treated as a hard failure -- a resync
         # costs seconds and is not warranted here.
-        ack = await self._read_exact(1, timeout=2.5)
+        ack = await self._read_exact(1, timeout=P300_TIMEOUT)
         if ack[0] == NACK:
-            ack = await self._read_exact(1, timeout=2.5)
+            ack = await self._read_exact(1, timeout=P300_TIMEOUT)
         if ack[0] != ACK:
             raise OptolinkProtocolError(
                 f"controller did not ACK telegram: 0x{ack[0]:02X}"
             )
 
-        hdr = await self._read_exact(2, timeout=2.5)
+        hdr = await self._read_exact(2, timeout=P300_TIMEOUT)
         if hdr[0] != START_BYTE:
             raise OptolinkProtocolError(f"invalid response header: 0x{hdr[0]:02X}")
         resp_len = hdr[1]
 
-        body = await self._read_exact(resp_len + 1, timeout=2.5)
+        body = await self._read_exact(resp_len + 1, timeout=P300_TIMEOUT)
         resp_payload, resp_chk = body[:-1], body[-1]
 
         if resp_chk != calc_checksum(bytes([resp_len]) + resp_payload):
@@ -761,21 +776,16 @@ class OptolinkClient:
 
         self._flush_rx()
         self._transport.write(
-            bytes([kw_fc, (address >> 8) & 0xFF, address & 0xFF, data_length]) + data
+            bytes([kw_fc])
+            + (address & 0xFFFF).to_bytes(2, "big")
+            + bytes([data_length])
+            + data
         )
         # A write is acknowledged with one byte whose value says nothing; that it arrived at all
         # is the acknowledgement.
         answer = await self._read_exact(1 if data else data_length, timeout=KW_TIMEOUT)
         self._last_kw_tx = loop.time()
-        header = bytes(
-            [
-                MSGID_RESPONSE,
-                function_code,
-                (address >> 8) & 0xFF,
-                address & 0xFF,
-                data_length,
-            ]
-        )
+        header = _header(MSGID_RESPONSE, function_code, address, data_length)
         return header + (b"" if data else answer)
 
     async def _transact_retry(
@@ -802,16 +812,16 @@ class OptolinkClient:
                     return await self._transact(
                         function_code, address, data_length, data
                     )
-                except OptolinkDeviceError:
-                    # The controller answered correctly; it just refused this address. The
-                    # link is healthy, so do NOT drop P300 sync and do NOT retry -- a resync
-                    # costs several seconds and cannot change a definitive negative answer.
-                    raise
-                except (OptolinkNotConnected, OptolinkControllerSilent):
-                    # Closed on purpose, the node away and not due another attempt, or a
-                    # controller that sends nothing at all: asking again straight away cannot
-                    # give a different answer, and a second silent handshake would only double
-                    # the wait.
+                except (
+                    OptolinkDeviceError,
+                    OptolinkNotConnected,
+                    OptolinkControllerSilent,
+                ):
+                    # Answers a retry cannot change. A device error is the controller
+                    # refusing this address over a healthy link, so sync is kept: a resync
+                    # costs several seconds. Not connected is closed on purpose or the node
+                    # away and not due another attempt; a silent controller sends nothing at
+                    # all, and a second silent handshake would only double the wait.
                     raise
                 except (TimeoutError, ConnectionError, OptolinkProtocolError) as err:
                     _LOGGER.warning(
@@ -986,8 +996,11 @@ class OptolinkClient:
         """Some records of a block datapoint, one telegram each; see read_block()."""
         result = bytearray()
         for index in indexes:
-            offset = index * record_size // step_bytes
-            chunk = await self.read_raw(address + offset, record_size, fc)
+            chunk = await self.read_raw(
+                _record_address(address, index, record_size, step_bytes),
+                record_size,
+                fc,
+            )
             if len(chunk) != record_size:
                 raise OptolinkProtocolError(
                     f"0x{address:04X} record {index}: asked for {record_size} bytes, "
@@ -1065,11 +1078,10 @@ class OptolinkClient:
         for day_idx in day_indexes:
             if block_length and block_factor:
                 record_size = block_length // block_factor
-                per_day = day_bytes // record_size
                 raw = await self.read_records(
                     base_address,
                     record_size,
-                    range(day_idx * per_day, (day_idx + 1) * per_day),
+                    _day_records(day_idx, day_bytes, record_size),
                     step_bytes,
                     fc,
                 )
@@ -1119,13 +1131,9 @@ class OptolinkClient:
             raise ValueError(
                 f"day of {day_bytes} bytes is not a whole number of {record_size}-byte records"
             )
-        records_per_day = day_bytes // record_size
-        first = day_index * records_per_day
-        for i in range(records_per_day):
-            index = first + i
-            record_offset = index * record_size // step_bytes
+        for i, index in enumerate(_day_records(day_index, day_bytes, record_size)):
             await self.write_raw(
-                base_address + record_offset,
+                _record_address(base_address, index, record_size, step_bytes),
                 raw_data[i * record_size : (i + 1) * record_size],
                 fc,
             )
