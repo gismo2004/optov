@@ -54,9 +54,11 @@ every poll, and the drift is what you would look at. The controller's time is no
 **Fault history.** The controller's own fault buffer, decoded with the fault texts of your
 exact controller family. Boilers with a burner automat get a second sensor for the automat's
 own fault records, with the texts of the automat that is actually fitted; the fault-history card
-lists both. The fault history is read on startup and refreshed in the background
-every **15 minutes** (every 60 poll cycles at the default 15 s interval).
+lists both. The whole history is read on startup; after that only its newest entry is checked,
+every 4 poll cycles (**about once a minute** at the default 15 s interval), and the history is
+read again when that entry changed. A new entry also fires the fault event entity.
 
-**Schedules.** Weekly programmes are read on startup and refreshed in the background every
-**30 minutes** (every 120 poll cycles at the default 15 s interval). When a schedule is changed
-from a dashboard card or service, the updated programme is read back immediately.
+**Schedules.** Weekly programmes are read once on startup. They change almost only through this
+integration, so they are not read periodically: a change from a dashboard card or action first
+checks the programme on the controller, and the card's refresh button or the `read_schedule`
+action reads it again on request.
