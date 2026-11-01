@@ -111,6 +111,24 @@ def test_a_multiplied_setting_takes_its_limits_in_the_shown_unit():
     assert (number["min"], number["max"], number["step"]) == (0, 1275, 5)
 
 
+def test_a_setting_in_tenths_can_be_set_in_tenths():
+    placed = _placed(
+        {
+            "entity_kind": catalog_db.KIND_WRITABLE,
+            "fc_write": "Virtual_WRITE",
+            "conversion": "Div10",
+            "min_value": 0,
+            "max_value": 35,
+            "stepping": 1.0,
+            "parameter_type": "SInt",
+            "byte_length": 2,
+            "block_length": 2,
+        }
+    )
+    number = placed["numbers"][0]
+    assert (number["step"], number["setpoint_step"]) == (0.1, 1.0)
+
+
 def test_an_address_setting_is_shown_not_set():
     placed = _placed(
         {

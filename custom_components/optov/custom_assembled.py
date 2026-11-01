@@ -108,7 +108,7 @@ class AssembledEntity(Entity):
 
     @property
     def target_step(self) -> float:
-        return self._target_attr("step", 1)
+        return self._target_attr("setpoint_step", self._target_attr("step", 1))
 
     @property
     def current_mode(self) -> str | None:

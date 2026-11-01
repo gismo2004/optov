@@ -10,6 +10,10 @@ commits.
 
 ## [Unreleased]
 
+### Fixed
+- Settings kept in tenths can be set in tenths. A heating curve slope offered only whole numbers, so
+  0.5 showed as 1 and any change wrote 0 or 1.
+
 ## [0.9.1] - 2026-10-15
 
 ### Changed

@@ -1128,7 +1128,7 @@ def _description(dp: dict[str, Any]) -> str | None:
 def _number_limits(dp: dict[str, Any]) -> dict[str, Any]:
     """What a writable number may be set to, and in what steps, in the unit it is shown in.
 
-    The catalog's own limits where it states them; they are in that unit already. Where it does
+    The catalog's own limits where it states them. Where it does
     not -- and it does not for well over a third of this family's settings -- the datapoint
     itself answers: its parameter type's width and sign give the raw range, and the conversion
     turns that range and one raw step into the shown unit. Inventing a range instead refuses
@@ -1148,10 +1148,14 @@ def _number_limits(dp: dict[str, Any]) -> dict[str, Any]:
     )
     limits.setdefault("min", ends[0])
     limits.setdefault("max", ends[1])
-    limits.setdefault(
-        "step",
-        abs(scale(1, conv, factor, offset) - scale(0, conv, factor, offset)) or 1,
-    )
+    raw_step = abs(scale(1, conv, factor, offset) - scale(0, conv, factor, offset)) or 1
+    stated = limits.get("step", raw_step)
+    # The vendor's own tool never applies this step: it offers a free field checked against the
+    # limits only, and a value kept in tenths takes decimals (a slope has step 1 and default 0.6).
+    # So the number takes one raw step; a setpoint keeps the stated one for thermostat controls.
+    limits["step"] = min(stated, raw_step) if raw_step < 1 else stated
+    if limits["step"] != stated:
+        limits["setpoint_step"] = stated
     return limits
 
 

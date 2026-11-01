@@ -44,6 +44,13 @@ class OptolinkNumber(OptolinkEntity, NumberEntity):
         self._attr_native_unit_of_measurement = definition.get("unit")
 
     @property
+    def extra_state_attributes(self):
+        attrs = super().extra_state_attributes
+        if (step := self._def.get("setpoint_step")) is not None:
+            attrs["setpoint_step"] = step
+        return attrs
+
+    @property
     def native_value(self):
         return self.raw_value
 
