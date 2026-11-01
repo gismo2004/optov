@@ -10,12 +10,13 @@ commits.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-01
+
 ### Fixed
 - Settings kept in tenths can be set in tenths. A heating curve slope offered only whole numbers, so
   0.5 showed as 1 and any change wrote 0 or 1.
-- Rebuilding your catalog with the current VExtractor is recommended: on some controllers a value
-  list showed the wrong text (none of the common heat pump settings), and a repair notice now says
-  so. An older catalog keeps working.
+- Rebuilding your catalog is recommended once VExtractor's next release is out: on some controllers
+  a few value lists showed the wrong text. A repair notice says so; an older catalog keeps working.
 
 ## [0.9.1] - 2026-10-15
 
@@ -271,7 +272,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/gismo2004/optov/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/gismo2004/optov/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gismo2004/optov/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/gismo2004/optov/compare/v0.7.1...v0.8.0
