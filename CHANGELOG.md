@@ -13,6 +13,9 @@ commits.
 ### Fixed
 - Settings kept in tenths can be set in tenths. A heating curve slope offered only whole numbers, so
   0.5 showed as 1 and any change wrote 0 or 1.
+- Rebuilding your catalog with the current VExtractor is recommended: on some controllers a value
+  list showed the wrong text (none of the common heat pump settings), and a repair notice now says
+  so. An older catalog keeps working.
 
 ## [0.9.1] - 2026-10-15
 

@@ -64,7 +64,9 @@ CATALOG_FILENAME = "catalog.db"
 #   2  fa_error_codes: the fault texts of the burner automats
 #   3  display_condition_groups and display_conditions.group_id: rules as group trees, all six
 #      comparison operators
-CATALOG_SCHEMA_VERSION = 3
+#   4  corrected enum keys (older catalogs show the wrong text on a few datapoints), defaults,
+#      value types, role names, quick-check and gateway flags, merged-read rule per controller
+CATALOG_SCHEMA_VERSION = 4
 
 # The oldest structure this code still reads. A catalog between the two works, minus what was
 # added since, and raises a repair saying so; one below this fails setup, because a query would

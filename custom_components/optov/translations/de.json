@@ -444,7 +444,7 @@
   "issues": {
     "catalog_behind": {
       "title": "Katalog mit älterer Struktur",
-      "description": "Der Katalog \"{name}\", mit dem {title} läuft, hat Strukturversion {found}; diese Version der Integration ist für {needed} geschrieben. Er funktioniert weiterhin, aber alles, was seither in den Katalog aufgenommen wurde, fehlt, bis er neu erzeugt wird.\n\nMit dem aktuellen VExtractor neu erzeugen und über \"Neu konfigurieren\" an diesem Eintrag hochladen. Die Meldung verschwindet von selbst, sobald der Eintrag mit einem aktuellen Katalog startet."
+      "description": "Der Katalog \"{name}\", mit dem {title} läuft, hat Strukturversion {found}; diese Version der Integration ist für {needed} geschrieben. Er funktioniert weiterhin, aber Korrekturen und alles andere, was seither in den Katalog aufgenommen wurde, fehlen, bis er neu erzeugt wird.\n\nMit dem aktuellen VExtractor neu erzeugen und über \"Neu konfigurieren\" an diesem Eintrag hochladen. Die Meldung verschwindet von selbst, sobald der Eintrag mit einem aktuellen Katalog startet."
     },
     "dst_mismatch": {
       "title": "Regelung: Zeitumstellung",

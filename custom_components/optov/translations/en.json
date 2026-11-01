@@ -444,7 +444,7 @@
   "issues": {
     "catalog_behind": {
       "title": "Catalog built for an older structure",
-      "description": "The catalog \"{name}\" that {title} runs on has structure version {found}; this version of the integration is written for {needed}. It still works, but everything the catalog gained since then is missing until it is rebuilt.\n\nRebuild it with the current VExtractor and upload it with Reconfigure on this entry. This message goes away by itself once the entry starts on a current catalog."
+      "description": "The catalog \"{name}\" that {title} runs on has structure version {found}; this version of the integration is written for {needed}. It still works, but corrections and everything else the catalog gained since then are missing until it is rebuilt.\n\nRebuild it with the current VExtractor and upload it with Reconfigure on this entry. This message goes away by itself once the entry starts on a current catalog."
     },
     "dst_mismatch": {
       "title": "Controller: daylight-saving settings",
