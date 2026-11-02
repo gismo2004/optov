@@ -7,13 +7,13 @@ Methods on objects, base classes and changed behaviour are out of its reach.
     python3 check_ha_api.py custom_components/optov
 """
 
-import annotationlib
 import ast
 import importlib
 import inspect
 import pathlib
 import sys
 
+import annotationlib
 import homeassistant.const
 
 
