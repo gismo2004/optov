@@ -375,7 +375,9 @@ def _port_url(hass: HomeAssistant, entry: OptolinkConfigEntry) -> str:
                 raise ConfigEntryNotReady(
                     f"ESPHome at {host} has not listed its proxies yet"
                 )
-            url = str(build_url(node.entry_id, info.serial_proxies[instance].name))
+            url = str(
+                build_url(node.entry_id, port_name=info.serial_proxies[instance].name)
+            )
             break
     else:
         if not url:
