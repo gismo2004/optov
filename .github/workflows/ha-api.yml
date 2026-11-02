@@ -1,0 +1,24 @@
+name: Home Assistant API
+
+# Home Assistant betas appear about a week before each monthly release; a function that changes
+# there breaks the integration for everyone on release day. This runs against both channels so
+# a failure says which one it is. It fails by mail, not on anybody's commit.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Against ${{ matrix.channel }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [beta, stable]
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          docker run --rm --entrypoint python3 -v "${{ github.workspace }}:/w:ro" \
+            ghcr.io/home-assistant/home-assistant:${{ matrix.channel }} \
+            /w/.github/scripts/check_ha_api.py /w/custom_components/optov
