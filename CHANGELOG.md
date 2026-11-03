@@ -10,6 +10,8 @@ commits.
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-11-03
+
 ### Added
 - A blueprint for a message when the controller logs a fault: pick the fault event and what should
   happen, for example a push to your phone. Import link in the documentation (how it works, fault
@@ -286,7 +288,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/gismo2004/optov/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/gismo2004/optov/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/gismo2004/optov/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/gismo2004/optov/compare/v0.9.0...v0.9.1
