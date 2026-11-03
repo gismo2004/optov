@@ -167,3 +167,22 @@ def test_nothing_happens_before_the_history_is_read(event_module):
     coordinator._error_history_loaded = True
     entity._handle_coordinator_update()  # first read: the starting point
     assert entity.fired == []
+
+
+def test_several_new_entries_each_fire_oldest_first(event_module):
+    # A heat pump that tripped twice and restarted while the link was down, logged in one minute.
+    entity, coordinator = _entity(event_module)
+    asyncio.run(entity.async_added_to_hass())
+    coordinator._error_history_loaded = True
+    coordinator.error_history = [_entry("FF", "2026-10-31T13:31:00+00:00")]
+    entity._handle_coordinator_update()
+    coordinator.error_history = [
+        _entry("FF", "2026-10-31T13:53:00+00:00"),
+        _entry("C9", "2026-10-31T13:37:00+00:00"),
+        _entry("A9", "2026-10-31T13:36:00+00:00"),
+        _entry("C9", "2026-10-31T13:36:00+00:00"),
+        _entry("FF", "2026-10-31T13:31:00+00:00"),
+    ]
+    entity._handle_coordinator_update()
+    entity._handle_coordinator_update()
+    assert [attrs["code"] for _, attrs in entity.fired] == ["C9", "A9", "C9", "FF"]

@@ -38,14 +38,15 @@ async def async_setup_entry(
 
 
 class OptolinkFaultEvent(CoordinatorEntity[OptolinkCoordinator], EventEntity):
-    """Fires `fault` when the newest entry of the controller's fault history changes.
+    """Fires `fault` once for every entry the controller's fault history gains, oldest first.
 
-    What counts is the newest entry's code and the time it was logged, so a fault that comes
-    back with the same code is still a new event. The first reading after the entity is
-    created only sets the starting point: a history that already holds years of entries must
-    not fire for the most recent of them. After a restart the last event's entry is the
-    starting point, so a fault logged while Home Assistant was down still fires once the
-    history has been read.
+    An entry is its code and the time it was logged, so a fault that comes back with the same
+    code is still a new event. Several entries can arrive between two reads -- a controller that
+    trips, restarts and trips again while the link is down -- and each of them fires. The first
+    reading after the entity is created only sets the starting point: a history that already
+    holds years of entries must not fire for them. After a restart the last event's entry is the
+    starting point, so faults logged while Home Assistant was down still fire once the history
+    has been read.
 
     A history that empties (cleared at the controller) or whose newest entry turns out older
     than the last one seen fires nothing; it only moves the starting point.
@@ -94,26 +95,40 @@ class OptolinkFaultEvent(CoordinatorEntity[OptolinkCoordinator], EventEntity):
             # Nothing read yet, or a history with no entries: nothing to compare.
             return
         newest = entries[0]
-        current = (str(newest.get("code", "")), str(newest.get("timestamp") or ""))
+        current = self._key(newest)
         if not self._have_start:
             self._seen, self._have_start = current, True
             return
         if current == self._seen:
             return
         previous, self._seen = self._seen, current
-        # Timestamps of one buffer share one format and sort as text; a history that went
-        # back in time was cleared or rewritten, not extended.
-        if previous and current[1] and previous[1] and current[1] < previous[1]:
-            return
-        self._trigger_event(
-            EVENT_FAULT,
-            {
-                "code": current[0],
-                "description": newest.get("description"),
-                "logged_at": current[1],
-            },
-        )
-        self.async_write_ha_state()
+        # Everything above the last entry seen is new. Timestamps of one buffer share one format
+        # and sort as text; an entry older than the last one seen ends the new part, and a
+        # history whose newest entry is older was cleared or rewritten, not extended.
+        new = []
+        for entry in entries:
+            key = self._key(entry)
+            if key == previous:
+                break
+            if previous and key[1] and previous[1] and key[1] < previous[1]:
+                break
+            new.append(entry)
+        for entry in reversed(new):
+            code, logged_at = self._key(entry)
+            self._trigger_event(
+                EVENT_FAULT,
+                {
+                    "code": code,
+                    "description": entry.get("description"),
+                    "logged_at": logged_at,
+                },
+            )
+            # One state per event, so an automation sees each of them.
+            self.async_write_ha_state()
+
+    @staticmethod
+    def _key(entry: dict[str, Any]) -> tuple[str, str]:
+        return str(entry.get("code", "")), str(entry.get("timestamp") or "")
 
 
 class OptolinkBurnerFaultEvent(OptolinkFaultEvent):

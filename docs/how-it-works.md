@@ -56,7 +56,15 @@ exact controller family. Boilers with a burner automat get a second sensor for t
 own fault records, with the texts of the automat that is actually fitted; the fault-history card
 lists both. The whole history is read on startup; after that only its newest entry is checked,
 every 4 poll cycles (**about once a minute** at the default 15 s interval), and the history is
-read again when that entry changed. A new entry also fires the fault event entity.
+read again when that entry changed. Every new entry also fires the fault event entity, once
+each and oldest first.
+
+**A message on a fault.** The blueprint [fault notification](../blueprints/automation/optov/fault_notification.yaml)
+turns the event into whatever you choose, for example a push to your phone, and stays quiet after a
+restart. Import it with
+[this link](https://my.home-assistant.io/create-link/?redirect=blueprint_import&blueprint_url=https%3A%2F%2Fgithub.com%2Fgismo2004%2Foptov%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foptov%2Ffault_notification.yaml),
+then create an automation from it. A fault code means something different on every controller, so
+look at your own fault list before you leave a code out.
 
 **Schedules.** Weekly programmes are read once on startup. They change almost only through this
 integration, so they are not read periodically: a change from a dashboard card or action first

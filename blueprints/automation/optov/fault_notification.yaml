@@ -1,0 +1,72 @@
+blueprint:
+  name: "OptoV: when the controller logs a fault"
+  description: >-
+    Runs your actions whenever an OptoV fault event fires, once per new entry in the
+    controller's fault history. A restart of Home Assistant or a controller that was
+    unreachable sends nothing.
+
+
+    In your actions you can use `{{ fault_code }}`, `{{ fault_text }}`, `{{ fault_time }}`
+    (local time it was logged) and `{{ fault_device }}`.
+  domain: automation
+  source_url: https://github.com/gismo2004/optov/blob/main/blueprints/automation/optov/fault_notification.yaml
+  input:
+    fault_events:
+      name: Fault events
+      description: >-
+        The controller's fault event, and on boilers with a burner automat also its burner
+        fault event.
+      selector:
+        entity:
+          integration: optov
+          domain: event
+          multiple: true
+    ignore_codes:
+      name: Codes to leave out
+      description: >-
+        Fault codes, separated by commas, that should not run the actions. A code means
+        something different on every controller: FF is a restart on a heat pump but a burner
+        fault on many boilers, so check your own fault list before adding one.
+      default: ""
+      selector:
+        text:
+    actions:
+      name: Actions
+      description: >-
+        What to do, for example send a notification to your phone with the title
+        "{{ fault_device }}: {{ fault_code }}" and the message "{{ fault_text }} ({{ fault_time }})".
+      selector:
+        action:
+
+triggers:
+  - trigger: state
+    entity_id: !input fault_events
+
+variables:
+  ignore_codes: !input ignore_codes
+  fault_code: "{{ trigger.to_state.attributes.code }}"
+  fault_text: "{{ trigger.to_state.attributes.description }}"
+  fault_time: >-
+    {% set logged = as_datetime(trigger.to_state.attributes.logged_at | default('', true)) %}
+    {{ as_local(logged).strftime('%d.%m.%Y %H:%M') if logged else trigger.to_state.attributes.logged_at }}
+  fault_device: "{{ device_attr(device_id(trigger.entity_id), 'name') or trigger.entity_id }}"
+
+conditions:
+  # A real event changes the state from a time or from "unknown" (never fired yet). Coming
+  # back from "unavailable" after a restart restores the last event and must stay quiet.
+  - condition: template
+    value_template: >-
+      {{ trigger.from_state is not none
+         and trigger.from_state.state != 'unavailable'
+         and trigger.to_state.state not in ['unavailable', 'unknown']
+         and trigger.to_state.attributes.event_type == 'fault' }}
+  - condition: template
+    value_template: >-
+      {{ (fault_code | string | upper) not in
+         (ignore_codes | upper | replace(' ', '')).split(',') | reject('eq', '') | list }}
+
+actions: !input actions
+
+# Several faults can arrive in one read; each gets its own run.
+mode: queued
+max: 20

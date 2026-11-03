@@ -10,6 +10,15 @@ commits.
 
 ## [Unreleased]
 
+### Added
+- A blueprint for a message when the controller logs a fault: pick the fault event and what should
+  happen, for example a push to your phone. Import link in the documentation (how it works, fault
+  history).
+
+### Fixed
+- When several faults were logged between two reads, only the newest fired the fault event. Each
+  one now fires, oldest first.
+
 ## [0.9.3] - 2026-11-02
 
 ### Fixed
