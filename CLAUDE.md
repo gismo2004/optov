@@ -5,7 +5,7 @@ Guidance for Claude Code (or any agent) working in this repository.
 ## What this is
 
 **OptoV**, a Home Assistant custom integration that talks to Viessmann heating controllers over
-the Optolink optical port. Installed through HACS; nothing here is a vendor product and nothing
+the Optolink optical port. Installed through Home Assistant's Marketplace (HACS before 2026.11; both read `hacs.json`); nothing here is a vendor product and nothing
 here is endorsed by one. MIT licensed, copyright gismo2004; the README says openly that it was
 written together with AI assistants, and that sentence stays.
 
@@ -76,7 +76,7 @@ where an identifier demands it -- the Home Assistant domain, the config director
 
 The manufacturer's name is never part of the product name. It belongs in the repository
 description, the topics, and prose that says which equipment this talks to, which is referential
-use and is what keeps the project findable in HACS. Never a logo, never "official", and the
+use and is what keeps the project findable in the Marketplace. Never a logo, never "official", and the
 disclaimer at the top of the README stays there.
 
 ## The catalog
@@ -259,7 +259,7 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
 ## Releasing
 
 A release is made by hand, on GitHub, never by a workflow: **Releases → Draft a new release →
-tag `vX.Y.Z` on `main`**, "pre-release" unticked (HACS hides pre-releases from anyone who has
+tag `vX.Y.Z` on `main`**, "pre-release" unticked (the Marketplace hides pre-releases from anyone who has
 not opted into betas, and the `0.` says beta already). Before that click, in one commit:
 
 1. `CHANGELOG.md`: give the **Unreleased** section the version and the date, start a new empty
@@ -270,9 +270,10 @@ Paste the changelog section into the release body. The `Release` workflow runs o
 fails if the manifest or the changelog disagree with it, which is the reminder for a forgotten
 step -- it cannot undo a release, so look at it.
 
-HACS rechecks an installed custom repository only every 48 hours, so a new release does not show
-up in anyone's Home Assistant straight away. To see it at once, use *Update information* on the
-repository in HACS (the websocket command `hacs/repository/refresh`).
+The Marketplace (like HACS before it) rechecks an installed custom repository only every 48
+hours, so a new release does not show up in anyone's Home Assistant straight away. To see it at
+once, refresh the repository in the Marketplace (the websocket command
+`marketplace/repository/refresh`; `hacs/repository/refresh` on HACS).
 
 The changelog is written **as the changes are made**: any commit that changes what a user
 sees, gets or has to do adds a line under Unreleased in the same commit. Internal work does not

@@ -48,8 +48,9 @@ part of this repository; you build it yourself, once, in a few minutes.
 
 ## Installation
 
-**Through HACS** (recommended). Add this repository as a custom repository of type
-*Integration*, install *OptoV*, and restart Home Assistant.
+**Through the Marketplace** (recommended; HACS before Home Assistant 2026.11). Add this
+repository as a custom repository of type *Integration* (the Marketplace asks you to connect
+GitHub for that), install *OptoV*, and restart Home Assistant.
 
 **By hand.** Copy `custom_components/optov/` into your Home Assistant
 `config/custom_components/` directory and restart.
@@ -109,7 +110,7 @@ part of this repository; you build it yourself, once, in a few minutes.
 
 **Removing.** Delete the entry under **Settings → Devices & services**; its entities, devices,
 dashboard resource and catalog file go with it (keep your own copy of the catalog). Uninstall
-through HACS afterwards and restart once more.
+through the Marketplace (or HACS) afterwards and restart once more.
 
 ## What you get
 

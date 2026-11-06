@@ -60,4 +60,4 @@ diagnostic sensors show the duty cycle and the datapoint rate.
 
 ## Removing the integration
 
-Delete the entry under **Settings → Devices & services → OptoV**. Its entities, devices and the dashboard resource go with it, and so does its catalog file in `<config>/optov/`, unless another entry uses the same file -- keep your own copy of the catalog. Uninstalling through HACS afterwards removes the code; restart Home Assistant once more.
+Delete the entry under **Settings → Devices & services → OptoV**. Its entities, devices and the dashboard resource go with it, and so does its catalog file in `<config>/optov/`, unless another entry uses the same file -- keep your own copy of the catalog. Uninstalling through the Marketplace (or HACS) afterwards removes the code; restart Home Assistant once more.
