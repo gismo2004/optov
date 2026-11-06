@@ -10,6 +10,8 @@ commits.
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-11-06
+
 ### Fixed
 - Readings went unavailable because of an unrelated flag in the same data block, for example the
   heating circuit readings on a Vitotronic 200 KW2 while frost protection was active (#12). A
@@ -295,7 +297,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/gismo2004/optov/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/gismo2004/optov/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/gismo2004/optov/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/gismo2004/optov/compare/v0.9.1...v0.9.2
