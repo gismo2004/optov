@@ -1698,7 +1698,7 @@ def _place_datapoint(
             (
                 s
                 for s in siblings
-                if s.get("bit_length", 0) > 0 and s["id"] in inputs.enums_by_et
+                if s.get("bit_length", 0) == 4 and s["id"] in inputs.enums_by_et
             ),
             None,
         )
