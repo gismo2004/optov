@@ -229,3 +229,109 @@ def test_running_hours_are_left_to_their_device_class():
     )
     assert "icon" not in entry
     assert entry["device_class"] == "duration"
+
+
+# -- which bit-field is a value's sensor health ----------------------------------------
+
+
+def _place_block(datapoints, enums):
+    """Place every datapoint of one address and return the profile."""
+    rows = [
+        {
+            "name": f"DP_{dp['id']}",
+            "pretty_name": f"DP {dp['id']}",
+            "address": "0x2500",
+            "entity_kind": catalog_db.KIND_READONLY,
+            "fc_read": "Virtual_READ",
+            "block_length": 22,
+            "bit_start": 0,
+            "bit_length": 0,
+            "conversion": "NoConversion",
+            "parameter_type": "Integer",
+            "tier": "Overview",
+            **dp,
+        }
+        for dp in datapoints
+    ]
+    inputs = _inputs(
+        GROUPS, links={r["id"]: [1] for r in rows}, datapoints=rows, enums=enums
+    )
+    inputs.by_address = {"0x2500": rows}
+    profile = _profile()
+    for row in rows:
+        catalog_db._place_datapoint(row, inputs, profile)
+    return profile
+
+
+def _by_id(profile):
+    return {
+        int(e["id"].removeprefix("dp_")): e
+        for platform in ("sensors", "binary_sensors")
+        for e in profile[platform]
+    }
+
+
+def test_a_flag_elsewhere_in_the_block_is_no_sensor_health():
+    # A heating circuit's block: its operating mode, set flow temperature, and a frost flag
+    # in the top bit of byte 16. The flag is a reading of its own; read as the others'
+    # health, its 1 marked them unavailable whenever frost protection ran.
+    profile = _place_block(
+        [
+            {"id": 1, "byte_position": 1, "byte_length": 1},
+            {"id": 2, "byte_position": 6, "byte_length": 2},
+            {
+                "id": 3,
+                "byte_position": 16,
+                "byte_length": 1,
+                "bit_start": 135,
+                "bit_length": 1,
+            },
+        ],
+        enums={1: {"0": "A", "1": "B", "2": "C"}, 3: {"0": "Nein", "1": "Ja"}},
+    )
+    entries = _by_id(profile)
+    assert "status_bit_length" not in entries[1]
+    assert "status_bit_length" not in entries[2]
+    assert 3 in entries
+
+
+def test_the_nibble_right_after_a_value_is_its_sensor_health():
+    status = {str(i): f"S{i}" for i in range(10)}
+    profile = _place_block(
+        [
+            {"id": 1, "byte_position": 0, "byte_length": 2},
+            {
+                "id": 2,
+                "byte_position": 2,
+                "byte_length": 1,
+                "bit_start": 20,
+                "bit_length": 4,
+            },
+        ],
+        enums={2: status},
+    )
+    entries = _by_id(profile)
+    assert entries[1]["status_bit_start"] == 20
+    assert entries[1]["status_bit_length"] == 4
+    assert entries[1]["status_options"] == status
+    assert 2 not in entries
+
+
+def test_a_nibble_in_front_of_a_value_is_not_its_health():
+    # A demand or mode nibble ahead of the set temperatures it belongs beside.
+    profile = _place_block(
+        [
+            {
+                "id": 1,
+                "byte_position": 0,
+                "byte_length": 2,
+                "bit_start": 52,
+                "bit_length": 4,
+            },
+            {"id": 2, "byte_position": 2, "byte_length": 2},
+        ],
+        enums={1: {"0": "A", "1": "B"}},
+    )
+    entries = _by_id(profile)
+    assert "status_bit_length" not in entries[2]
+    assert 1 in entries

@@ -10,6 +10,13 @@ commits.
 
 ## [Unreleased]
 
+### Fixed
+- Readings went unavailable because of an unrelated flag in the same data block, for example the
+  heating circuit readings on a Vitotronic 200 KW2 while frost protection was active (#12). A
+  reading's sensor status is now only the status field right after its value.
+- Read-only flags that share a data block with other readings were hidden. They are now
+  entities, for example the frost risk of each heating circuit.
+
 ## [0.9.4] - 2026-11-03
 
 ### Added

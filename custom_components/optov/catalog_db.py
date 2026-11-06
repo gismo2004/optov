@@ -1513,6 +1513,36 @@ def _reachable(fc: str, inputs: _ProfileInputs, known_only: bool = False) -> boo
     return fc in inputs.reachable_fc
 
 
+def _status_nibble_of(
+    dp: dict[str, Any], siblings: list[dict[str, Any]], inputs: _ProfileInputs
+) -> dict[str, Any] | None:
+    """The sensor-health nibble of a full-width value, or None.
+
+    The catalog files it as an enumerated four-bit field in the byte right after the
+    value: a room temperature in bytes 0-1, its sensor status in byte 2. Nothing else
+    sharing the address qualifies. A block can hold a whole heating circuit, and a flag
+    elsewhere in it (frost risk, a mode nibble, a fault bit) is no statement about this
+    value; read as one, its 1 would mark the value unavailable.
+    """
+    if dp.get("bit_length"):
+        return None
+    return next((s for s in siblings if _is_status_nibble(s, [dp], inputs)), None)
+
+
+def _is_status_nibble(
+    bits: dict[str, Any], siblings: list[dict[str, Any]], inputs: _ProfileInputs
+) -> bool:
+    """Whether a bit-field is the health nibble of one of the full-width siblings."""
+    if bits.get("bit_length") != 4 or bits["id"] not in inputs.enums_by_et:
+        return False
+    at = bits.get("byte_position") or 0
+    return any(
+        not s.get("bit_length")
+        and (s.get("byte_position") or 0) + (s.get("byte_length") or 0) == at
+        for s in siblings
+    )
+
+
 def _place_datapoint(
     dp: dict[str, Any], inputs: _ProfileInputs, profile: dict[str, Any]
 ) -> None:
@@ -1572,16 +1602,14 @@ def _place_datapoint(
     bit_length = dp.get("bit_length", 0)
     siblings = inputs.by_address.get(dp["address"], [])
     if (
-        bit_length > 0
-        and dp.get("entity_kind") == KIND_READONLY
-        and any(not s.get("bit_length") for s in siblings)
+        dp.get("entity_kind") == KIND_READONLY
+        and _is_status_nibble(dp, siblings, inputs)
     ):
-        # A read-only bit-field beside a full-width value at the same address is that
-        # value's sensor-health nibble; it rides along with the value and is surfaced
-        # through its availability instead (see status_sibling below). A read-only
-        # bit-field on its own is a reading in its own right: relay states, the device
-        # status flags, the digital inputs of the diagnosis page all live in single bits
-        # of a register that holds nothing else.
+        # A value's sensor-health nibble rides along with the value and is surfaced through
+        # its availability instead (see status_sibling below). Every other read-only
+        # bit-field is a reading in its own right, also when it shares a block with
+        # full-width values: relay states, device status flags, a heating circuit's frost
+        # flag beside its set temperatures.
         return
     # Writable bit-fields are real controls and must be exposed -- operating mode, party
     # and eco all live in bits of a shared register. Writing them needs the whole block
@@ -1688,21 +1716,7 @@ def _place_datapoint(
         entry["enabled_by_default"] = False
         entry["base"] = False
 
-    # A full-width value takes the health nibble that shares its address. A bit-field takes
-    # none: it would only find itself, or a neighbouring flag in the same register, and read
-    # its own 1 as a fault.
-    status_sibling = (
-        None
-        if bit_length
-        else next(
-            (
-                s
-                for s in siblings
-                if s.get("bit_length", 0) > 0 and s["id"] in inputs.enums_by_et
-            ),
-            None,
-        )
-    )
+    status_sibling = _status_nibble_of(dp, siblings, inputs)
     if status_sibling is not None:
         entry["status_bit_start"] = status_sibling.get("bit_start", 0)
         entry["status_bit_length"] = status_sibling.get("bit_length", 0)
