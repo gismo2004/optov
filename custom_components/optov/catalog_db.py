@@ -1601,9 +1601,8 @@ def _place_datapoint(
 
     bit_length = dp.get("bit_length", 0)
     siblings = inputs.by_address.get(dp["address"], [])
-    if (
-        dp.get("entity_kind") == KIND_READONLY
-        and _is_status_nibble(dp, siblings, inputs)
+    if dp.get("entity_kind") == KIND_READONLY and _is_status_nibble(
+        dp, siblings, inputs
     ):
         # A value's sensor-health nibble rides along with the value and is surfaced through
         # its availability instead (see status_sibling below). Every other read-only
