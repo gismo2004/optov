@@ -1571,17 +1571,21 @@ def _place_datapoint(
 
     bit_length = dp.get("bit_length", 0)
     siblings = inputs.by_address.get(dp["address"], [])
+    # Frost-risk flags are genuine one-bit readings, even when a full-width value
+    # shares the data block. They are identified by catalog role, not address.
+    is_frost_risk = (
+        bit_length == 1
+        and dp.get("entity_kind") == KIND_READONLY
+        and (dp.get("role") or "").strip().lower() == "zustand_frostgefahr_r"
+    )
     if (
         bit_length > 0
         and dp.get("entity_kind") == KIND_READONLY
+        and not is_frost_risk
         and any(not s.get("bit_length") for s in siblings)
     ):
-        # A read-only bit-field beside a full-width value at the same address is that
-        # value's sensor-health nibble; it rides along with the value and is surfaced
-        # through its availability instead (see status_sibling below). A read-only
-        # bit-field on its own is a reading in its own right: relay states, the device
-        # status flags, the digital inputs of the diagnosis page all live in single bits
-        # of a register that holds nothing else.
+        # Other read-only bit-fields alongside full-width values keep the
+        # original handling, so this change cannot expose unrelated flags.
         return
     # Writable bit-fields are real controls and must be exposed -- operating mode, party
     # and eco all live in bits of a shared register. Writing them needs the whole block
@@ -1761,7 +1765,12 @@ def _place_datapoint(
             profile["numbers"].append(entry)
         return
 
-    if enum_values:
+    if is_frost_risk:
+        # The catalog's on/off labels do not affect binary_sensor decoding.
+        # The entity keeps its exact bit geometry and an explicit frost icon.
+        entry["icon"] = "mdi:snowflake"
+        profile["binary_sensors"].append(_as_sensor(entry, sensor_category))
+    elif enum_values:
         entry["options"] = enum_values
         # Two named states -- a relay's Aus/Ein, a flag's Nein/Ja -- is an on/off reading.
         # Without an icon it wears the same eye as every other enumeration, and the relay
