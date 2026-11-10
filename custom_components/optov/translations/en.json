@@ -372,6 +372,9 @@
     },
     "date_out_of_range": {
       "message": "{date} cannot be stored in this setting: it holds dates from {first} to {last}."
+    },
+    "no_saved_settings": {
+      "message": "No settings have been saved for this controller yet. Run the action optov.save_settings first."
     }
   },
   "card": {

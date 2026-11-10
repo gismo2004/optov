@@ -49,7 +49,12 @@ from .conversions import (
     encode_day_schedule,
     parse_level,
 )
-from .custom_entities import SECTION_ONOFF, SECTIONS, onoff_unique_id
+from .custom_entities import (
+    SECTION_ONOFF,
+    SECTIONS,
+    onoff_unique_id,
+    settings_items,
+)
 from .decode import (
     byte_order,
     decode_date,
@@ -1824,6 +1829,37 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_read_custom_datapoint(self, address: int, length: int = 2) -> bytes:
         """Perform an ad-hoc read of any address without polling."""
         return await self.client.read_raw(address, length)
+
+    async def async_read_settings(self) -> tuple[dict[str, Any], list[str]]:
+        """Read every setting of the controller now: value by datapoint id, and what it refused.
+
+        A number comes as it is set and shown, a select or a switch as its raw value -- what
+        async_write_item() takes for each. Enabled or not makes no difference; a setting whose
+        entity is switched off is still a setting. One the controller does not have is left out
+        without a telegram, as in a poll.
+        """
+        values: dict[str, Any] = {}
+        refused: list[str] = []
+        # Settings that share a block (the bits of one byte) are one telegram between them.
+        blocks: dict[tuple[Any, ...], bytes | None] = {}
+        for platform, item in settings_items(self.profile):
+            key = (item["address"], block_length(item), item.get("fc_read"))
+            if key not in blocks:
+                try:
+                    blocks[key] = await self._read_reg(
+                        *key, fresh=True, prefix=item.get("prefix_read")
+                    )
+                except optolink.OptolinkDeviceError:
+                    blocks[key] = None
+            raw = blocks[key]
+            if raw is None:
+                refused.append(item["id"])
+                continue
+            if platform == "numbers":
+                values[item["id"]] = self._decode_number(item, raw)
+            else:
+                values[item["id"]] = self._raw_int(item, raw, False)
+        return values, refused
 
     def datapoint_at(self, address: int) -> dict[str, Any] | None:
         """This controller's datapoint at an address, whichever platform it became."""

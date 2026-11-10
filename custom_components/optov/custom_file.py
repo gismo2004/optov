@@ -13,10 +13,12 @@ from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 from .catalog_db import ENTITY_DOMAINS
 from .const import CONF_CUSTOM_FILE, DOMAIN
 from .custom_entities import (
+    KEY_CONTROLLER,
     KEY_CURRENT,
     KEY_DEVICE_CLASS,
     KEY_HEATING,
@@ -25,18 +27,27 @@ from .custom_entities import (
     KEY_NAME,
     KEY_ON,
     KEY_PRESETS,
+    KEY_PROGRAMMES,
+    KEY_SAVED,
+    KEY_SOFTWARE,
     KEY_TARGET,
     KEY_VALUE,
+    KEY_VALUES,
     SECTION_CLIMATE,
     SECTION_ONOFF,
     SECTION_WATER_HEATER,
     assembled_unique_id,
+    changed_settings,
     default_on_value,
     find_item,
     off_value,
     onoff_entity,
     parse_file,
+    parse_settings,
     render_file,
+    render_settings,
+    replace_settings,
+    settings_items,
     two_state_items,
 )
 
@@ -348,16 +359,184 @@ async def async_save(
         ]
         for section in (SECTION_CLIMATE, SECTION_WATER_HEATER)
     }
-    title = coordinator.profile.device_name
     text = render_file(
-        f"{title} ({coordinator.stable_id})",
+        _title(coordinator),
         onoff,
         assembled[SECTION_CLIMATE],
         assembled[SECTION_WATER_HEATER],
+        # The saved settings are not this dialog's, so they are written back as they were.
+        saved := await async_read_settings(hass, coordinator.stable_id),
+        _notes(hass, coordinator, saved[KEY_VALUES]) if saved else None,
     )
     await hass.async_add_executor_job(
         write_text, custom_file_path(hass, coordinator.stable_id), text
     )
+
+
+def _title(coordinator: Any) -> str:
+    return f"{coordinator.profile.device_name} ({coordinator.stable_id})"
+
+
+async def async_read_settings(
+    hass: HomeAssistant, stable_id: str
+) -> dict[str, Any] | None:
+    """The settings saved in the controller's file; None without a file or a section."""
+    path = custom_file_path(hass, stable_id)
+    try:
+        text = await hass.async_add_executor_job(read_text, path)
+        return parse_settings(yaml.safe_load(text)) if text is not None else None
+    except (OSError, yaml.YAMLError):
+        return None
+
+
+def _setting_entities(
+    hass: HomeAssistant, coordinator: Any
+) -> dict[str, tuple[str, dict[str, Any]]]:
+    """Every setting of the controller by its entity id, as (platform, datapoint).
+
+    The registry knows the id an entity has, renamed or not; one that is not registered yet
+    is named as it will be, as for the custom entities.
+    """
+    registry = er.async_get(hass)
+    found: dict[str, tuple[str, dict[str, Any]]] = {}
+    for platform, item in settings_items(coordinator.profile):
+        domain = ENTITY_DOMAINS[platform]
+        entity_id = (
+            registry.async_get_entity_id(
+                domain, DOMAIN, f"{coordinator.stable_id}_{item['id']}"
+            )
+            or f"{domain}.{coordinator.object_id(item.get('circuit'), item['name'])}"
+        )
+        found[entity_id] = (platform, item)
+    return found
+
+
+def _label(item: dict[str, Any], value: Any) -> str | None:
+    """The catalog's name for a raw value of an enumerated setting."""
+    try:
+        return item.get("options", {}).get(int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _notes(
+    hass: HomeAssistant, coordinator: Any, values: dict[str, Any]
+) -> dict[str, str]:
+    """What to write next to each saved value: the setting's name, and a raw value's own."""
+    notes: dict[str, str] = {}
+    for entity_id, (_platform, item) in _setting_entities(hass, coordinator).items():
+        if entity_id in values:
+            label = _label(item, values[entity_id])
+            notes[entity_id] = item["name"] + (f": {label}" if label else "")
+    return notes
+
+
+async def _async_current(
+    hass: HomeAssistant, coordinator: Any
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """The controller's settings now, by entity id; its programmes; what it refused."""
+    by_item, refused = await coordinator.async_read_settings()
+    entities = _setting_entities(hass, coordinator)
+    values = {
+        entity_id: by_item[item["id"]]
+        for entity_id, (_platform, item) in entities.items()
+        if item["id"] in by_item
+    }
+    await coordinator.async_refresh_schedules()
+    programmes = {
+        name: {
+            day: [[w["start"], w["end"], w["mode"]] for w in windows]
+            for day, windows in days.items()
+        }
+        for name, days in coordinator.schedules.items()
+        if days
+    }
+    not_read = sorted(
+        entity_id
+        for entity_id, (_platform, item) in entities.items()
+        if item["id"] in refused
+    )
+    return values, programmes, not_read
+
+
+async def async_save_settings(hass: HomeAssistant, coordinator: Any) -> dict[str, Any]:
+    """Read the controller's settings and programmes and put them in its file."""
+    values, programmes, not_read = await _async_current(hass, coordinator)
+    settings = {
+        KEY_CONTROLLER: coordinator.profile.model,
+        KEY_SOFTWARE: coordinator.profile.sw_version,
+        KEY_SAVED: dt_util.now().isoformat(timespec="seconds"),
+        KEY_VALUES: values,
+        KEY_PROGRAMMES: programmes,
+    }
+    section = render_settings(settings, _notes(hass, coordinator, values))
+    path = custom_file_path(hass, coordinator.stable_id)
+    text = await hass.async_add_executor_job(read_text, path)
+    if text is None:
+        text = render_file(_title(coordinator), [])
+    await hass.async_add_executor_job(write_text, path, replace_settings(text, section))
+    return {
+        "file": os.path.basename(path),
+        "saved": settings[KEY_SAVED],
+        "settings": len(values),
+        "programmes": len(programmes),
+        "not_read": not_read,
+    }
+
+
+async def async_compare_settings(
+    hass: HomeAssistant, coordinator: Any
+) -> dict[str, Any] | None:
+    """What differs between the saved settings and the controller now; None if none are saved.
+
+    Nothing is written. A saved value whose entity is not a setting of this controller, or
+    that the controller did not answer for, is listed apart and not compared.
+    """
+    saved = await async_read_settings(hass, coordinator.stable_id)
+    if saved is None:
+        return None
+    values, programmes, not_read = await _async_current(hass, coordinator)
+    entities = _setting_entities(hass, coordinator)
+    differences = []
+    for entity_id, was, now in changed_settings(saved[KEY_VALUES], values):
+        item = entities[entity_id][1]
+        difference = {
+            "entity_id": entity_id,
+            "name": item["name"],
+            "saved": was,
+            "now": now,
+        }
+        if (label := _label(item, was)) is not None:
+            difference["saved_as"] = label
+        if (label := _label(item, now)) is not None:
+            difference["now_as"] = label
+        differences.append(difference)
+    days = [
+        {
+            "programme": name,
+            "day": day,
+            "saved": windows,
+            "now": programmes[name].get(day),
+        }
+        for name, saved_days in sorted(saved[KEY_PROGRAMMES].items())
+        if name in programmes
+        for day, windows in saved_days.items()
+        if [list(w) for w in windows] != programmes[name].get(day)
+    ]
+    return {
+        "saved": saved[KEY_SAVED],
+        "controller": saved[KEY_CONTROLLER],
+        "same_controller": (saved[KEY_CONTROLLER], saved[KEY_SOFTWARE])
+        == (coordinator.profile.model, coordinator.profile.sw_version),
+        "compared": len(set(saved[KEY_VALUES]) & set(values)),
+        "differences": differences,
+        "programme_days": days,
+        "not_compared": sorted(
+            (set(saved[KEY_VALUES]) - set(values))
+            | (set(saved[KEY_PROGRAMMES]) - set(programmes))
+        ),
+        "not_read": not_read,
+    }
 
 
 class CustomFileView(HomeAssistantView):

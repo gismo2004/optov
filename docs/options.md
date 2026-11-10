@@ -93,6 +93,23 @@ thermostat's `presets:` maps a preset (`eco`, `comfort`, `away`, `boost`, `home`
 format, and each entry's comment says what its two raw values mean. A file that cannot be read
 keeps the custom entities you have until it is fixed.
 
+### Saved settings
+
+The action `optov.save_settings` reads every setting of the controller and its weekly programmes
+and stores them in the same file, in a `settings:` section: each value under its entity id, a
+number as it is shown, a select or switch as its raw value with its name as a comment. It takes
+under a minute and writes nothing to the controller. `optov.compare_settings` reads them again
+and lists what differs from the saved ones -- after a reset, a replaced board, or a visit by
+someone who changed things.
+
+What counts as a setting: every number and select one of the controller's menus lists, and the
+on/off settings of its configuration pages. Party mode, eco mode, a one-off hot water run and
+holiday dates are states of the moment and are left out. The section records the controller's
+model and software, so a comparison says when the file was saved from a different one.
+
+Download the file from *Backup and restore* to keep it outside Home Assistant: it is deleted
+with the integration entry.
+
 ## Entity ids
 
 Entity ids are built from the controller's model code, its circuit and the datapoint, not from

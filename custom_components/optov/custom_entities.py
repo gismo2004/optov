@@ -21,6 +21,10 @@ language, which can change.
 All custom entities of a controller live in one YAML file next to the catalog, one section per
 kind, so they can be backed up, edited and restored. The options flow edits the same file.
 
+The same file can hold a `settings:` section: the value every setting of the controller had when
+it was saved, and its weekly programmes. It is what a controller is compared with, and later set
+back to, after a reset or a replaced board.
+
 Kept free of Home Assistant imports so the rules can be tested on their own.
 """
 
@@ -33,6 +37,13 @@ SECTION_ONOFF = "onoff"
 SECTION_CLIMATE = "climate"
 SECTION_WATER_HEATER = "water_heater"
 SECTIONS = (SECTION_ONOFF, SECTION_CLIMATE, SECTION_WATER_HEATER)
+# The saved settings: not a list of entities but one mapping, see parse_settings().
+SECTION_SETTINGS = "settings"
+KEY_CONTROLLER = "controller"
+KEY_SOFTWARE = "software"
+KEY_SAVED = "saved"
+KEY_VALUES = "values"
+KEY_PROGRAMMES = "programmes"
 
 # Keys of an on/off entry.
 KEY_VALUE = "value"
@@ -182,6 +193,8 @@ def parse_file(raw: Any) -> tuple[dict[str, list[dict[str, Any]]], list[str], bo
         return sections, ["the file must have sections such as 'onoff:'"], False
     problems: list[str] = []
     for name, content in raw.items():
+        if name == SECTION_SETTINGS:
+            continue
         if name not in SECTIONS:
             problems.append(f"unknown section '{name}', ignored")
             continue
@@ -385,11 +398,14 @@ def render_file(
     onoff: list[dict[str, Any]],
     climate: list[dict[str, Any]] | None = None,
     water_heater: list[dict[str, Any]] | None = None,
+    settings: dict[str, Any] | None = None,
+    notes: dict[str, str] | None = None,
 ) -> str:
     """The file's text: a header that explains the format, then each section.
 
     An on/off entry may carry `on_label` and `other` (the other raw value and its label) for
-    the comment that says what the numbers mean.
+    the comment that says what the numbers mean. `settings` is the saved settings section, if
+    the controller has one, and `notes` what to say next to each of its values.
     """
     lines = [
         f"# OptoV custom entities for {title}.",
@@ -414,6 +430,11 @@ def render_file(
         "#   write:   which raw value a mode writes when several map to it",
         "#   presets: preset -> the switch or two-state select that turns it on (climate,",
         "#            optional; a select's on value is ON/1): " + ", ".join(PRESETS),
+        "#",
+        "# settings: the controller's settings as they were saved (action optov.save_settings)",
+        "#   values:     entity id -> value; a number as it is shown, a select or switch as",
+        "#               its raw value",
+        "#   programmes: weekly programme -> day -> [start, end, level] per switching window",
         "",
         f"{SECTION_ONOFF}:" + ("" if onoff else " []"),
     ]
@@ -438,7 +459,107 @@ def render_file(
         lines.append(f"{section}:" + ("" if entries else " []"))
         for entry in entries:
             lines.extend(_render_assembled(section, entry))
+    if settings:
+        lines.append("")
+        lines.extend(render_settings(settings, notes or {}))
     return "\n".join(lines) + "\n"
+
+
+def settings_items(profile: Any) -> list[tuple[str, dict[str, Any]]]:
+    """The datapoints that are settings of the controller, as (platform, item).
+
+    Every number and select a menu of the controller lists, and the one-bit switches the
+    catalog files as configuration. A switch outside the configuration pages -- party mode, a
+    one-off hot water run -- is a state of the moment, and setting it back would start or stop
+    something; a date is a holiday. A datapoint no menu lists is left out as well: nothing says
+    what it is for.
+    """
+    return [
+        (platform, item)
+        for platform in ("numbers", "selects", "switches")
+        for item in getattr(profile, platform)
+        if not item.get("unlisted")
+        and (platform != "switches" or item.get("entity_category"))
+    ]
+
+
+def parse_settings(raw: Any) -> dict[str, Any] | None:
+    """The saved settings out of what was read from the file; None without a usable section."""
+    section = raw.get(SECTION_SETTINGS) if isinstance(raw, dict) else None
+    if not isinstance(section, dict) or not isinstance(section.get(KEY_VALUES), dict):
+        return None
+    programmes = section.get(KEY_PROGRAMMES)
+    return {
+        KEY_CONTROLLER: section.get(KEY_CONTROLLER),
+        KEY_SOFTWARE: section.get(KEY_SOFTWARE),
+        KEY_SAVED: section.get(KEY_SAVED),
+        KEY_VALUES: {str(k): v for k, v in section[KEY_VALUES].items()},
+        KEY_PROGRAMMES: programmes if isinstance(programmes, dict) else {},
+    }
+
+
+def render_settings(settings: dict[str, Any], notes: dict[str, str]) -> list[str]:
+    """The settings section's lines; `notes` is a comment per entity id, a value's name."""
+    lines = [f"{SECTION_SETTINGS}:"]
+    for key in (KEY_CONTROLLER, KEY_SOFTWARE, KEY_SAVED):
+        if settings.get(key) is not None:
+            lines.append(f"  {key}: {_quote(str(settings[key]))}")
+    lines.append(f"  {KEY_VALUES}:" + ("" if settings[KEY_VALUES] else " {}"))
+    for entity_id, value in sorted(settings[KEY_VALUES].items()):
+        note = f"  # {notes[entity_id]}" if notes.get(entity_id) else ""
+        lines.append(f"    {entity_id}: {value}{note}")
+    programmes = settings.get(KEY_PROGRAMMES) or {}
+    lines.append(f"  {KEY_PROGRAMMES}:" + ("" if programmes else " {}"))
+    for name, days in sorted(programmes.items()):
+        lines.append(f"    {name}:")
+        for day, windows in days.items():
+            shown = ", ".join(
+                f"[{_quote(str(start))}, {_quote(str(end))}, {level}]"
+                for start, end, level in windows
+            )
+            lines.append(f"      {day}: [{shown}]")
+    return lines
+
+
+def replace_settings(text: str, section: list[str]) -> str:
+    """The file's text with its settings section replaced, or added at the end.
+
+    Only that section is touched: whatever else the file holds, entries the integration could
+    not use among it, stays as its owner wrote it.
+    """
+    kept: list[str] = []
+    inside = False
+    for line in text.splitlines():
+        if line.startswith(f"{SECTION_SETTINGS}:"):
+            inside = True
+        elif inside and line[:1] not in ("", " ", "#"):
+            inside = False
+        if not inside:
+            kept.append(line)
+    while kept and not kept[-1].strip():
+        kept.pop()
+    return "\n".join([*kept, "", *section]) + "\n"
+
+
+def changed_settings(
+    saved: dict[str, Any], current: dict[str, Any]
+) -> list[tuple[str, Any, Any]]:
+    """What differs between two sets of values, as (key, saved, current), for keys in both.
+
+    A number compares as a number: the file may hold 20 where the controller answers 20.0.
+    """
+
+    def same(a: Any, b: Any) -> bool:
+        try:
+            return abs(float(a) - float(b)) < 1e-6
+        except (TypeError, ValueError):
+            return a == b
+
+    return [
+        (key, value, current[key])
+        for key, value in sorted(saved.items())
+        if key in current and not same(value, current[key])
+    ]
 
 
 def _render_assembled(section: str, entry: dict[str, Any]) -> list[str]:

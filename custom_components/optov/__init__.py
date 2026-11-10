@@ -1018,6 +1018,19 @@ def _async_register_services(hass: HomeAssistant) -> None:
             await orphaned_statistics.async_update_issue(hass, entry)
         return {"cleared": cleared}
 
+    async def save_settings(call: ServiceCall) -> ServiceResponse:
+        return await custom_file.async_save_settings(hass, _one_coordinator(hass, call))
+
+    async def compare_settings(call: ServiceCall) -> ServiceResponse:
+        found = await custom_file.async_compare_settings(
+            hass, _one_coordinator(hass, call)
+        )
+        if found is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="no_saved_settings"
+            )
+        return found
+
     # The raw services answer their caller, so a script can use the value without going
     # through an entity; the Actions page in developer tools shows the same answer.
     answers = SupportsResponse.OPTIONAL
@@ -1030,5 +1043,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         ("set_schedule_day", set_schedule_day, SupportsResponse.NONE),
         ("set_schedule_window", set_schedule_window, SupportsResponse.NONE),
         ("clear_orphaned_statistics", clear_orphaned_statistics, answers),
+        ("save_settings", save_settings, answers),
+        ("compare_settings", compare_settings, answers),
     ):
         hass.services.async_register(DOMAIN, name, handler, supports_response=response)

@@ -10,6 +10,11 @@ commits.
 
 ## [Unreleased]
 
+### Added
+- Two actions for the controller's settings: `optov.save_settings` stores every setting and the
+  weekly programmes in the controller's file next to the catalog, and `optov.compare_settings`
+  lists what differs from them now. Neither writes to the controller (options, saved settings).
+
 ## [0.9.6] - 2026-11-10
 
 ### Added

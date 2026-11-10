@@ -372,6 +372,9 @@
     },
     "date_out_of_range": {
       "message": "{date} kann in dieser Einstellung nicht gespeichert werden: sie fasst Daten von {first} bis {last}."
+    },
+    "no_saved_settings": {
+      "message": "Für diese Regelung wurden noch keine Einstellungen gespeichert. Zuerst die Aktion optov.save_settings ausführen."
     }
   },
   "card": {

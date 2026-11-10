@@ -209,3 +209,22 @@ clear_orphaned_statistics:
       default: false
       selector:
         boolean:
+
+save_settings:
+  name: Save the controller's settings
+  description: >-
+    Read every setting of the controller and its weekly programmes and store them in the
+    controller's file next to the catalog, in its `settings` section. Nothing is written to the
+    controller. Momentary states such as party mode or a one-off hot water run are not
+    settings and are left out. Download the file from the options (Custom entities, Backup and
+    restore) to keep it somewhere else.
+  fields:
+    config_entry_id: *controller
+
+compare_settings:
+  name: Compare the controller with its saved settings
+  description: >-
+    Read the controller's settings and weekly programmes again and list what differs from the
+    saved ones. Nothing is written to the controller.
+  fields:
+    config_entry_id: *controller
