@@ -1,7 +1,6 @@
 """DataUpdateCoordinator for OptoV integration."""
 
 import asyncio
-import contextlib
 import logging
 import re
 import time
@@ -111,8 +110,8 @@ EXOTIC_CONVERSIONS = {
     "mult100",
 }
 
-# Catalog Priority at or below this is part of the fast set, polled every cycle. Everything
-# above rotates through the remaining bus budget -- see OptolinkCoordinator._select_due().
+# Catalog Priority at or below this is read at the faster of the two reading intervals --
+# see OptolinkCoordinator._target_interval().
 _URGENT_PRIORITY = 50
 
 # Share of the poll interval the bus may spend reading, and how hard the scheduler chases it.
@@ -129,21 +128,18 @@ _URGENT_PRIORITY = 50
 _BUS_BUDGET = 0.90
 
 # How often a datapoint wants to be read, as a multiple of the poll interval. The catalog
-# supplies the inputs: `Trending` marks the fast-moving process values, `priority` ranks the
-# rest, and whether an entity is writable separates settings from readings.
+# supplies the inputs: `Trending` marks the fast-moving process values and `priority` ranks the
+# rest. Writable settings are read as often as readings; reading them less often gains nothing
+# measurable, since a telegram is ~63 ms and even the full expert set of 428 datapoints is one
+# pass in about 27 s.
 #
-# A setting cannot change unless somebody changes it -- at the controller's own panel, since
-# this integration writes only on request -- so it tolerates being read a few cycles later than
-# a temperature. These are *targets*, not guarantees: the scheduler reads whatever is most
-# overdue relative to its target and simply gets further behind when the bus is busy, which is
-# what makes it self-levelling instead of starving anything.
+# These are *targets*, not guarantees: the scheduler reads whatever is most overdue relative
+# to its target and simply gets further behind when the bus is busy, which is what makes it
+# self-levelling instead of starving anything.
 _INTERVAL_TRENDING = 1
-_INTERVAL_READING_FAST = 2  # read-only, catalog priority <= 50
-_INTERVAL_READING_SLOW = 3  # read-only, lower catalog priority
-# Writable settings are read as often as readings. Reading them less often gains nothing
-# measurable: a telegram is ~63 ms, so even the full expert set of 428 datapoints is one pass in
-# about 27 s, and the budget already leaves the bus half idle; a setting changed at the
-# controller's own panel shows up within a minute.
+_INTERVAL_READING_FAST = 2  # catalog priority <= 50
+_INTERVAL_READING_SLOW = 3  # lower catalog priority
+
 # The corridor the sweep is allowed to sit in without the budget being touched, and how many
 # cycles have to agree before it is.
 #
@@ -375,8 +371,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.writes_today: dict[int, int] = {}
         self._writes_day: str | None = None
         client.on_write = self._count_write
-        # Rotation state for the slow pool, plus the measured cost of one datapoint read and
-        # the worst-case refresh interval that follows from it.
+        # The measured cost of one datapoint read, which sizes each cycle's share of the bus.
         self._read_cost: float = _DEFAULT_READ_COST
         self._backoff: float = 1.0
         # Cycle durations as a share of the interval; the budget follows their median.
@@ -398,9 +393,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.active_wire_load: float | None = None
         self.scan_interval_seconds: float = float(scan_interval)
         self._current_telegrams: int = 0
-        self._current_failed: int = 0
         self._current_bytes: int = 0
-        self._current_datapoints: int = 0
 
         super().__init__(
             hass,
@@ -428,7 +421,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         A controller that does not answer this read is not identified at all, and the failure is
         left to speak for itself. Standing in a System ID of 0x0000 instead reported a link that
         never came up, or a controller that does not speak P300, as a catalog that lacks an
-        entry -- and sent at least one user looking for the entry.
+        entry.
         """
         ident = await self.client.read_raw(
             optolink.IDENT_ADDRESS, optolink.IDENT_LENGTH
@@ -451,11 +444,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # pays for the extra telegram. Within that range it is the only thing that separates
         # several controller variants declaring the same IdentificationExtension range.
         f0 = None
-        if (
-            sw_index is not None
-            and (sys_id & 0xFF) in range(0xC0, 0xCC)
-            and sw_index >= 200
-        ):
+        if (sys_id & 0xFF) in range(0xC0, 0xCC) and sw_index >= 200:
             try:
                 f0 = int.from_bytes(await self.client.read_raw(0x00F0, 2), "little")
                 _LOGGER.info("DeviceIdentF0 = %d", f0)
@@ -509,30 +498,23 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Error-history buffer geometry + fault-code texts, resolved entirely from the catalog
         # (address, size, element count, wire function code and per-device code texts). No
         # System-ID branching: a new device family works as soon as it is in catalog.db.
-        self._error_history_dp = None
-        self._error_codes = {}
-        device_id = dev.get("id")
-        if device_id is not None:
-            try:
-                self._error_history_dp = await self.hass.async_add_executor_job(
-                    catalog_db.get_error_history_datapoint, device_id, self.db_path
-                )
-                self._error_codes = await self.hass.async_add_executor_job(
-                    catalog_db.get_error_codes, device_id, self.db_path, self._language
-                )
-            except Exception as err:
-                _LOGGER.warning(
-                    "Could not resolve error-history catalog entry: %s", err
-                )
+        device_id = dev["id"]
+        try:
+            self._error_history_dp = await self.hass.async_add_executor_job(
+                catalog_db.get_error_history_datapoint, device_id, self.db_path
+            )
+            self._error_codes = await self.hass.async_add_executor_job(
+                catalog_db.get_error_codes, device_id, self.db_path, self._language
+            )
+        except Exception as err:
+            _LOGGER.warning("Could not resolve error-history catalog entry: %s", err)
 
-        self._gfa_dp = None
-        if device_id is not None:
-            try:
-                self._gfa_dp = await self.hass.async_add_executor_job(
-                    catalog_db.get_gfa_error_history, device_id, self.db_path
-                )
-            except Exception as err:
-                _LOGGER.warning("Could not resolve burner fault history: %s", err)
+        try:
+            self._gfa_dp = await self.hass.async_add_executor_job(
+                catalog_db.get_gfa_error_history, device_id, self.db_path
+            )
+        except Exception as err:
+            _LOGGER.warning("Could not resolve burner fault history: %s", err)
         # Records the link cannot ask for would fail on every refresh.
         gfa_fcs = (
             {self._gfa_dp["fc_read"], self._gfa_dp["chip_fc_read"]}
@@ -564,17 +546,13 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def object_id(self, circuit: str | None, name: str) -> str:
         """A stable entity id for one of this controller's datapoints. See profiles.py."""
-        model = self.profile.model if self.profile else DOMAIN
-        circuits = getattr(self.profile, "circuits", {}) if self.profile else {}
-        return stable_object_id(model, circuits.get(circuit) if circuit else None, name)
+        circuits = self.profile.circuits
+        return stable_object_id(
+            self.profile.model, circuits.get(circuit) if circuit else None, name
+        )
 
-    def _sub_device(self, suffix: str, **extra: Any) -> DeviceInfo | None:
-        """A device under the controller, with the controller's product, variant and software.
-
-        None until the controller has been identified (device_info is set with the profile).
-        """
-        if not self.device_info:
-            return None
+    def _sub_device(self, suffix: str, **extra: Any) -> DeviceInfo:
+        """A device under the controller, with the controller's product, variant and software."""
         info: DeviceInfo = DeviceInfo(
             identifiers={(DOMAIN, f"{self.stable_id}_{suffix}")},
             manufacturer="Viessmann",
@@ -621,20 +599,18 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # through via_device, and the model is the controller's product and variant.
         return self._sub_device(
             circuit,
-            name=self.profile.circuits.get(circuit, circuit)
-            if self.profile
-            else circuit,
+            name=self.profile.circuits.get(circuit, circuit),
             configuration_url=f"http://{host}" if host else None,
         )
 
     def get_gateway_device_info(self) -> DeviceInfo:
         """Return DeviceInfo for the Optolink Gateway/Interface device."""
         host = self.config_entry.data.get(CONF_HOST, "")
-        esp_info = getattr(self.client, "esphome_info", None)
-        sw_ver = getattr(esp_info, "esphome_version", None) if esp_info else None
-        board = getattr(esp_info, "model", None) if esp_info else None
+        esp_info = self.client.esphome_info
+        sw_ver = getattr(esp_info, "esphome_version", None)
+        board = getattr(esp_info, "model", None)
         model = f"Optolink Bridge ({board})" if board else "Optolink Bridge"
-        mac = getattr(esp_info, "mac_address", None) if esp_info else None
+        mac = getattr(esp_info, "mac_address", None)
         connections = {(dr.CONNECTION_NETWORK_MAC, mac)} if mac else None
 
         # The name is the one this integration invents rather than reads from the catalog, so
@@ -841,7 +817,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         One telegram per register. Reading several of them in one wider telegram was tried and
         withdrawn: the controller accepts such a read and answers with bytes that are not what
         those addresses return individually, so cutting the answer up by address silently
-        produces wrong values. The whole result is cached in the config entry, so this runs
+        produces wrong values. The whole result is kept with the learned state, so this runs
         once per installation and never again. A register this link has no telegram for is
         left unread, as a refused one would be, without asking.
         """
@@ -1030,8 +1006,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         now = time.monotonic()
         budget_s = self.scan_interval_seconds * _BUS_BUDGET * self._backoff
-        cost = self._read_cost or _DEFAULT_READ_COST
-        capacity = max(1, int(budget_s / cost))
+        capacity = max(1, int(budget_s / self._read_cost))
 
         scored: list[tuple[float, str]] = []
         for item, _domain in items:
@@ -1111,16 +1086,14 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if now - self._last_publish < _PUBLISH_EVERY:
             return
         self._last_publish = now
-        merged = dict(self.data or {})
-        merged.update(data)
-        self.data = merged
+        self.data = {**self.data, **data}
         self.sensor_status = {**self.sensor_status, **sensor_status}
         self.sensor_status_raw = {**self.sensor_status_raw, **sensor_status_raw}
         self.async_update_listeners()
 
     def _carry_forward(self, data: dict[str, Any], item_id: str) -> None:
         """Reuse the previous reading for a datapoint that is not due this cycle."""
-        if self.data and item_id in self.data:
+        if item_id in self.data:
             data[item_id] = self.data[item_id]
 
     async def _read_reg(
@@ -1254,8 +1227,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data dynamically for all points defined in the active profile."""
-        if not self.profile:
-            await self.async_init_device()
         # A new day starts the write count over even when nothing is written.
         self._roll_write_day()
 
@@ -1264,9 +1235,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cycle_unreachable = None
         self._cycle_answered = 0
         self._current_telegrams = 0
-        self._current_failed = 0
         self._current_bytes = 0
-        self._current_datapoints = 0
+        failed = 0
 
         data: dict[str, Any] = {}
         self._cycle_data = data
@@ -1279,7 +1249,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._should_poll(item, domain)
         ]
         due = self._select_due(pollable)
-        self._current_datapoints = len(due)
         full_sweep, self._force_full_sweep = self._force_full_sweep, False
         self._last_publish = time.monotonic()
 
@@ -1314,7 +1283,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 data[item["id"]] = decode(item, raw)
             except Exception as err:
-                self._current_failed += 1
+                failed += 1
                 _LOGGER.debug(
                     "Failed reading %s %s (0x%04X): %s",
                     domain,
@@ -1343,12 +1312,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             round(min(100.0, (duration / period) * 100.0), 1) if period > 0 else 0.0
         )
         self.active_channels = self._current_telegrams
-        self.telegrams_failed = self._current_failed
+        self.telegrams_failed = failed
         self.bytes_transferred = self._current_bytes
-        self.datapoints_read = self._current_datapoints
-        self.datapoint_rate = (
-            round(self._current_datapoints / duration, 1) if duration > 0 else 0.0
-        )
+        self.datapoints_read = len(due)
+        self.datapoint_rate = round(len(due) / duration, 1) if duration > 0 else 0.0
         if duration > 0 and self._current_telegrams > 0:
             self.avg_response_time_ms = round(
                 (duration / self._current_telegrams) * 1000.0, 1
@@ -1411,11 +1378,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Hold the *period* at the configured interval, not the gap between sweeps.
         #
         # A DataUpdateCoordinator schedules the next refresh `update_interval` after the
-        # previous one finishes, so the period is duration + interval, not interval. With a
-        # 12 s sweep and a 15 s setting that made the real period 27 s: the bus sat idle 55% of
-        # the time while the budget believed it was using 80%, and every target interval was
-        # silently in units of 27 s rather than 15 s. Shrinking the gap by however long the
-        # sweep took makes "15 s" mean 15 s between starts, which is what the targets assume.
+        # previous one finishes, so the period is duration + interval, not interval. Shrinking
+        # the gap by however long the sweep took makes "15 s" mean 15 s between starts, which
+        # is what the targets assume.
         gap = max(_MIN_GAP, self.scan_interval_seconds - elapsed)
         wanted = timedelta(seconds=gap)
         if self.update_interval != wanted:
@@ -1506,9 +1471,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     bit_length=s["status_bit_length"],
                     enum=s.get("status_options"),
                 )
-                if raw_status is not None:
-                    with contextlib.suppress(ValueError, TypeError):
-                        sensor_status_raw[s["id"]] = int(raw_status)
+                sensor_status_raw[s["id"]] = raw_status
             return value
         if "options" in s:
             return _option(s, int.from_bytes(raw, "little", signed=False))
@@ -1550,8 +1513,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         address keeps this working across the families, whose clocks sit at different
         registers.
         """
-        if not self.profile:
-            return None
         for item in self.profile.sensors:
             conversion = (item.get("conversion") or "").strip().lower()
             if conversion in ("datetimebcd", "datetime_bcd") and item.get("fc_write"):
@@ -1676,7 +1637,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         cycle, so a wrong rule costs one poll interval twice a year -- but a wrong rule is
         still worth saying out loud.
         """
-        rule = getattr(self.profile, "clock_dst", None) or {}
+        rule = self.profile.clock_dst or {}
         changeovers = rule.get("changeovers")
         if not changeovers:
             self.dst_status = None
@@ -1774,9 +1735,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             retired_addresses=sorted(self._retired_addresses),
         )
 
-    def _disable_unsupported_entities(
-        self, sensor_status_raw: dict[str, int] | None = None
-    ) -> None:
+    def _disable_unsupported_entities(self, sensor_status_raw: dict[str, int]) -> None:
         """Disable entities for hardware this controller does not have.
 
         Two independent signals, both the controller's own answer rather than a guess:
@@ -1784,9 +1743,8 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         * the address is refused outright with a permanent error, and
         * the address reads fine but its sensor-health nibble reports the sensor as not fitted.
 
-        The second is why temperatures could show up as "unavailable" rather than simply not
-        being there: the value is readable, it is just meaningless, and the health nibble is
-        what says so. A sensor reporting a *fault* is deliberately left alone -- that is
+        In the second case the value is readable, it is just meaningless, and the health nibble
+        is what says so. A sensor reporting a *fault* is deliberately left alone -- that is
         something worth seeing.
 
         The catalog describes a controller family, so it always offers more datapoints than a
@@ -1796,16 +1754,12 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         The controller itself settles it: the address is refused with a permanent error, which
         _read_reg() records. Those entities can never produce a value, so leaving them enabled
-        only yields a permanently unavailable entity. Disabling is one-way -- re-enabling by
-        hand sticks, because the address stays in the skip set only for this session.
+        only yields a permanently unavailable entity.
         """
-        if not self.profile:
-            return
-
         # Entities whose health nibble says the sensor is absent.
         absent_ids = {
             item_id
-            for item_id, code in (sensor_status_raw or {}).items()
+            for item_id, code in sensor_status_raw.items()
             if code == _SENSOR_NOT_PRESENT and item_id not in self._retired_item_ids
         }
         pending = self._unsupported_addresses - self._retired_addresses
@@ -2070,8 +2024,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, address: int, block: int, fc_read: str | None, raw: bytes
     ) -> None:
         """Decode one freshly read block into every control that lives in it and notify."""
-        if not self.profile:
-            return
 
         def _same_block(item: dict[str, Any]) -> bool:
             return (
@@ -2090,7 +2042,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if self._cycle_data is not None:
             self._cycle_data.update(updated)
-        self.data = {**(self.data or {}), **updated}
+        self.data = {**self.data, **updated}
         self.async_update_listeners()
 
     def resolve_schedule(self, ref: str | None) -> str | None:
@@ -2100,7 +2052,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         written against earlier versions -- a circuit code, which resolves to that circuit's
         first programme.
         """
-        if not self.profile or not ref:
+        if not ref:
             return None
         wanted = str(ref).strip().lower()
         for key, cfg in self.profile.schedules.items():
@@ -2129,7 +2081,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         stores what it got at the end, so an edit landing in between would be overwritten
         with the older copy -- and the next window edit starts from that copy.
         """
-        if not self.profile or not self.profile.schedules:
+        if not self.profile.schedules:
             return
 
         resolved = self.resolve_schedule(schedule)
@@ -2292,29 +2244,32 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Fetch and decode the controller's error-history buffer.
 
         Everything comes from the catalog entry resolved at setup (address, size, element
-        count, wire function code) -- no address probing and no System-ID branching. The
-        heat-pump buffers are RPC arrays that must be fetched as N indexed sub-reads; the
-        boiler buffer is ordinary chunked memory. `read_error_history()` dispatches on fc_read.
+        count, wire function code) -- no address probing and no System-ID branching. Two
+        shapes exist across the device families. `Remote_Procedure_Call` (heat pumps): the
+        buffer is an RPC array and must be fetched as indexed sub-reads; read as plain memory
+        the controller answers "not implemented". Otherwise (boilers) it is an ordinary block
+        datapoint, read on its own record boundaries with the address rule of its catalog
+        type, as for the weekly programmes.
         """
         dp = self._error_history_dp
         if not dp:
             return
 
         try:
-            fc = (
-                optolink.FC_RPC
-                if dp["fc_read"] == "Remote_Procedure_Call"
-                else optolink.FC_VIRTUAL_READ
-            )
-            raw = await self.client.read_error_history(
-                dp["address"],
-                total_bytes=dp["total_bytes"],
-                block_factor=dp["block_factor"],
-                function_code=fc,
-                step_bytes=optolink.address_step_bytes(
-                    dp.get("mapping_type"), dp["entry_bytes"]
-                ),
-            )
+            rpc = dp["fc_read"] == "Remote_Procedure_Call"
+            if rpc:
+                raw = await self.client.read_rpc_block(
+                    dp["address"], dp["total_bytes"], dp["block_factor"]
+                )
+            else:
+                raw = await self.client.read_block(
+                    dp["address"],
+                    dp["total_bytes"],
+                    dp["block_factor"],
+                    optolink.address_step_bytes(
+                        dp.get("mapping_type"), dp["entry_bytes"]
+                    ),
+                )
             if not raw:
                 _LOGGER.warning(
                     "Error history read at 0x%04X returned no data", dp["address"]
@@ -2323,14 +2278,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Both layouts put the fault code at entry byte 5 and terminate on 0x00; the WP
             # family stores a little-endian epoch at bytes 1..4 while the boiler stores BCD.
-            if dp["fc_read"] == "Remote_Procedure_Call":
-                entries = decode_wp_error_history(
-                    raw, entry_bytes=dp["entry_bytes"], error_codes=self._error_codes
-                )
-            else:
-                entries = decode_boiler_error_history(
-                    raw, entry_bytes=dp["entry_bytes"], error_codes=self._error_codes
-                )
+            decode = decode_wp_error_history if rpc else decode_boiler_error_history
+            entries = decode(
+                raw, entry_bytes=dp["entry_bytes"], error_codes=self._error_codes
+            )
 
             self.error_history = entries
             self.last_error = entries[0] if entries else None

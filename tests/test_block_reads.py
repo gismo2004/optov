@@ -103,15 +103,7 @@ def test_a_boiler_error_buffer_is_addressed_by_its_type_not_probed():
     # such a controller refuses as an address it does not have.
     rec = Recorder(0x7507)
     client = client_with(rec, record_size=9, step_bytes=1)
-    data = run(
-        client.read_error_history(
-            0x7507,
-            total_bytes=90,
-            block_factor=10,
-            function_code=optolink.FC_VIRTUAL_READ,
-            step_bytes=address_step_bytes(3, 9),
-        )
-    )
+    data = run(client.read_block(0x7507, 90, 10, step_bytes=address_step_bytes(3, 9)))
 
     assert data == bytes(range(90))
     assert rec.calls == [(0x7507 + 9 * i, 9) for i in range(10)]

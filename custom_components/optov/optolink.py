@@ -373,7 +373,7 @@ def address_step_bytes(mapping_type: int | None, record_size: int) -> int:
 
 
 class OptolinkClient:
-    """Speaks P300 to a controller through a serial port that serialx opens from a URL.
+    """Speaks P300 or KW to a controller through a serial port that serialx opens from a URL.
 
     `esphome-hass://` reaches the node over Home Assistant's own ESPHome connection;
     `esphome://` opens one of its own, for a node that integration does not have.
@@ -805,13 +805,12 @@ class OptolinkClient:
                         await self._reconnect_locked()
                     if not self._synced:
                         await self._sync()
-                    if self.protocol == PROTO_KW:
-                        return await self._transact_kw(
-                            function_code, address, data_length, data
-                        )
-                    return await self._transact(
-                        function_code, address, data_length, data
+                    transact = (
+                        self._transact_kw
+                        if self.protocol == PROTO_KW
+                        else self._transact
                     )
+                    return await transact(function_code, address, data_length, data)
                 except (
                     OptolinkDeviceError,
                     OptolinkNotConnected,
@@ -847,13 +846,9 @@ class OptolinkClient:
     async def read_rpc(self, address: int, prefix: bytes) -> bytes:
         """Single Remote_Procedure_Call read (P300 function code 7).
 
-        See read_rpc_block() for how an array datapoint is assembled from these. Wire format:
-
-            b0 = (ProtocolIdentifier << 4) | MessageIdentifier   -> 0x00 for a request
-            b1 = (MessageSequenzNumber << 5) | FunctionCode      -> 0x07 = Remote_Procedure_Call
-            b2 = address high, b3 = address low
-            b4 = DataLength   (= the catalog's BlockLength, which for an RPC is len(prefix))
-            b5..= Data        (= the catalog's PrefixRead bytes, i.e. the entry index)
+        See read_rpc_block() for how an array datapoint is assembled from these, and
+        _transact() for the wire format; the data is the catalog's PrefixRead bytes, i.e. the
+        entry index.
 
         Unlike a Virtual_READ the length byte is the size of the *outgoing* parameter, not the
         expected response length -- the controller decides how much it returns.
@@ -908,7 +903,7 @@ class OptolinkClient:
 
         `length` must fit MAX_TELEGRAM_PAYLOAD and line up with the controller's own datapoint
         layout, otherwise the controller answers ERR_BAD_RANGE. Use read_block() for anything
-        larger or array-shaped -- it handles the chunking and the alignment.
+        larger or array-shaped -- it reads record by record on the datapoint's own boundaries.
         """
         if not 1 <= length <= MAX_TELEGRAM_PAYLOAD:
             raise ValueError(
@@ -1023,7 +1018,7 @@ class OptolinkClient:
         """Read all seven days of a weekly programme.
 
         With the catalog's block geometry the programme is one block datapoint and comes in
-        through read_block(), record-aligned and in a few telegrams. Without it -- the classic
+        through read_block(), one telegram per record. Without it -- the classic
         boiler layout -- each day is its own block at base + day * day_bytes.
         """
         from .conversions import DAYS, decode_day_schedule
@@ -1137,28 +1132,3 @@ class OptolinkClient:
                 raw_data[i * record_size : (i + 1) * record_size],
                 fc,
             )
-
-    async def read_error_history(
-        self,
-        base_address: int,
-        total_bytes: int,
-        block_factor: int,
-        function_code: int = FC_RPC,
-        step_bytes: int = 1,
-    ) -> bytes:
-        """Read a controller error-history buffer, honouring its catalog function code.
-
-        Two shapes exist across the device families (all per the catalog, nothing hardcoded):
-
-        * `FCRead = Remote_Procedure_Call` (heat pumps) -- the buffer is an RPC array and MUST
-          be fetched as `block_factor` indexed sub-reads. Reading it as plain chunked memory
-          gets 0x01 "not implemented" from the controller.
-        * `FCRead = Virtual_READ` (boilers) -- an ordinary block datapoint, fetched by
-          read_block() on its own record boundaries, with the address rule of its catalog type
-          (address_step_bytes()), as for the weekly programmes.
-        """
-        if function_code == FC_RPC:
-            return await self.read_rpc_block(base_address, total_bytes, block_factor)
-        return await self.read_block(
-            base_address, total_bytes, block_factor, step_bytes, function_code
-        )
