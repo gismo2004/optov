@@ -2,8 +2,9 @@
 
 Entity names, units and device names are translated by Home Assistant itself once an entity
 carries a `translation_key`, so nothing here is needed for those. This exists for the handful
-of strings the integration has to put *into* a value -- currently the fault-history sensor's
-"no entries" state -- where Home Assistant has no mechanism of its own.
+of strings the integration has to put *into* a value -- the fault-history sensor's "no
+entries" state, labels built in the options dialog -- where Home Assistant has no mechanism of
+its own.
 
 The strings live in `translations/<language>.json` under a `text` section, alongside the
 entity and card sections, and are resolved in the user's Home Assistant language. Adding a

@@ -590,7 +590,7 @@ def _async_reconcile_registry(
         # A datapoint that moved between circuits follows its circuit's device.
         info = coordinator.get_device_info(item.get("circuit"))
         if info:
-            # Identifiers are no longer unique across config entries, so the lookup has to be
+            # Identifiers are not unique across config entries, so the lookup has to be
             # scoped to this one.
             device = device_reg.async_get_device_by_identifier(
                 next(iter(info["identifiers"])), entry.entry_id

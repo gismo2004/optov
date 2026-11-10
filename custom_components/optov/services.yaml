@@ -6,7 +6,7 @@ refresh_all:
     protocol offers no change notification and a rotating value is otherwise only re-read
     once per full turn.
   fields:
-    config_entry_id:
+    config_entry_id: &controller
       name: Controller
       description: Which controller, when more than one is set up. Optional otherwise.
       required: false
@@ -22,25 +22,13 @@ sync_clock:
     the heating times. Normally this happens by itself; calling the service does it now and
     regardless of how small the drift is.
   fields:
-    config_entry_id:
-      name: Controller
-      description: Which controller, when more than one is set up. Optional otherwise.
-      required: false
-      selector:
-        config_entry:
-          integration: optov
+    config_entry_id: *controller
 
 read_datapoint:
   name: Read datapoint
   description: Read any address from the controller once, outside the regular poll.
   fields:
-    config_entry_id:
-      name: Controller
-      description: Which controller, when more than one is set up. Optional otherwise.
-      required: false
-      selector:
-        config_entry:
-          integration: optov
+    config_entry_id: *controller
     address:
       name: Address
       description: Hex address (e.g. 0x0108) or decimal address.
@@ -66,13 +54,7 @@ write_datapoint:
   name: Write datapoint
   description: Write raw bytes to an address on the controller.
   fields:
-    config_entry_id:
-      name: Controller
-      description: Which controller, when more than one is set up. Optional otherwise.
-      required: false
-      selector:
-        config_entry:
-          integration: optov
+    config_entry_id: *controller
     address:
       name: Address
       description: Hex address (e.g. 0x2000) or decimal address.
@@ -95,14 +77,8 @@ read_schedule:
     Programmes are otherwise read once at startup and checked before every write. The
     programme key is the `schedule` attribute of its sensor.
   fields:
-    config_entry_id:
-      name: Controller
-      description: Which controller, when more than one is set up. Optional otherwise.
-      required: false
-      selector:
-        config_entry:
-          integration: optov
-    schedule:
+    config_entry_id: *controller
+    schedule: &programme
       name: Programme
       description: Programme key as shown in the schedule sensor's `schedule` attribute.
       required: true
@@ -117,20 +93,8 @@ set_schedule_day:
     time grid and the selectable levels are given by the schedule sensor's
     `windows_per_day`, `minutes_per_step` and `modes` attributes.
   fields:
-    config_entry_id:
-      name: Controller
-      description: Which controller, when more than one is set up. Optional otherwise.
-      required: false
-      selector:
-        config_entry:
-          integration: optov
-    schedule:
-      name: Programme
-      description: Programme key as shown in the schedule sensor's `schedule` attribute.
-      required: true
-      example: "nku_tagesprogramm_hk1"
-      selector:
-        text:
+    config_entry_id: *controller
+    schedule: *programme
     day:
       name: Days
       description: >-
@@ -160,7 +124,7 @@ set_schedule_day:
       example: '[{"start": "05:00", "end": "22:00", "mode": 2}]'
       selector:
         object:
-    force:
+    force: &force
       name: Overwrite changes on the controller
       description: >-
         The programme is read first. If it was changed on the controller since it was last
@@ -174,20 +138,8 @@ set_schedule_window:
   name: Set one switching window
   description: Update or add a single switching window of one day.
   fields:
-    config_entry_id:
-      name: Controller
-      description: Which controller, when more than one is set up. Optional otherwise.
-      required: false
-      selector:
-        config_entry:
-          integration: optov
-    schedule:
-      name: Programme
-      description: Programme key as shown in the schedule sensor's `schedule` attribute.
-      required: true
-      example: "nku_tagesprogramm_hk1"
-      selector:
-        text:
+    config_entry_id: *controller
+    schedule: *programme
     day:
       name: Day
       description: Day of the week.
@@ -238,15 +190,7 @@ set_schedule_window:
         number:
           min: 0
           max: 4
-    force:
-      name: Overwrite changes on the controller
-      description: >-
-        The programme is read first. If it was changed on the controller since it was last
-        read, the call fails and the controller's version is shown, unless this is on.
-      required: false
-      default: false
-      selector:
-        boolean:
+    force: *force
 
 clear_orphaned_statistics:
   name: Delete statistics of disabled entities
@@ -257,13 +201,7 @@ clear_orphaned_statistics:
     operation is offered as a repair whenever there is something to delete. Entities you
     disabled yourself are left alone unless asked for.
   fields:
-    config_entry_id:
-      name: Controller
-      description: Which controller, when more than one is set up. Optional otherwise.
-      required: false
-      selector:
-        config_entry:
-          integration: optov
+    config_entry_id: *controller
     include_user_disabled:
       name: Include entities disabled by hand
       description: Also delete the statistics of entities you disabled yourself.

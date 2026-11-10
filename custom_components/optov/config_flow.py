@@ -109,8 +109,21 @@ _SCAN_INTERVAL = vol.All(int, vol.Range(min=5, max=600))
 CONF_DELETE = "delete"
 
 
+def _pick(options: list, multiple: bool = False) -> SelectSelector:
+    """A choice shown as a list, every option visible at once."""
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=options, multiple=multiple, mode=SelectSelectorMode.LIST
+        )
+    )
+
+
 async def _async_catalog_languages(hass: HomeAssistant, catalog: str | None) -> list:
-    """The languages a catalog carries text in, which are the ones it can be shown in."""
+    """The languages a catalog carries text in, which are the ones it can be shown in.
+
+    Which languages are on offer is a property of the catalog, not of the integration: a
+    catalog built for two languages can only be shown in those two.
+    """
     path = os.path.join(hass.config.path(DOMAIN), catalog or "")
     return await hass.async_add_executor_job(get_available_languages, path)
 
@@ -157,14 +170,6 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         return OptoVOptionsFlow()
 
-    async def _async_languages(self) -> list:
-        """The languages the chosen catalog carries text in.
-
-        Which languages are on offer is a property of the catalog, not of the integration: a
-        catalog built for two languages can only be shown in those two.
-        """
-        return await _async_catalog_languages(self.hass, self._catalog)
-
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -200,7 +205,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_manual({CONF_HOST: device, **user_input})
             return await self._async_create(device, *self._proxy_of(device), user_input)
 
-        languages = await self._async_languages()
+        languages = await _async_catalog_languages(self.hass, self._catalog)
         # A port already picked to ask the controller its identity is offered again here, so
         # nobody has to find it twice.
         device_key = (
@@ -485,9 +490,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
                 for name, label in labels.items()
             ]
             default = current if current in names else names[0]
-            schema[vol.Optional(CONF_CATALOG, default=default)] = SelectSelector(
-                SelectSelectorConfig(options=options, mode=SelectSelectorMode.LIST)
-            )
+            schema[vol.Optional(CONF_CATALOG, default=default)] = _pick(options)
         schema[vol.Optional(CONF_CATALOG_FILE)] = FileSelector(
             # A catalog as the compiler leaves it. `.xz` is still taken because an older
             # one may be compressed; it is unpacked once, on the way in.
@@ -505,11 +508,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                     label = f"{label} – {in_use}"
                 deletable.append(SelectOptionDict(value=c["name"], label=label))
-            schema[vol.Optional(CONF_DELETE, default=[])] = SelectSelector(
-                SelectSelectorConfig(
-                    options=deletable, multiple=True, mode=SelectSelectorMode.LIST
-                )
-            )
+            schema[vol.Optional(CONF_DELETE, default=[])] = _pick(deletable, True)
         return vol.Schema(schema)
 
     @staticmethod
@@ -564,7 +563,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
 
         entry = self._get_reconfigure_entry()
         options = dict(entry.options)
-        languages = await self._async_languages()
+        languages = await _async_catalog_languages(self.hass, self._catalog)
         language = option(entry, CONF_LANGUAGE, DEFAULT_LANGUAGE)
         if language not in languages:
             # The new catalog does not carry the language in use. Take one it does, so the
@@ -645,7 +644,7 @@ class OptoVConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
         given = user_input or {}
-        languages = await self._async_languages()
+        languages = await _async_catalog_languages(self.hass, self._catalog)
         schema = vol.Schema(
             {
                 vol.Required(CONF_HOST, default=given.get(CONF_HOST, "")): str,
@@ -841,14 +840,11 @@ class OptoVOptionsFlow(OptionsFlow):
         self, platform: str, item: dict[str, Any], on: int, device_class: str, name: str
     ) -> dict:
         return {
-            vol.Required(KEY_ON, default=str(on)): SelectSelector(
-                SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(value=str(v), label=item["options"][v])
-                        for v in sorted(item["options"])
-                    ],
-                    mode=SelectSelectorMode.LIST,
-                )
+            vol.Required(KEY_ON, default=str(on)): _pick(
+                [
+                    SelectOptionDict(value=str(v), label=item["options"][v])
+                    for v in sorted(item["options"])
+                ]
             ),
             vol.Required(KEY_DEVICE_CLASS, default=device_class): SelectSelector(
                 SelectSelectorConfig(
@@ -885,15 +881,7 @@ class OptoVOptionsFlow(OptionsFlow):
         options.sort(key=lambda o: o["label"].casefold())
         return self.async_show_form(
             step_id="custom_onoff_add",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("device"): SelectSelector(
-                        SelectSelectorConfig(
-                            options=options, mode=SelectSelectorMode.LIST
-                        )
-                    )
-                }
-            ),
+            data_schema=vol.Schema({vol.Required("device"): _pick(options)}),
         )
 
     async def async_step_custom_onoff_value(
@@ -996,15 +984,7 @@ class OptoVOptionsFlow(OptionsFlow):
         options.sort(key=lambda o: o["label"].casefold())
         return self.async_show_form(
             step_id="custom_edit",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("entity"): SelectSelector(
-                        SelectSelectorConfig(
-                            options=options, mode=SelectSelectorMode.LIST
-                        )
-                    )
-                }
-            ),
+            data_schema=vol.Schema({vol.Required("entity"): _pick(options)}),
         )
 
     async def _async_kind_names(self) -> dict[str, str]:
@@ -1198,14 +1178,8 @@ class OptoVOptionsFlow(OptionsFlow):
         before = draft.get(KEY_WRITE) or {}
         schema = {
             vol.Required(f"write_{mode}", default=str(before.get(mode, values[0]))): (
-                SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            SelectOptionDict(value=str(v), label=options[v])
-                            for v in values
-                        ],
-                        mode=SelectSelectorMode.LIST,
-                    )
+                _pick(
+                    [SelectOptionDict(value=str(v), label=options[v]) for v in values]
                 )
             )
             for mode, values in shared.items()
