@@ -24,23 +24,33 @@ rather than a branch in Python.
 ```
 custom_components/optov/
   __init__.py      setup, registry reconciliation, dashboard resource, services
-  optolink.py      P300 transport: framing, checksums, sync, retries, block/array reads
+  optolink.py      P300 and KW transport: framing, checksums, sync, retries, block/array reads
   decode.py        raw bytes -> value, driven by parameter type and conversion
   conversions.py   shared decoders (schedules, BCD timestamps) and their encoders
   catalog_db.py    all catalog access; controller identification; profile generation
   coordinator.py   polling, cadence, per-cycle state, schedules, clock, error history
   profiles.py      the generated entity set as the platforms consume it; stable entity ids
   errors.py        error-history buffer decoding
-  sensor.py / binary_sensor.py / number.py / select.py / switch.py   entity platforms
-  config_flow.py   setup and options
+  sensor.py / binary_sensor.py / number.py / select.py / switch.py / date.py
+                   the catalog-driven entity platforms
+  event.py         a new fault-history entry as an event an automation can trigger on
+  custom_entities.py / custom_file.py / custom_assembled.py
+                   entities the user builds from the controller's values, and their YAML file
+  climate.py / water_heater.py   the thermostats and water heaters assembled that way
+  config_flow.py   setup, reconfigure and options, the custom entities menu among them
+  repairs.py / orphaned_statistics.py   the repair flows, and the statistics clean-up behind one
+  services.yaml    the services' fields; repeated ones are defined once and referenced
   diagnostics.py   the download on the entry: controller, catalog, learned state, bus figures
   translate.py     the integration's own UI strings from translations/, for values
-  entity.py        what every catalog-driven entity shares
+  entity.py        what every catalog-driven entity shares, and the stable ids of all of them
   frontend/        the two dashboard cards (one file)
   translations/    the integration's own text, one file per language
   brand/           the mark and wordmark, SVG sources and PNG renders
-hacs.json          HACS metadata
-tests/             what runs without hardware: decoder, conversions, faults, the card
+blueprints/        the automation blueprint for a message on a fault
+hacs.json          Marketplace (HACS) metadata, the minimum Home Assistant version among it
+tests/             what runs without hardware: decoding, the transport against a fake line,
+                   the catalog queries against a hand-made sample catalog, entity placement,
+                   custom entities, the fault event, the card
 docs/              the documentation pages the README links to, and its images
 work/              git-ignored playground: deployment scripts, scratch data, throwaway probes
 ```
@@ -177,8 +187,8 @@ An `if language == "de"` branch anywhere is a bug.
 **Ask the device, don't guess.** Where the catalog is silent or self-contradictory, prefer a
 one-off probe at startup over an assumption: the controller is the authority on what it
 implements, what read lengths it accepts, and how its array datapoints are addressed. Several
-such probes already exist (`read_block`'s drop to one record per telegram, the unsupported-address
-set, the equipment probe) and they follow that pattern deliberately.
+such probes already exist (the unsupported-address set, the equipment probe, the sensor-health
+nibble that retires a sensor which is not fitted) and they follow that pattern deliberately.
 
 **Measure before optimising, and record negative results.** Several plausible ideas here turned
 out to be wrong when measured, and the reasons are written next to the code so they are not
@@ -282,11 +292,15 @@ go in. That is what keeps a release from being an archaeology of the commits bet
 ## Working on the integration
 
 `tests/` holds what can be checked without hardware, and CI runs it on every push: the decoder,
-the conversions and the fault buffer are free of Home Assistant imports on purpose, so they are
-imported directly and tested against the rules the catalog implies -- signedness by declared
-width, MSB-first bit fields, the round trip of every schedule layout. Everything above them --
-the transport's timing, the catalog queries, the coordinator -- still needs a real controller,
-and the probe scripts for that live in `work/`.
+the conversions, the fault buffer and the catalog queries are free of Home Assistant imports on
+purpose, so they are imported directly and tested against the rules the catalog implies --
+signedness by declared width, MSB-first bit fields, the round trip of every schedule layout.
+The catalog queries run against `tests/sample_catalog.py`, a catalog of one invented controller
+that is built by hand for each run; a catalog bug gets a row there and a test, and nothing
+from a real catalog goes into it. Modules that import Home Assistant are loaded against
+stand-ins for the few names they use (`test_fault_event.py` shows the pattern). The transport's
+timing on a real line and the coordinator as a whole still need a controller, and the probe
+scripts for that live in `work/`.
 
 `node tests/card_smoke.js` renders the dashboard card against a stub DOM and a fake Home
 Assistant and fails on any exception. Run it after every card change. `node --check` only
