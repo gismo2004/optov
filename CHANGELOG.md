@@ -14,6 +14,11 @@ commits.
 - Home Assistant 2026.11 logged a deprecation warning for the custom thermostat and water heater
   at every start. They now use the current names for their temperatures; earlier Home Assistant
   versions keep working.
+- The check at startup for which equipment a controller has read its register names in German,
+  whatever language was chosen, so with another catalog language a rule could go unevaluated
+  and entities for equipment that is not installed stayed visible. It now uses the chosen
+  language. No change with a German or English catalog; some controllers read their startup
+  registers once more after the update.
 
 ## [0.9.5] - 2026-11-06
 

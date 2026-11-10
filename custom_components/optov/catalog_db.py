@@ -689,11 +689,20 @@ _PROBE_COLUMNS = (
 )
 
 
-def get_probe_targets(device_id: int, db_path: str) -> list[dict[str, Any]]:
+# Sensor-health nibbles are read with their value on every poll, so they are neither probed
+# as rule inputs nor stood in for by another datapoint.
+_NOT_SENSOR_HEALTH = (
+    "{0} NOT LIKE '%SensorStatus%' AND {0} NOT LIKE '%SensorDruckStatus%'"
+)
+
+
+def get_probe_targets(
+    device_id: int, db_path: str, culture: str
+) -> list[dict[str, Any]]:
     """Return distinct equipment configuration registers for self-configuration probe.
 
-    Excludes dynamic runtime sensor health nibbles (SensorStatus, SensorDruckStatus)
-    which are evaluated per-datapoint at runtime during polling.
+    `culture` is the language the rules are evaluated in: the redirects of
+    get_condition_aliases() are matched on labels, so both have to read the same ones.
     """
     with closing(get_db_connection(db_path)) as conn:
         rows = conn.execute(
@@ -701,9 +710,7 @@ def get_probe_targets(device_id: int, db_path: str) -> list[dict[str, Any]]:
                FROM display_conditions dc
                JOIN datapoints dp
                  ON dc.condition_event_type_id = dp.id AND dp.device_id = dc.device_id
-               WHERE dc.device_id = ?
-                 AND dp.name NOT LIKE '%SensorStatus%'
-                 AND dp.name NOT LIKE '%SensorDruckStatus%'""",
+               WHERE dc.device_id = ? AND {_NOT_SENSOR_HEALTH.format("dp.name")}""",
             (device_id,),
         ).fetchall()
         targets = {r["id"]: dict(r) for r in rows}
@@ -711,7 +718,8 @@ def get_probe_targets(device_id: int, db_path: str) -> list[dict[str, Any]]:
         # Rules whose input belongs to a sibling family are redirected onto this controller's
         # equivalent (see get_condition_aliases). Those equivalents have to be probed too,
         # otherwise the redirect resolves to a datapoint nobody ever read.
-        for local_id in set(get_condition_aliases(device_id, db_path=db_path).values()):
+        aliases = get_condition_aliases(device_id, db_path, culture)
+        for local_id in set(aliases.values()):
             if local_id in targets:
                 continue
             row = conn.execute(
@@ -922,9 +930,7 @@ def _condition_holds(probed_value: float | None, op: str, compare: int) -> bool:
 _ALIAS_CACHE: dict[tuple[str, int, str], tuple[int, dict[int, int]]] = {}
 
 
-def get_condition_aliases(
-    device_id: int, db_path: str, culture: str = "de"
-) -> dict[int, int]:
+def get_condition_aliases(device_id: int, db_path: str, culture: str) -> dict[int, int]:
     """Map display-condition inputs that this controller does not have onto ones it does.
 
     A rule names the datapoint whose value it tests. For a fifth of this controller's rules
@@ -976,7 +982,7 @@ def get_condition_aliases(
             row = conn.execute(
                 f"""SELECT COALESCE(t.s, dd.name) AS label FROM datapoint_defs dd
                    {_text_join(conn, culture, "t", "dd.name_key")}
-                   WHERE dd.id = ?""",
+                   WHERE dd.id = ? AND {_NOT_SENSOR_HEALTH.format("dd.name")}""",
                 (fid,),
             ).fetchone()
             if not row:
@@ -999,7 +1005,7 @@ def evaluate_rules(
     device_id: int,
     probed_values: dict[int, int],
     db_path: str,
-    culture: str = "de",
+    culture: str,
 ) -> tuple[set[int], set[int]]:
     """Evaluate display condition rules and return (hidden_event_type_ids, hidden_group_ids)."""
     aliases = get_condition_aliases(device_id, db_path, culture)

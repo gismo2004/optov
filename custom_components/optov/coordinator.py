@@ -868,7 +868,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         probed_values: dict[int, int] = {}
         targets = await self.hass.async_add_executor_job(
-            catalog_db.get_probe_targets, dev["id"], self.db_path
+            catalog_db.get_probe_targets, dev["id"], self.db_path, self._language
         )
         cached_conditions = self._learned.get("condition_cache")
         cached_targets = self._learned.get("condition_targets")
