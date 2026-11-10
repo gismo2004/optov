@@ -107,7 +107,7 @@ class AssembledEntity(Entity):
         return self._target_attr("max", 35)
 
     @property
-    def target_step(self) -> float:
+    def target_temperature_step(self) -> float:
         return self._target_attr("setpoint_step", self._target_attr("step", 1))
 
     @property

@@ -11,7 +11,6 @@ from homeassistant.components.sensor import (
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -19,7 +18,7 @@ from . import catalog_db
 from .const import CARD_VERSION_KEY, DOMAIN
 from .conversions import DAYS, snap
 from .coordinator import OptolinkConfigEntry, OptolinkCoordinator
-from .entity import OptolinkEntity
+from .entity import OptolinkEntity, add_with_stable_ids
 from .profiles import parse_address
 from .translate import async_ui_text
 
@@ -68,13 +67,7 @@ async def async_setup_entry(
     if coordinator._gfa_dp:
         entities.append(OptolinkGfaErrorHistorySensor(coordinator, empty_text))
 
-    # A stable entity id, so a reinstall lands on the same ids and keeps its history.
-    for entity in entities:
-        entity.entity_id = async_generate_entity_id(
-            "sensor.{}", entity.object_id_hint, hass=hass
-        )
-
-    async_add_entities(entities)
+    add_with_stable_ids(hass, async_add_entities, "sensor", entities)
 
 
 class OptolinkSensor(OptolinkEntity, SensorEntity):

@@ -10,12 +10,11 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import OptolinkConfigEntry
 from .custom_entities import KEY_DEVICE_CLASS, SECTION_ONOFF, off_value
-from .entity import OptolinkEntity, OptolinkOnOffEntity
+from .entity import OptolinkEntity, OptolinkOnOffEntity, add_with_stable_ids
 
 # Writes go one at a time: the controller sits on a serial line and the client queues
 # telegrams anyway, so more than one in flight would only wait on the other.
@@ -32,11 +31,7 @@ async def async_setup_entry(
         OptolinkSwitch(coordinator, definition)
         for definition in coordinator.profile.switches
     ]
-    for entity in entities:
-        entity.entity_id = async_generate_entity_id(
-            "switch.{}", entity.object_id_hint, hass=hass
-        )
-    async_add_entities(entities)
+    add_with_stable_ids(hass, async_add_entities, "switch", entities)
 
     # On/off entities the user added (custom_entities.py); this platform takes its kind.
     onoff = [
@@ -44,11 +39,7 @@ async def async_setup_entry(
         for entity in coordinator.custom[SECTION_ONOFF]
         if entity["platform"] == "selects"
     ]
-    for entity in onoff:
-        entity.entity_id = async_generate_entity_id(
-            "switch.{}", entity.object_id_hint, hass=hass
-        )
-    async_add_entities(onoff)
+    add_with_stable_ids(hass, async_add_entities, "switch", onoff)
 
 
 class OptolinkSwitch(OptolinkEntity, SwitchEntity):

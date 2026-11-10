@@ -8,11 +8,11 @@ from typing import Any
 
 from homeassistant.components.event import EventEntity
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import OptolinkConfigEntry, OptolinkCoordinator
+from .entity import add_with_stable_ids
 
 PARALLEL_UPDATES = 0
 
@@ -30,11 +30,7 @@ async def async_setup_entry(
         entities.append(OptolinkFaultEvent(coordinator))
     if coordinator._gfa_dp:
         entities.append(OptolinkBurnerFaultEvent(coordinator))
-    for entity in entities:
-        entity.entity_id = async_generate_entity_id(
-            "event.{}", entity.object_id_hint, hass=hass
-        )
-    async_add_entities(entities)
+    add_with_stable_ids(hass, async_add_entities, "event", entities)
 
 
 class OptolinkFaultEvent(CoordinatorEntity[OptolinkCoordinator], EventEntity):

@@ -2,11 +2,10 @@
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import OptolinkConfigEntry
-from .entity import OptolinkEntity
+from .entity import OptolinkEntity, add_with_stable_ids
 
 # Writes go one at a time: the controller sits on a serial line and the client queues
 # telegrams anyway, so more than one in flight would only wait on the other.
@@ -23,11 +22,7 @@ async def async_setup_entry(
         OptolinkSelect(coordinator, definition)
         for definition in coordinator.profile.selects
     ]
-    for entity in entities:
-        entity.entity_id = async_generate_entity_id(
-            "select.{}", entity.object_id_hint, hass=hass
-        )
-    async_add_entities(entities)
+    add_with_stable_ids(hass, async_add_entities, "select", entities)
 
 
 class OptolinkSelect(OptolinkEntity, SelectEntity):

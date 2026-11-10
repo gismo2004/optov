@@ -44,7 +44,6 @@ _LOGGER = logging.getLogger(__name__)
 
 # Where the file can be downloaded; the link in the options dialog is signed for a few minutes.
 DOWNLOAD_URL = "/api/optov/custom/{entry_id}"
-# The domain of the entity a two-state value comes in as.
 
 
 def custom_file_name(stable_id: str) -> str:

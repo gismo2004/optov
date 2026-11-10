@@ -2,12 +2,11 @@
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import OptolinkConfigEntry
 from .decode import unscale
-from .entity import OptolinkEntity
+from .entity import OptolinkEntity, add_with_stable_ids
 
 # Writes go one at a time: the controller sits on a serial line and the client queues
 # telegrams anyway, so more than one in flight would only wait on the other.
@@ -24,11 +23,7 @@ async def async_setup_entry(
         OptolinkNumber(coordinator, definition)
         for definition in coordinator.profile.numbers
     ]
-    for entity in entities:
-        entity.entity_id = async_generate_entity_id(
-            "number.{}", entity.object_id_hint, hass=hass
-        )
-    async_add_entities(entities)
+    add_with_stable_ids(hass, async_add_entities, "number", entities)
 
 
 class OptolinkNumber(OptolinkEntity, NumberEntity):

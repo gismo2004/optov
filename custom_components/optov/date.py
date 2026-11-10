@@ -5,13 +5,12 @@ from datetime import date, timedelta
 from homeassistant.components.date import DateEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import OptolinkConfigEntry
 from .decode import DecodeError, encode_date
-from .entity import OptolinkEntity
+from .entity import OptolinkEntity, add_with_stable_ids
 
 # Writes go one at a time, as for every other setting.
 PARALLEL_UPDATES = 1
@@ -27,11 +26,7 @@ async def async_setup_entry(
         OptolinkDate(coordinator, definition)
         for definition in coordinator.profile.dates
     ]
-    for entity in entities:
-        entity.entity_id = async_generate_entity_id(
-            "date.{}", entity.object_id_hint, hass=hass
-        )
-    async_add_entities(entities)
+    add_with_stable_ids(hass, async_add_entities, "date", entities)
 
 
 class OptolinkDate(OptolinkEntity, DateEntity):

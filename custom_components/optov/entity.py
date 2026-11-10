@@ -7,10 +7,30 @@ for a sensor, a number, a select and a switch, so they live here once.
 
 from typing import Any
 
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import async_generate_entity_id
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import OptolinkCoordinator
 from .custom_entities import KEY_NAME, KEY_ON, is_on, onoff_unique_id
+
+
+def add_with_stable_ids(
+    hass: HomeAssistant,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+    domain: str,
+    entities: list[Any],
+) -> None:
+    """Add entities under their own suggested ids (`object_id_hint`).
+
+    A stable entity id, so a reinstall lands on the same ids and keeps its history.
+    """
+    for entity in entities:
+        entity.entity_id = async_generate_entity_id(
+            f"{domain}.{{}}", entity.object_id_hint, hass=hass
+        )
+    async_add_entities(entities)
 
 
 class OptolinkEntity(CoordinatorEntity[OptolinkCoordinator]):
@@ -50,7 +70,7 @@ class OptolinkEntity(CoordinatorEntity[OptolinkCoordinator]):
         at the time. The model code is stable, which is what lets a reinstall land on the same
         ids and keep its history. See profiles.stable_object_id.
         """
-        return self.coordinator.object_id(self._def.get("circuit"), self._def["name"])
+        return self.coordinator.object_id(self._def.get("circuit"), self._attr_name)
 
     @property
     def raw_value(self) -> Any:
@@ -103,10 +123,6 @@ class OptolinkOnOffEntity(OptolinkEntity):
         # The user asked for this one, so it is shown regardless of the source's tier.
         self._attr_entity_registry_enabled_default = True
         self._attr_entity_category = None
-
-    @property
-    def object_id_hint(self) -> str:
-        return self.coordinator.object_id(self._def.get("circuit"), self._attr_name)
 
     @property
     def is_on(self) -> bool | None:
