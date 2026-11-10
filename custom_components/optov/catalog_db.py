@@ -1730,10 +1730,10 @@ def _place_datapoint(
         # one-off hot water run are all this. A select would take two taps where Home
         # Assistant already draws a toggle, and a number would read 0 and 1.
         if bit_length == 1:
-            profile["switches"].append(entry)
+            profile["switches"].append(_with_default(entry, dp))
         elif enum_values:
             entry["options"] = enum_values
-            profile["selects"].append(entry)
+            profile["selects"].append(_with_default(entry, dp))
         elif is_date(dp.get("conversion")) and not bit_length:
             # A holiday's first and last day, a service date: a calendar date both ways. As
             # a reading it could only be looked at; as a date it is set from a date picker.
@@ -1744,7 +1744,7 @@ def _place_datapoint(
         else:
             entry.update(_unit_meta(unit_str))
             entry.update(_number_limits(dp))
-            profile["numbers"].append(entry)
+            profile["numbers"].append(_with_default(entry, dp))
         return
 
     if enum_values:
@@ -1778,6 +1778,21 @@ def _place_datapoint(
                 if tier == "Statistic" and not entry.get("unit"):
                     entry["icon"] = ICON_COUNTER
         profile["sensors"].append(_as_sensor(entry, sensor_category))
+
+
+def _with_default(entry: dict[str, Any], dp: dict[str, Any]) -> dict[str, Any]:
+    """The setting with the default the catalog states for it, where it states one.
+
+    One value per definition for the whole controller family, in the unit the setting is shown
+    in; an enumeration's is the raw value. It is information only: a product's delivered state
+    differs from it for some settings, and what a controller restores on a reset is its own.
+    """
+    try:
+        number = float(dp.get("default_value"))
+    except (TypeError, ValueError):
+        return entry
+    entry["catalog_default"] = int(number) if number.is_integer() else number
+    return entry
 
 
 def _group_labels(

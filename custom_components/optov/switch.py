@@ -9,6 +9,7 @@ select instead; the user can add an on/off entity for it and say which value is 
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -49,6 +50,9 @@ class OptolinkSwitch(OptolinkEntity, SwitchEntity):
     def is_on(self) -> bool | None:
         value = self.raw_value
         return None if value is None else bool(value)
+
+    def _as_state(self, raw: float) -> str:
+        return STATE_ON if raw else STATE_OFF
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.coordinator.async_write_item(self._def, 1)

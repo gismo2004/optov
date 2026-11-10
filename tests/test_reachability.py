@@ -129,6 +129,20 @@ def test_a_setting_in_tenths_can_be_set_in_tenths():
     assert (number["step"], number["setpoint_step"]) == (0.1, 1.0)
 
 
+def test_a_setting_carries_the_default_the_catalog_states():
+    setting = {"entity_kind": catalog_db.KIND_WRITABLE, "fc_write": "Virtual_WRITE"}
+    tenths = _placed({**setting, "conversion": "Div10", "default_value": "0.6"})
+    whole = _placed({**setting, "default_value": "50"})
+    none = _placed({**setting, "default_value": None})
+    # A reading has no default to go back to, whatever the catalog holds for it.
+    reading = _placed({"default_value": "50"})
+
+    assert tenths["numbers"][0]["catalog_default"] == 0.6
+    assert whole["numbers"][0]["catalog_default"] == 50
+    assert "catalog_default" not in none["numbers"][0]
+    assert "catalog_default" not in reading["sensors"][0]
+
+
 def test_an_address_setting_is_shown_not_set():
     placed = _placed(
         {

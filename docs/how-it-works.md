@@ -38,6 +38,10 @@ not fitted is retired.
 weekly programmes are writable. Several settings can share one byte; the integration reads the
 byte, changes its bits and writes it back, then reads it again to confirm.
 
+**Defaults.** A setting shows the default the catalog states for it as its `catalog_default`
+attribute. That is one value for the whole controller family. A product's delivered state
+differs from it for some settings, so take it as a hint, not as what a reset restores.
+
 **Losing the connection.** When the ESPHome node restarts or drops off the network, the integration
 reconnects by itself as soon as the node is back. When the controller stops answering, because
 it is switched off, restarting, or the read head was taken off, every entity turns unavailable

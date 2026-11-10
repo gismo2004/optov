@@ -10,6 +10,11 @@ commits.
 
 ## [Unreleased]
 
+### Added
+- Settings show the default the catalog states for them as a `catalog_default` attribute. It is
+  the value for the whole controller family, not necessarily your product's delivered state
+  (how it works, defaults).
+
 ### Fixed
 - Home Assistant 2026.11 logged a deprecation warning for the custom thermostat and water heater
   at every start. They now use the current names for their temperatures; earlier Home Assistant

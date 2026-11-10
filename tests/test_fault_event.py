@@ -50,6 +50,7 @@ def event_module():
     module("homeassistant.components")
     module("homeassistant.components.event", EventEntity=_EventEntity)
     module("homeassistant.config_entries", ConfigEntry=object)
+    module("homeassistant.const", STATE_OFF="off", STATE_ON="on")
     module("homeassistant.core", HomeAssistant=object, callback=lambda f: f)
     module("homeassistant.helpers")
     module("homeassistant.helpers.entity", async_generate_entity_id=lambda *a, **k: "")

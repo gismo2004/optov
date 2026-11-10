@@ -7,6 +7,7 @@ for a sensor, a number, a select and a switch, so they live here once.
 
 from typing import Any
 
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import async_generate_entity_id
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -102,7 +103,13 @@ class OptolinkEntity(CoordinatorEntity[OptolinkCoordinator]):
         }
         if description := self._def.get("description"):
             attrs["description"] = description
+        if (default := self._def.get("catalog_default")) is not None:
+            attrs["catalog_default"] = self._as_state(default)
         return attrs
+
+    def _as_state(self, raw: float) -> Any:
+        """A raw catalog value the way this entity's state shows it: an option by its name."""
+        return self._def.get("options", {}).get(raw, raw)
 
 
 class OptolinkOnOffEntity(OptolinkEntity):
@@ -127,3 +134,6 @@ class OptolinkOnOffEntity(OptolinkEntity):
     @property
     def is_on(self) -> bool | None:
         return is_on(self.raw_value, self._def, self._on_value)
+
+    def _as_state(self, raw: float) -> str:
+        return STATE_ON if raw == self._on_value else STATE_OFF
