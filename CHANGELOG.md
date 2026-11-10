@@ -10,6 +10,8 @@ commits.
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-11-10
+
 ### Added
 - Settings show the default the catalog states for them as a `catalog_default` attribute. It is
   the value for the whole controller family, not necessarily your product's delivered state
@@ -312,7 +314,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.6...HEAD
+[0.9.6]: https://github.com/gismo2004/optov/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/gismo2004/optov/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/gismo2004/optov/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/gismo2004/optov/compare/v0.9.2...v0.9.3
