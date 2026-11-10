@@ -106,8 +106,6 @@ def encode_time53(t_str: str | None) -> int:
     if not t_str:
         return 0x00
     t_clean = str(t_str).strip()
-    if t_clean in ("24:00", "24:0"):
-        return 0xC0
     try:
         parts = t_clean.split(":")
         hour = int(parts[0])
@@ -145,16 +143,6 @@ def decode_day_schedule(
     skipped rather than decoded into nonsense times.
     """
     windows: list[dict[str, Any]] = []
-    if fmt == "phase2":
-        for i in range(min(4, len(raw) // 2)):
-            b1, b2 = raw[i * 2], raw[i * 2 + 1]
-            if (b1 == 0 and b2 == 0) or (b1 == 0xFF and b2 == 0xFF):
-                continue
-            start, end = decode_time53(b1), decode_time53(b2)
-            if start and end:
-                windows.append({"window": i + 1, "start": start, "end": end, "mode": 1})
-        return windows
-
     if fmt == "bitmap":
         # Four 2-bit levels per byte, most significant pair first, one per quarter hour.
         level_at = []
@@ -176,12 +164,15 @@ def decode_day_schedule(
                 run_start, run_level = slot, level
         return windows
 
-    for i in range(min(8, len(raw) // 3)):
-        b1, b2, level = raw[i * 3], raw[i * 3 + 1], raw[i * 3 + 2]
+    # Two time bytes per window; phase3 adds the level as a third, phase2 has the one level.
+    size, slots = (2, 4) if fmt == "phase2" else (3, 8)
+    for i in range(min(slots, len(raw) // size)):
+        b1, b2 = raw[i * size], raw[i * size + 1]
         if (b1 == 0 and b2 == 0) or (b1 == 0xFF and b2 == 0xFF):
             continue
         start, end = decode_time53(b1), decode_time53(b2)
         if start and end:
+            level = 1 if size == 2 else raw[i * size + 2]
             windows.append({"window": i + 1, "start": start, "end": end, "mode": level})
     return windows
 
@@ -211,8 +202,6 @@ def encode_day_schedule(
         return bytes(buf)
 
     if fmt == "bitmap":
-        packed = default_level & 3
-        packed |= packed << 2 | packed << 4 | packed << 6
         slots = [default_level] * 96
         for w in ordered:
             level = parse_level(w.get("mode"), allowed, default_level)
@@ -279,20 +268,17 @@ def decode_datetime_bcd(raw_bytes: bytes) -> str | None:
     """
     if len(raw_bytes) < 8:
         return None
-    try:
 
-        def bcd(val):
-            return ((val >> 4) * 10) + (val & 0x0F)
+    def bcd(val):
+        return ((val >> 4) * 10) + (val & 0x0F)
 
-        year = (bcd(raw_bytes[0]) * 100) + bcd(raw_bytes[1])
-        month = bcd(raw_bytes[2])
-        day = bcd(raw_bytes[3])
-        hour = bcd(raw_bytes[5])
-        minute = bcd(raw_bytes[6])
-        second = bcd(raw_bytes[7])
-        return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
-    except Exception:
-        return raw_bytes.hex(" ")
+    year = (bcd(raw_bytes[0]) * 100) + bcd(raw_bytes[1])
+    month = bcd(raw_bytes[2])
+    day = bcd(raw_bytes[3])
+    hour = bcd(raw_bytes[5])
+    minute = bcd(raw_bytes[6])
+    second = bcd(raw_bytes[7])
+    return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
 
 
 def snap(value: float | None, step: float) -> float | int | None:

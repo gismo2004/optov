@@ -216,13 +216,7 @@ def decodes_to_number(conversion: str | None) -> bool:
     float are numbers. The BCD timestamps, dates, byte dumps, addresses and strings are not, and
     neither is a conversion this module does not implement, which never yields a value at all.
     """
-    conv = _conv(conversion)
-    return (
-        conv in _PLAIN
-        or conv in ("multoffset", "convert4bytestofloat")
-        or conv in DIVISORS
-        or conv in _MULTIPLIERS
-    )
+    return is_encodable(conversion) or _conv(conversion) == "convert4bytestofloat"
 
 
 def decodes_to_integer(conversion: str | None) -> bool:
@@ -285,13 +279,8 @@ def extract_bitfield(raw: bytes, bit_start: int, bit_length: int) -> int:
     block is flattened into a bit sequence that starts at the most significant bit of byte 0;
     `BitLength` bits are taken from `BitPosition` and read most-significant-first.
 
-    This was previously implemented as a little-endian shift-and-mask, which silently produced
-    the wrong nibble. Measured against hardware across the sensor-status fields (all of which
-    sit at `BitStartPos=20, BitLength=4` over a 3-byte block, so the two schemes select
-    opposite nibbles of byte 2): MSB-first reports a realistic mix of "ok", "open circuit"
-    and "not present" matching the hardware actually installed, while the little-endian
-    reading reported "ok" for every sensor -- including ones that do not exist and whose
-    values are plainly bogus.
+    A little-endian shift-and-mask selects the opposite nibble of a status byte and reads "ok"
+    for every sensor, including ones that are not installed; measured against hardware.
 
     `raw` must be the whole block (`BlockLength` bytes), not the sliced field.
     """
@@ -390,8 +379,6 @@ def decode_value(
             # Truncate at first NUL (0x00) or unwritten byte (0xFF).
             clean_bytes = bytearray()
             for b in raw:
-                if b in (0x00, 0xFF):
-                    break
                 if 0x20 <= b <= 0x7E:
                     clean_bytes.append(b)
                 else:

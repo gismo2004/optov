@@ -7,6 +7,7 @@ integration opens it.
 """
 
 import logging
+import operator
 import os
 import re
 import sqlite3
@@ -512,12 +513,9 @@ def _settle_journal(path: str) -> None:
     # Autocommit: the pragma is refused inside a transaction, which is what the connection
     # would otherwise open on the first statement.
     try:
-        conn = sqlite3.connect(path, isolation_level=None)
-        try:
+        with closing(sqlite3.connect(path, isolation_level=None)) as conn:
             if conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
                 conn.execute("PRAGMA journal_mode=DELETE")
-        finally:
-            conn.close()
     except (
         sqlite3.DatabaseError
     ) as err:  # Nothing fatal: the catalog itself is already sound.
@@ -648,11 +646,10 @@ def get_device_by_system_id(
     """Look up the controller's catalog row (id and model) by DeviceIdent.
 
     `hw_index`/`sw_index` are DeviceIdent bytes 0x00FA/0x00FB and `f0` is register 0x00F0.
-    They are optional so older callers keep working, but without them a System ID that maps to
-    several controllers resolves to whichever variant the catch-all rule picks -- see
-    _select_variant().
+    Without them a System ID that maps to several controllers resolves to whichever variant
+    the catch-all rule picks -- see _select_variant().
     """
-    hex_id = f"{sys_id:04X}".upper()
+    hex_id = f"{sys_id:04X}"
     dec_id = str(sys_id)
     with closing(get_db_connection(db_path)) as conn:
         candidates = conn.execute(
@@ -766,11 +763,8 @@ def get_error_history_datapoint(device_id: int, db_path: str) -> dict[str, Any] 
             )
             return None
 
-        addr_raw = str(row["address"])
         return {
-            "address": int(addr_raw, 16)
-            if addr_raw.lower().startswith("0x")
-            else int(addr_raw),
+            "address": _address_int(row["address"]),
             "name": row["name"],
             "total_bytes": byte_length,
             "block_factor": block_factor,
@@ -912,22 +906,13 @@ def _hidden_by_rule_trees(
     return hidden_event_types, hidden_groups
 
 
+_CONDITION_OPERATORS = ("eq", "ne", "gt", "lt", "ge", "le")
+
+
 def _condition_holds(probed_value: float | None, op: str, compare: int) -> bool:
-    if probed_value is None:
+    if probed_value is None or op not in _CONDITION_OPERATORS:
         return False
-    if op == "eq":
-        return probed_value == compare
-    if op == "ne":
-        return probed_value != compare
-    if op == "gt":
-        return probed_value > compare
-    if op == "lt":
-        return probed_value < compare
-    if op == "ge":
-        return probed_value >= compare
-    if op == "le":
-        return probed_value <= compare
-    return False
+    return getattr(operator, op)(probed_value, compare)
 
 
 # Per catalog file, controller and language: the file's modification time and the aliases it
@@ -1448,7 +1433,7 @@ def _load_profile_inputs(
 
     # Get groups
     g_rows = conn.execute(
-        f"""SELECT g.id, g.parent_id, g.address, g.order_index, COALESCE(t.s, g.name_key) as name
+        f"""SELECT g.id, g.address, g.order_index, COALESCE(t.s, g.name_key) as name
            FROM groups g
            {_text_join(conn, culture, "t", "g.name_key")}
            WHERE g.device_id = ?
@@ -1646,9 +1631,7 @@ def _place_datapoint(
     # The trend tier belongs with them. It is the controller's own graphing set, the
     # fast-moving process values it expects to be watched over time -- return and hot-gas
     # temperatures, suction and condenser pressures -- and the poll scheduler already gives
-    # it the shortest interval of any tier. Leaving it out meant the cadence table had an
-    # entry for datapoints that could never be in the set, and that a heat pump's return
-    # temperature was hidden while its flow temperature was not.
+    # it the shortest interval of any tier.
     in_overview = "overview" in branches or "plantoverview" in branches
     in_operation = "operation" in branches
     in_trend = (tier or "") == "Trending"
@@ -1673,8 +1656,7 @@ def _place_datapoint(
         "byte_position": dp.get("byte_position", 0),
         "bit_start": dp.get("bit_start", 0),
         # Real geometry, not a placeholder. A writable bit-field is a control in its own
-        # right and both reading and writing it depend on knowing where it sits; read-only
-        # bit-fields never reach here, they are folded into their value's health status.
+        # right and both reading and writing it depend on knowing where it sits.
         "bit_length": bit_length,
         "conversion": dp.get("conversion") or "NoConversion",
         "parameter_type": dp.get("parameter_type"),
@@ -1726,19 +1708,7 @@ def _place_datapoint(
     # A plain value wider than four bytes is an identifier (a LON Neuron ID, a serial number, a
     # MAC address), not a number: no integer type is that wide.
     too_wide = (dp.get("byte_length") or 0) > 4 and conv_lower in ("", "noconversion")
-    is_datetime_or_str = (
-        conv_lower
-        in (
-            "datetimebcd",
-            "datetime_bcd",
-            "datebcd",
-            "daytodate",
-            "hexbyte2asciibyte",
-            "hexbyte2utf16byte",
-        )
-        or param_type in ("array", "string")
-        or too_wide
-    )
+    is_datetime_or_str = param_type in ("array", "string") or too_wide
 
     # Writable only through a write code this link has, and never as a procedure call. A
     # missing code ("undefined") is not replaced by a guess.
@@ -1751,9 +1721,8 @@ def _place_datapoint(
     if writable:
         # A writable datapoint one bit wide has exactly two states, so it is a switch --
         # whether or not the catalog bothered to name them. Party mode, eco mode and the
-        # one-off hot water run are all this. As a select they took two taps and read
-        # "Aus"/"Ein" where Home Assistant already draws a toggle; as a number, which is
-        # what the unnamed ones fell through to, they read 0 and 1.
+        # one-off hot water run are all this. A select would take two taps where Home
+        # Assistant already draws a toggle, and a number would read 0 and 1.
         if bit_length == 1:
             profile["switches"].append(entry)
         elif enum_values:
@@ -1762,11 +1731,9 @@ def _place_datapoint(
         elif is_date(dp.get("conversion")) and not bit_length:
             # A holiday's first and last day, a service date: a calendar date both ways. As
             # a reading it could only be looked at; as a date it is set from a date picker.
-            entry["conversion"] = dp.get("conversion")
             profile["dates"].append(entry)
         elif is_datetime_or_str or not is_encodable(dp.get("conversion")):
             # A value that cannot be turned back into its raw integer is shown, not set.
-            entry["conversion"] = dp.get("conversion") or "NoConversion"
             profile["sensors"].append(_as_sensor(entry, sensor_category))
         else:
             entry.update(_unit_meta(unit_str))
