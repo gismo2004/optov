@@ -10,6 +10,11 @@ commits.
 
 ## [Unreleased]
 
+### Fixed
+- Home Assistant 2026.11 logged a deprecation warning for the custom thermostat and water heater
+  at every start. They now use the current names for their temperatures; earlier Home Assistant
+  versions keep working.
+
 ## [0.9.5] - 2026-11-06
 
 ### Fixed

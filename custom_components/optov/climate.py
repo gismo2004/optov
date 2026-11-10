@@ -44,7 +44,12 @@ async def async_setup_entry(
 class OptolinkCustomClimate(AssembledEntity, ClimateEntity):
     """A thermostat: setpoint, operating mode, and optionally the current temperature."""
 
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
+    if not hasattr(ClimateEntity, "native_temperature_unit"):
+        # Home Assistant before 2026.11 reads these under their earlier names.
+        _attr_temperature_unit = _attr_native_temperature_unit
+        current_temperature = AssembledEntity.native_current_temperature
+        target_temperature = AssembledEntity.native_target_temperature
 
     def __init__(self, coordinator, cfg: dict[str, Any]) -> None:
         self._presets: dict[str, dict[str, Any]] = cfg.get("preset_on") or {}

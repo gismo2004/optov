@@ -84,12 +84,12 @@ class AssembledEntity(Entity):
         return True
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         current = self._state(self._cfg.get(KEY_CURRENT))
         return _float(current.state) if current else None
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         target = self._state(self._cfg[KEY_TARGET])
         return _float(target.state) if target else None
 

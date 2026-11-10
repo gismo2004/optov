@@ -50,7 +50,12 @@ class OptolinkCustomWaterHeater(AssembledEntity, WaterHeaterEntity):
     standard water heater states.
     """
 
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
+    if not hasattr(WaterHeaterEntity, "native_temperature_unit"):
+        # Home Assistant before 2026.11 reads these under their earlier names.
+        _attr_temperature_unit = _attr_native_temperature_unit
+        current_temperature = AssembledEntity.native_current_temperature
+        target_temperature = AssembledEntity.native_target_temperature
 
     def __init__(self, coordinator, cfg: dict[str, Any]) -> None:
         super().__init__(coordinator, cfg)
