@@ -247,7 +247,7 @@
       "custom_saved": "Saved. The integration reloads to apply it.",
       "custom_applied": "Applied: {count} custom entities. The integration reloads.\n\n{saved}",
       "custom_applied_notes": "Applied: {count} custom entities. The integration reloads.\n\nNot used:\n\n{skipped}\n\n{saved}",
-      "custom_unchanged": "The file is in place. Its {count} custom entities are the ones already set up, so nothing reloads.\n\n{saved}",
+      "custom_unchanged": "The file is in place. The {count} custom entities in it are the ones already set up, so the integration does not reload.\n\n{saved}",
       "custom_onoff_none": "There is no enabled value with two named states left that does not have an on/off entity.",
       "custom_not_loaded": "The controller is not set up right now. Try again once it is running.",
       "custom_empty": "There are no custom entities yet.",
@@ -495,7 +495,7 @@
     "save_first": "Nothing has been saved for this controller yet.",
     "save_replaces": "**This replaces the save from {saved}, which differs from the controller in {count} values.** That save is kept as the previous one. If the controller was reset or changed and you want the old values back, do not save: use Compare and restore.",
     "save_same": "The controller still holds what was saved on {saved}, so only the date changes.",
-    "upload_saved": "The file holds the controller's values as saved on {saved} ({count} values). Nothing was written to the controller: to set values back, use Controller settings, Compare and restore."
+    "upload_saved": "The file also holds the controller's values as saved on {saved} ({count} values). Uploading writes nothing to the controller: Controller settings, Compare and restore shows what differs and sets back what you tick."
   },
   "issues": {
     "catalog_behind": {

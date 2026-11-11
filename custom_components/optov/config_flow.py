@@ -738,6 +738,8 @@ class OptoVOptionsFlow(OptionsFlow):
         self._task: asyncio.Task[Any] | None = None
         self._failure = ""
         self._previous = False
+        # Whether the file step was reached from the controller's values or the custom entities.
+        self._for_controller = False
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -1293,6 +1295,7 @@ class OptoVOptionsFlow(OptionsFlow):
         """Save what the controller holds, or set it back to what was saved."""
         if self._coordinator() is None:
             return self.async_abort(reason="custom_not_loaded")
+        self._for_controller = True
         return self.async_show_menu(
             step_id="controller",
             menu_options=["controller_save", "controller_restore", "custom_backup"],
@@ -1576,6 +1579,10 @@ class OptoVOptionsFlow(OptionsFlow):
                     if save
                     else ""
                 )
+                if unchanged and save and self._for_controller:
+                    # Uploaded for the controller's values: what the file would change is
+                    # the answer, not what it does to the custom entities.
+                    return await self.async_step_controller_restore()
                 if unchanged:
                     reason = "custom_unchanged"
                 else:
