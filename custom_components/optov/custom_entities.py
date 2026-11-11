@@ -436,9 +436,10 @@ def render_file(
         "#            optional; a select's on value is ON/1): " + ", ".join(PRESETS),
         "#",
         "# settings: everything writable as it was saved (OptoV options -> Controller settings)",
-        "#   values:     datapoint -> value; a number as it is shown, a select or switch as",
-        "#               its raw value, a date as YYYY-MM-DD. The comment gives its name",
-        "#               and, where the catalog states one, the catalog's default",
+        "#   values:     datapoint -> its name and value; a number as it is shown, a select",
+        "#               or switch as its raw value (value_text is what that means), a date",
+        "#               as YYYY-MM-DD; default is the catalog's, where it states one.",
+        "#               Only `value` is read back.",
         "#   programmes: weekly programme -> day -> [start, end, level] per switching window",
         "# settings_previous: the save before that one, kept when a new save replaces it",
         "",
@@ -506,28 +507,51 @@ def parse_settings(raw: Any, name: str = SECTION_SETTINGS) -> dict[str, Any] | N
         KEY_CONTROLLER: section.get(KEY_CONTROLLER),
         KEY_SOFTWARE: section.get(KEY_SOFTWARE),
         KEY_SAVED: section.get(KEY_SAVED),
-        KEY_VALUES: {str(k): v for k, v in section[KEY_VALUES].items()},
+        # Each value is an entry with its `value` and what describes it; a bare value, as
+        # someone writing the file by hand might put it, is taken as well.
+        KEY_VALUES: {
+            str(key): entry[KEY_VALUE] if isinstance(entry, dict) else entry
+            for key, entry in section[KEY_VALUES].items()
+            if not isinstance(entry, dict) or KEY_VALUE in entry
+        },
         KEY_PROGRAMMES: programmes if isinstance(programmes, dict) else {},
     }
 
 
+def _scalar(value: Any) -> Any:
+    return _quote(value) if isinstance(value, str) else value
+
+
 def render_settings(
-    settings: dict[str, Any], notes: dict[str, str], name: str = SECTION_SETTINGS
+    settings: dict[str, Any],
+    about: dict[str, dict[str, Any]],
+    section: str = SECTION_SETTINGS,
 ) -> list[str]:
-    """One save's lines; `notes` is a comment per datapoint, its name."""
-    lines = [f"{name}:"]
+    """One save's lines.
+
+    `about` describes each value for the reader: its `name`, the name of a raw value
+    (`value_text`), and the catalog's `default` with its own `default_text`. Only `value` is
+    read back; the rest is written afresh with every save. The values are in the order of
+    their names, which for most settings start with their code.
+    """
+    lines = [f"{section}:"]
     for key in (KEY_CONTROLLER, KEY_SOFTWARE, KEY_SAVED):
         if settings.get(key) is not None:
             lines.append(f"  {key}: {_quote(str(settings[key]))}")
     lines.append(f"  {KEY_VALUES}:" + ("" if settings[KEY_VALUES] else " {}"))
-    for key, value in sorted(settings[KEY_VALUES].items()):
-        note = f"  # {notes[key]}" if notes.get(key) else ""
-        shown = _quote(value) if isinstance(value, str) else value
-        lines.append(f"    {key}: {shown}{note}")
+    values = settings[KEY_VALUES]
+    for key in sorted(values, key=lambda k: (about.get(k, {}).get(KEY_NAME, "~"), k)):
+        entry = {**about.get(key, {}), KEY_VALUE: values[key]}
+        lines.append(f"    {key}:")
+        lines.extend(
+            f"      {field}: {_scalar(entry[field])}"
+            for field in (KEY_NAME, KEY_VALUE, "value_text", "default", "default_text")
+            if entry.get(field) is not None
+        )
     programmes = settings.get(KEY_PROGRAMMES) or {}
     lines.append(f"  {KEY_PROGRAMMES}:" + ("" if programmes else " {}"))
-    for name, days in sorted(programmes.items()):
-        lines.append(f"    {name}:")
+    for programme, days in sorted(programmes.items()):
+        lines.append(f"    {programme}:")
         for day, windows in days.items():
             shown = ", ".join(
                 f"[{_quote(str(start))}, {_quote(str(end))}, {level}]"

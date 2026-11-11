@@ -419,18 +419,19 @@ def _label(item: dict[str, Any], value: Any) -> str | None:
         return None
 
 
-def _notes(coordinator: Any, values: dict[str, Any]) -> dict[str, str]:
-    """What to write next to each saved value: the setting's name, a raw value's own name,
-    and the catalog's default where it states one (see catalog_db._with_default)."""
-    notes: dict[str, str] = {}
+def _notes(coordinator: Any, values: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """What describes each saved value in the file: the setting's name, a raw value's own
+    name, and the catalog's default where it states one (see catalog_db._with_default)."""
+    notes: dict[str, dict[str, Any]] = {}
     for key, (_platform, item) in settings_items(coordinator.profile).items():
-        if key not in values:
-            continue
-        label = _label(item, values[key])
-        note = item["name"] + (f": {label}" if label else "")
-        if (default := item.get("catalog_default")) is not None:
-            note += f" [catalog default: {_label(item, default) or default}]"
-        notes[key] = note
+        if key in values:
+            default = item.get("catalog_default")
+            notes[key] = {
+                KEY_NAME: item["name"],
+                "value_text": _label(item, values[key]),
+                "default": default,
+                "default_text": _label(item, default),
+            }
     return notes
 
 

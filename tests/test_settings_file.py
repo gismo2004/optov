@@ -18,7 +18,15 @@ SETTINGS = {
         }
     },
 }
-NOTES = {"room": "Room temperature", "mode": "Mode: Automatic"}
+NOTES = {
+    "room": {"name": "(2000) Room temperature", "default": 20},
+    "mode": {
+        "name": "(2010) Mode",
+        "value_text": "Automatic",
+        "default": 0,
+        "default_text": "Off",
+    },
+}
 
 
 def _profile(**platforms):
@@ -80,9 +88,21 @@ def test_the_section_reads_back_as_it_was_written():
     assert rules.parse_settings(yaml.safe_load(text), rules.SECTION_PREVIOUS) == OLDER
     # A switching time stays text: unquoted, YAML would read 06:00 as a number.
     assert '["06:00", "22:00", 2]' in text
-    assert "    mode: 2  # Mode: Automatic" in text
+    # A value is an entry a person can read: what it is, what it holds, the catalog's default.
+    assert (
+        "    mode:\n"
+        '      name: "(2010) Mode"\n'
+        "      value: 2\n"
+        '      value_text: "Automatic"\n'
+        "      default: 0\n"
+        '      default_text: "Off"\n'
+    ) in text
+    # In the order of their names, so by code; one nothing describes comes last.
+    assert (
+        text.index("    room:") < text.index("    mode:") < text.index("    holiday:")
+    )
     # A date stays text as well, not a YAML date.
-    assert '    holiday: "2026-12-24"' in text
+    assert '      value: "2026-12-24"' in text
 
 
 def test_the_settings_do_not_disturb_the_custom_entities():
@@ -154,3 +174,17 @@ def test_a_new_save_replaces_both_saves_the_file_held():
     assert rules.parse_settings(read, rules.SECTION_PREVIOUS) == SETTINGS
     assert OLDER["saved"] not in text
     assert (text.count("\nsettings:"), text.count("\nsettings_previous:")) == (1, 1)
+
+
+def test_only_the_value_is_read_back_and_a_bare_one_is_taken_too():
+    by_hand = {
+        "settings": {
+            "values": {
+                "room": {"name": "anything", "value": 21.5, "default": 99},
+                "mode": 2,
+                "broken": {"name": "an entry without a value"},
+            }
+        }
+    }
+
+    assert rules.parse_settings(by_hand)["values"] == {"room": 21.5, "mode": 2}
