@@ -212,6 +212,9 @@
         }
       },
       "controller_save": {
+        "title": "Werte der Regelung speichern"
+      },
+      "controller_save_confirm": {
         "title": "Werte der Regelung speichern",
         "description": "{values} Werte wurden aus der Regelung gelesen. {note}\n\nAbsenden, um sie in der Datei zu speichern. An der Regelung wird nichts geändert."
       },
@@ -224,19 +227,21 @@
         }
       },
       "controller_restore_latest": {
-        "title": "Vergleichen und zurückschreiben",
-        "description": "Gespeichert {saved}. {count} von {compared} Werten weichen jetzt von der Regelung ab; angezeigt als *jetzt → gespeichert*. {not_compared} gespeicherte Werte gibt es an dieser Regelung nicht. {other}\n\nAnhaken, was zurückgeschrieben werden soll. Einstellungen sind angehakt; momentane Zustände wie Partybetrieb, Datumswerte und Werte, die kein Menü führt, nicht.",
-        "data": {
-          "restore": "Auf den gespeicherten Wert zurücksetzen"
-        }
+        "title": "Vergleichen und zurückschreiben"
       },
       "controller_restore_previous": {
+        "title": "Vergleichen und zurückschreiben"
+      },
+      "controller_pick": {
         "title": "Vergleichen und zurückschreiben",
         "description": "Gespeichert {saved}. {count} von {compared} Werten weichen jetzt von der Regelung ab; angezeigt als *jetzt → gespeichert*. {not_compared} gespeicherte Werte gibt es an dieser Regelung nicht. {other}\n\nAnhaken, was zurückgeschrieben werden soll. Einstellungen sind angehakt; momentane Zustände wie Partybetrieb, Datumswerte und Werte, die kein Menü führt, nicht.",
         "data": {
           "restore": "Auf den gespeicherten Wert zurücksetzen"
         }
       }
+    },
+    "progress": {
+      "reading_controller": "Alle Werte werden aus der Regelung gelesen. Das dauert etwa eine Minute."
     },
     "abort": {
       "custom_saved": "Gespeichert. Die Integration lädt neu, um es zu übernehmen.",
@@ -250,7 +255,8 @@
       "controller_none_saved": "Für diese Regelung wurde noch nichts gespeichert.",
       "controller_same": "Keine Abweichung: alle {compared} Werte und die Wochenprogramme sind wie gespeichert ({saved}).",
       "controller_restored": "{written} Werte wurden zurückgeschrieben.",
-      "controller_restored_notes": "{written} Werte wurden zurückgeschrieben.\n\nNicht geschrieben:\n\n{refused}"
+      "controller_restored_notes": "{written} Werte wurden zurückgeschrieben.\n\nNicht geschrieben:\n\n{refused}",
+      "controller_unreadable": "Die Regelung konnte nicht gelesen werden: {error}"
     },
     "error": {
       "custom_invalid": "Das ist keine Datei für eigene Entitäten: Sie muss YAML mit Abschnitten wie onoff: sein.",

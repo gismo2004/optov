@@ -7,10 +7,11 @@ set, so setup stays fast and does not touch a serial link that a previous instan
 be releasing.
 """
 
+import asyncio
 import contextlib
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -733,6 +734,10 @@ class OptoVOptionsFlow(OptionsFlow):
         self._labels: dict[str, str] = {}
         # What was read from the controller for a save, between its form and its submit.
         self._reading: dict[str, Any] | None = None
+        # The reading of the controller a step is waiting for, and why one failed.
+        self._task: asyncio.Task[Any] | None = None
+        self._failure = ""
+        self._previous = False
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -1294,16 +1299,62 @@ class OptoVOptionsFlow(OptionsFlow):
             description_placeholders={"path": self._path()},
         )
 
+    def _async_reading(
+        self, step_id: str, read: Callable[[], Coroutine[Any, Any, Any]]
+    ) -> ConfigFlowResult | None:
+        """Say that the controller is being read until `read` is through; None once it is.
+
+        Reading everything writable takes the better part of a minute, which the dialog would
+        otherwise spend on a text that says nothing about it.
+        """
+        if self._task is None:
+            self._task = self.hass.async_create_task(read())
+        if self._task.done():
+            return None
+        return self.async_show_progress(
+            step_id=step_id,
+            progress_action="reading_controller",
+            progress_task=self._task,
+        )
+
+    def _read(self) -> Any:
+        """What the reading that _async_reading() waited for brought; None if it failed."""
+        task, self._task = self._task, None
+        try:
+            return task.result() if task else None
+        except Exception as err:  # noqa: BLE001 - whatever stopped it, the dialog says so
+            self._failure = str(err) or type(err).__name__
+            return None
+
+    def _async_unreadable(self) -> ConfigFlowResult:
+        return self.async_abort(
+            reason="controller_unreadable",
+            description_placeholders={"error": self._failure},
+        )
+
     async def async_step_controller_save(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Read the controller, so the next step can say what a save would replace: a save
+        made by mistake after a reset differs from the one before it in dozens of values."""
+        coordinator = self._coordinator()
+        if coordinator is None:
+            return self.async_abort(reason="custom_not_loaded")
+        return self._async_reading(
+            "controller_save",
+            lambda: custom_file.async_save_preview(self.hass, coordinator),
+        ) or self.async_show_progress_done(next_step_id="controller_save_confirm")
+
+    async def async_step_controller_save_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         coordinator = self._coordinator()
         if coordinator is None:
             return self.async_abort(reason="custom_not_loaded")
         if user_input is None:
-            # Read first, so the form can say what a save would replace: a save made by
-            # mistake after a reset differs from the one before it in dozens of values.
-            preview = await custom_file.async_save_preview(self.hass, coordinator)
+            preview = self._read()
+            if preview is None:
+                return self._async_unreadable()
             self._reading = preview["reading"]
             if preview["replaces"] is None:
                 note = await async_ui_text(self.hass, "save_first")
@@ -1315,7 +1366,7 @@ class OptoVOptionsFlow(OptionsFlow):
                     count=preview["differs"],
                 )
             return self.async_show_form(
-                step_id="controller_save",
+                step_id="controller_save_confirm",
                 data_schema=vol.Schema({}),
                 description_placeholders={
                     "values": str(len(self._reading["values"])),
@@ -1393,13 +1444,28 @@ class OptoVOptionsFlow(OptionsFlow):
     async def _async_restore(
         self, previous: bool, user_input: dict[str, Any] | None
     ) -> ConfigFlowResult:
-        """Show what differs from a save and write back the ones ticked."""
+        """Read the controller and compare it with one of the saves."""
+        coordinator = self._coordinator()
+        if coordinator is None:
+            return self.async_abort(reason="custom_not_loaded")
+        self._previous = previous
+        return self._async_reading(
+            f"controller_restore_{'previous' if previous else 'latest'}",
+            lambda: custom_file.async_compare_settings(
+                self.hass, coordinator, previous
+            ),
+        ) or self.async_show_progress_done(next_step_id="controller_pick")
+
+    async def async_step_controller_pick(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show what differs from the save and write back the ones ticked."""
         coordinator = self._coordinator()
         if coordinator is None:
             return self.async_abort(reason="custom_not_loaded")
         if user_input is not None:
             done = await custom_file.async_restore_settings(
-                self.hass, coordinator, user_input.get("restore", []), previous
+                self.hass, coordinator, user_input.get("restore", []), self._previous
             )
             refused = (done or {}).get("refused", {})
             labels = self._labels
@@ -1415,9 +1481,10 @@ class OptoVOptionsFlow(OptionsFlow):
                     ),
                 },
             )
-        found = await custom_file.async_compare_settings(
-            self.hass, coordinator, previous
-        )
+        failed = self._task is not None and self._task.exception() is not None
+        found = self._read()
+        if failed:
+            return self._async_unreadable()
         if found is None:
             return self.async_abort(reason="controller_none_saved")
         self._labels = await self._async_difference_labels(found)
@@ -1439,7 +1506,7 @@ class OptoVOptionsFlow(OptionsFlow):
             )
         )
         return self.async_show_form(
-            step_id=f"controller_restore_{'previous' if previous else 'latest'}",
+            step_id="controller_pick",
             data_schema=vol.Schema(
                 {
                     vol.Optional("restore", default=ticked): _pick(

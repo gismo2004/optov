@@ -212,6 +212,9 @@
         }
       },
       "controller_save": {
+        "title": "Save the controller's values"
+      },
+      "controller_save_confirm": {
         "title": "Save the controller's values",
         "description": "{values} values were read from the controller. {note}\n\nSubmit to store them in the file. Nothing is written to the controller."
       },
@@ -224,19 +227,21 @@
         }
       },
       "controller_restore_latest": {
-        "title": "Compare and restore",
-        "description": "Saved {saved}. {count} of {compared} values differ from the controller now; shown as *now → saved*. {not_compared} saved values have no counterpart on this controller. {other}\n\nTick what to set back. Settings are ticked; states of the moment such as party mode, dates and values no menu lists are not.",
-        "data": {
-          "restore": "Set back to the saved value"
-        }
+        "title": "Compare and restore"
       },
       "controller_restore_previous": {
+        "title": "Compare and restore"
+      },
+      "controller_pick": {
         "title": "Compare and restore",
         "description": "Saved {saved}. {count} of {compared} values differ from the controller now; shown as *now → saved*. {not_compared} saved values have no counterpart on this controller. {other}\n\nTick what to set back. Settings are ticked; states of the moment such as party mode, dates and values no menu lists are not.",
         "data": {
           "restore": "Set back to the saved value"
         }
       }
+    },
+    "progress": {
+      "reading_controller": "Reading all values from the controller. This takes about a minute."
     },
     "abort": {
       "custom_saved": "Saved. The integration reloads to apply it.",
@@ -250,7 +255,8 @@
       "controller_none_saved": "Nothing has been saved for this controller yet.",
       "controller_same": "Nothing differs: all {compared} values and the weekly programmes are as saved ({saved}).",
       "controller_restored": "{written} values were set back.",
-      "controller_restored_notes": "{written} values were set back.\n\nNot written:\n\n{refused}"
+      "controller_restored_notes": "{written} values were set back.\n\nNot written:\n\n{refused}",
+      "controller_unreadable": "The controller could not be read: {error}"
     },
     "error": {
       "custom_invalid": "This is not a custom entities file: it must be YAML with sections such as onoff:.",
