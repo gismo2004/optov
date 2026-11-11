@@ -101,10 +101,12 @@ after a reset, a replaced board, or a visit by someone who changed things.
 **Save the controller's values** reads everything writable and the weekly programmes and stores
 them in the same file as the custom entities, in a `settings:` section. It takes about a minute
 and writes nothing to the controller. Saving again replaces the section; the rest of the file
-stays as it is.
+stays as it is. Before it does, the dialog says how many values differ from the save it is about
+to replace, which is what tells a wanted save from one made by mistake after a reset. The save
+that is replaced is kept as the previous one (`settings_previous:`), and never more than that.
 
 **Compare and restore** reads the controller again and lists what differs, each line as *now →
-saved*. Tick what to set back and submit; only those are written, each checked like a change to
+saved*; with a previous save in the file it first asks which of the two to compare with. Tick what to set back and submit; only those are written, each checked like a change to
 its entity, and what the controller refuses is reported. Settings are ticked to begin with.
 States of the moment (party mode, a one-off hot water run), dates, and values none of the
 controller's menus lists are saved and shown as well, but left for you to tick.

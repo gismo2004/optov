@@ -213,9 +213,24 @@
       },
       "controller_save": {
         "title": "Werte der Regelung speichern",
-        "description": "Liest alles Einstellbare und die Wochenprogramme aus der Regelung und speichert sie in der Datei; der bisherige Stand wird ersetzt. Das dauert etwa eine Minute, an der Regelung wird nichts geändert."
+        "description": "{values} Werte wurden aus der Regelung gelesen. {note}\n\nAbsenden, um sie in der Datei zu speichern. An der Regelung wird nichts geändert."
       },
       "controller_restore": {
+        "title": "Vergleichen und zurückschreiben",
+        "description": "Die Datei enthält zwei Stände: den letzten vom {latest} und den davor vom {previous}.",
+        "menu_options": {
+          "controller_restore_latest": "Mit dem letzten Stand vergleichen",
+          "controller_restore_previous": "Mit dem vorherigen Stand vergleichen"
+        }
+      },
+      "controller_restore_latest": {
+        "title": "Vergleichen und zurückschreiben",
+        "description": "Gespeichert {saved}. {count} von {compared} Werten weichen jetzt von der Regelung ab; angezeigt als *jetzt → gespeichert*. {not_compared} gespeicherte Werte gibt es an dieser Regelung nicht. {other}\n\nAnhaken, was zurückgeschrieben werden soll. Einstellungen sind angehakt; momentane Zustände wie Partybetrieb, Datumswerte und Werte, die kein Menü führt, nicht.",
+        "data": {
+          "restore": "Auf den gespeicherten Wert zurücksetzen"
+        }
+      },
+      "controller_restore_previous": {
         "title": "Vergleichen und zurückschreiben",
         "description": "Gespeichert {saved}. {count} von {compared} Werten weichen jetzt von der Regelung ab; angezeigt als *jetzt → gespeichert*. {not_compared} gespeicherte Werte gibt es an dieser Regelung nicht. {other}\n\nAnhaken, was zurückgeschrieben werden soll. Einstellungen sind angehakt; momentane Zustände wie Partybetrieb, Datumswerte und Werte, die kein Menü führt, nicht.",
         "data": {
@@ -469,7 +484,10 @@
     "custom_kind_onoff": "An/Aus",
     "custom_kind_climate": "Thermostat",
     "custom_kind_water_heater": "Warmwasserbereiter",
-    "saved_from_other": "Die Datei wurde von einer anderen Regelung gespeichert ({controller})."
+    "saved_from_other": "Die Datei wurde von einer anderen Regelung gespeichert ({controller}).",
+    "save_first": "Für diese Regelung wurde noch nichts gespeichert.",
+    "save_replaces": "**Das ersetzt den Stand vom {saved}, der sich in {count} Werten von der Regelung unterscheidet.** Dieser Stand bleibt als vorheriger erhalten. Wurde die Regelung zurückgesetzt oder verändert und sollen die alten Werte zurück, nicht speichern, sondern Vergleichen und zurückschreiben verwenden.",
+    "save_same": "Die Regelung enthält noch, was am {saved} gespeichert wurde; es ändert sich nur das Datum."
   },
   "issues": {
     "catalog_behind": {

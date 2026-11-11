@@ -215,7 +215,8 @@ save_settings:
   description: >-
     Read everything writable on the controller and its weekly programmes and store them in
     the controller's file next to the catalog, in its `settings` section. Nothing is written to
-    the controller. The same is offered in the options under Controller settings.
+    the controller. The save this replaces is kept as the previous one. The same is offered in
+    the options under Controller settings.
   fields:
     config_entry_id: *controller
 
@@ -226,6 +227,13 @@ compare_settings:
     saved ones, each with the key to restore it by. Nothing is written to the controller.
   fields:
     config_entry_id: *controller
+    previous: &previous
+      name: Previous save
+      description: Use the save before the latest one, which is kept when a new save replaces it.
+      required: false
+      default: false
+      selector:
+        boolean:
 
 restore_settings:
   name: Restore saved values
@@ -244,3 +252,4 @@ restore_settings:
       example: '["nku_tagesprogramm_ww/mon"]'
       selector:
         object:
+    previous: *previous

@@ -13,7 +13,8 @@ commits.
 ### Added
 - Controller settings in the options: save everything writable on the controller and its weekly
   programmes to the file next to the catalog, compare the controller with it later, and set back
-  the values you tick -- after a reset or a replaced board. Also as the actions
+  the values you tick -- after a reset or a replaced board. A save says what it replaces and
+  keeps the one before it. Also as the actions
   `optov.save_settings`, `optov.compare_settings` and `optov.restore_settings` (options,
   controller settings).
 

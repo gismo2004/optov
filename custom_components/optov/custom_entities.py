@@ -41,6 +41,9 @@ SECTION_WATER_HEATER = "water_heater"
 SECTIONS = (SECTION_ONOFF, SECTION_CLIMATE, SECTION_WATER_HEATER)
 # The saved settings: not a list of entities but one mapping, see parse_settings().
 SECTION_SETTINGS = "settings"
+# The save before the latest one: kept when a new save replaces it, and never more than one.
+SECTION_PREVIOUS = "settings_previous"
+SAVED_SECTIONS = (SECTION_SETTINGS, SECTION_PREVIOUS)
 KEY_CONTROLLER = "controller"
 KEY_SOFTWARE = "software"
 KEY_SAVED = "saved"
@@ -195,7 +198,7 @@ def parse_file(raw: Any) -> tuple[dict[str, list[dict[str, Any]]], list[str], bo
         return sections, ["the file must have sections such as 'onoff:'"], False
     problems: list[str] = []
     for name, content in raw.items():
-        if name == SECTION_SETTINGS:
+        if name in SAVED_SECTIONS:
             continue
         if name not in SECTIONS:
             problems.append(f"unknown section '{name}', ignored")
@@ -400,14 +403,13 @@ def render_file(
     onoff: list[dict[str, Any]],
     climate: list[dict[str, Any]] | None = None,
     water_heater: list[dict[str, Any]] | None = None,
-    settings: dict[str, Any] | None = None,
-    notes: dict[str, str] | None = None,
+    saved: list[str] | None = None,
 ) -> str:
     """The file's text: a header that explains the format, then each section.
 
     An on/off entry may carry `on_label` and `other` (the other raw value and its label) for
-    the comment that says what the numbers mean. `settings` is the saved settings section, if
-    the controller has one, and `notes` what to say next to each of its values.
+    the comment that says what the numbers mean. `saved` are the lines of the saved values,
+    if the controller has any (render_settings), which follow the custom entities.
     """
     lines = [
         f"# OptoV custom entities for {title}.",
@@ -437,6 +439,7 @@ def render_file(
         "#   values:     datapoint -> value; a number as it is shown, a select or switch as",
         "#               its raw value, a date as YYYY-MM-DD",
         "#   programmes: weekly programme -> day -> [start, end, level] per switching window",
+        "# settings_previous: the save before that one, kept when a new save replaces it",
         "",
         f"{SECTION_ONOFF}:" + ("" if onoff else " []"),
     ]
@@ -461,9 +464,8 @@ def render_file(
         lines.append(f"{section}:" + ("" if entries else " []"))
         for entry in entries:
             lines.extend(_render_assembled(section, entry))
-    if settings:
-        lines.append("")
-        lines.extend(render_settings(settings, notes or {}))
+    if saved:
+        lines.extend(["", *saved])
     return "\n".join(lines) + "\n"
 
 
@@ -493,9 +495,9 @@ def restored_by_default(platform: str, item: dict[str, Any]) -> bool:
     return platform != "switches" or bool(item.get("entity_category"))
 
 
-def parse_settings(raw: Any) -> dict[str, Any] | None:
-    """The saved settings out of what was read from the file; None without a usable section."""
-    section = raw.get(SECTION_SETTINGS) if isinstance(raw, dict) else None
+def parse_settings(raw: Any, name: str = SECTION_SETTINGS) -> dict[str, Any] | None:
+    """One save out of what was read from the file; None without a usable section."""
+    section = raw.get(name) if isinstance(raw, dict) else None
     if not isinstance(section, dict) or not isinstance(section.get(KEY_VALUES), dict):
         return None
     programmes = section.get(KEY_PROGRAMMES)
@@ -508,9 +510,11 @@ def parse_settings(raw: Any) -> dict[str, Any] | None:
     }
 
 
-def render_settings(settings: dict[str, Any], notes: dict[str, str]) -> list[str]:
-    """The settings section's lines; `notes` is a comment per datapoint, its name."""
-    lines = [f"{SECTION_SETTINGS}:"]
+def render_settings(
+    settings: dict[str, Any], notes: dict[str, str], name: str = SECTION_SETTINGS
+) -> list[str]:
+    """One save's lines; `notes` is a comment per datapoint, its name."""
+    lines = [f"{name}:"]
     for key in (KEY_CONTROLLER, KEY_SOFTWARE, KEY_SAVED):
         if settings.get(key) is not None:
             lines.append(f"  {key}: {_quote(str(settings[key]))}")
@@ -532,16 +536,16 @@ def render_settings(settings: dict[str, Any], notes: dict[str, str]) -> list[str
     return lines
 
 
-def replace_settings(text: str, section: list[str]) -> str:
-    """The file's text with its settings section replaced, or added at the end.
+def replace_settings(text: str, saved: list[str]) -> str:
+    """The file's text with its saved values replaced by `saved`, at the end.
 
-    Only that section is touched: whatever else the file holds, entries the integration could
-    not use among it, stays as its owner wrote it.
+    Only those sections are touched: whatever else the file holds, entries the integration
+    could not use among it, stays as its owner wrote it.
     """
     kept: list[str] = []
     inside = False
     for line in text.splitlines():
-        if line.startswith(f"{SECTION_SETTINGS}:"):
+        if line.startswith(tuple(f"{name}:" for name in SAVED_SECTIONS)):
             inside = True
         elif inside and line[:1] not in ("", " ", "#"):
             inside = False
@@ -549,7 +553,7 @@ def replace_settings(text: str, section: list[str]) -> str:
             kept.append(line)
     while kept and not kept[-1].strip():
         kept.pop()
-    return "\n".join([*kept, "", *section]) + "\n"
+    return "\n".join([*kept, "", *saved]) + "\n"
 
 
 def changed_settings(

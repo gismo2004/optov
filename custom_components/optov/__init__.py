@@ -1030,7 +1030,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def compare_settings(call: ServiceCall) -> ServiceResponse:
         return saved(
-            await custom_file.async_compare_settings(hass, _one_coordinator(hass, call))
+            await custom_file.async_compare_settings(
+                hass, _one_coordinator(hass, call), bool(call.data.get("previous"))
+            )
         )
 
     async def restore_settings(call: ServiceCall) -> ServiceResponse:
@@ -1040,6 +1042,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 hass,
                 _one_coordinator(hass, call),
                 [keys] if isinstance(keys, str) else keys,
+                bool(call.data.get("previous")),
             )
         )
 

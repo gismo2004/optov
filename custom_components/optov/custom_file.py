@@ -35,6 +35,8 @@ from .custom_entities import (
     KEY_VALUES,
     SECTION_CLIMATE,
     SECTION_ONOFF,
+    SECTION_PREVIOUS,
+    SECTION_SETTINGS,
     SECTION_WATER_HEATER,
     assembled_unique_id,
     changed_settings,
@@ -365,9 +367,12 @@ async def async_save(
         onoff,
         assembled[SECTION_CLIMATE],
         assembled[SECTION_WATER_HEATER],
-        # The saved settings are not this dialog's, so they are written back as they were.
-        saved := await async_read_settings(hass, coordinator.stable_id),
-        _notes(coordinator, saved[KEY_VALUES]) if saved else None,
+        # The saved values are not this dialog's, so they are written back as they were.
+        _saved_lines(
+            coordinator,
+            await async_read_settings(hass, coordinator.stable_id),
+            await async_read_settings(hass, coordinator.stable_id, SECTION_PREVIOUS),
+        ),
     )
     await hass.async_add_executor_job(
         write_text, custom_file_path(hass, coordinator.stable_id), text
@@ -379,15 +384,31 @@ def _title(coordinator: Any) -> str:
 
 
 async def async_read_settings(
-    hass: HomeAssistant, stable_id: str
+    hass: HomeAssistant, stable_id: str, section: str = SECTION_SETTINGS
 ) -> dict[str, Any] | None:
-    """The settings saved in the controller's file; None without a file or a section."""
+    """A save in the controller's file, the latest unless asked for the previous one; None
+    without a file or that section."""
     path = custom_file_path(hass, stable_id)
     try:
         text = await hass.async_add_executor_job(read_text, path)
-        return parse_settings(yaml.safe_load(text)) if text is not None else None
-    except (OSError, yaml.YAMLError):
+    except OSError:
         return None
+    try:
+        return parse_settings(yaml.safe_load(text), section) if text else None
+    except yaml.YAMLError:
+        return None
+
+
+def _saved_lines(
+    coordinator: Any, latest: dict[str, Any] | None, previous: dict[str, Any] | None
+) -> list[str]:
+    """The lines of the saves the file holds, the latest first."""
+    lines: list[str] = []
+    for name, save in ((SECTION_SETTINGS, latest), (SECTION_PREVIOUS, previous)):
+        if save:
+            notes = _notes(coordinator, save[KEY_VALUES])
+            lines += [*([""] if lines else []), *render_settings(save, notes, name)]
+    return lines
 
 
 def _label(item: dict[str, Any], value: Any) -> str | None:
@@ -420,37 +441,17 @@ def _programme_days(schedules: dict[str, Any]) -> dict[str, dict[str, list[list[
     }
 
 
-async def _async_current(
-    coordinator: Any,
-) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
-    """What the controller holds now: values by datapoint, programmes, what it refused."""
+async def async_read_controller(coordinator: Any) -> dict[str, Any]:
+    """What the controller holds now, in the form a save has: values, programmes, when."""
     values, refused = await coordinator.async_read_settings()
     await coordinator.async_refresh_schedules()
-    return values, _programme_days(coordinator.schedules), sorted(refused)
-
-
-async def async_save_settings(hass: HomeAssistant, coordinator: Any) -> dict[str, Any]:
-    """Read everything writable and the programmes and put them in the controller's file."""
-    values, programmes, not_read = await _async_current(coordinator)
-    settings = {
+    return {
         KEY_CONTROLLER: coordinator.profile.model,
         KEY_SOFTWARE: coordinator.profile.sw_version,
         KEY_SAVED: dt_util.now().isoformat(timespec="seconds"),
         KEY_VALUES: values,
-        KEY_PROGRAMMES: programmes,
-    }
-    section = render_settings(settings, _notes(coordinator, values))
-    path = custom_file_path(hass, coordinator.stable_id)
-    text = await hass.async_add_executor_job(read_text, path)
-    if text is None:
-        text = render_file(_title(coordinator), [])
-    await hass.async_add_executor_job(write_text, path, replace_settings(text, section))
-    return {
-        "file": os.path.basename(path),
-        "saved": settings[KEY_SAVED],
-        "values": len(values),
-        "programmes": len(programmes),
-        "not_read": not_read,
+        KEY_PROGRAMMES: _programme_days(coordinator.schedules),
+        "not_read": sorted(refused),
     }
 
 
@@ -459,35 +460,27 @@ def programme_key(name: str, day: str) -> str:
     return f"{name}/{day}"
 
 
-async def async_compare_settings(
-    hass: HomeAssistant, coordinator: Any
-) -> dict[str, Any] | None:
-    """What differs between the saved values and the controller now; None if none are saved.
-
-    Nothing is written. A saved value this controller has no datapoint for, or did not answer
-    for, is listed apart and not compared: that is what a file from another controller of the
-    family looks like here.
-    """
-    saved = await async_read_settings(hass, coordinator.stable_id)
-    if saved is None:
-        return None
-    values, programmes, not_read = await _async_current(coordinator)
+def _differences(
+    coordinator: Any, saved: dict[str, Any], now: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Where a save and a reading of the controller differ: values, and programme days."""
     items = settings_items(coordinator.profile)
-    differences = []
-    for key, was, now in changed_settings(saved[KEY_VALUES], values):
+    values = []
+    for key, was, held in changed_settings(saved[KEY_VALUES], now[KEY_VALUES]):
         platform, item = items[key]
         difference = {
             "key": key,
             "name": item["name"],
             "saved": was,
-            "now": now,
+            "now": held,
             "setting": restored_by_default(platform, item),
         }
         if (label := _label(item, was)) is not None:
             difference["saved_as"] = label
-        if (label := _label(item, now)) is not None:
+        if (label := _label(item, held)) is not None:
             difference["now_as"] = label
-        differences.append(difference)
+        values.append(difference)
+    programmes = now[KEY_PROGRAMMES]
     days = [
         {
             "key": programme_key(name, day),
@@ -501,32 +494,104 @@ async def async_compare_settings(
         for day, windows in saved_days.items()
         if [list(w) for w in windows] != programmes[name].get(day)
     ]
+    return values, days
+
+
+async def async_save_preview(hass: HomeAssistant, coordinator: Any) -> dict[str, Any]:
+    """Read the controller for a save, and say what the save would replace.
+
+    `reading` goes to async_save_settings() unchanged. `replaces` is when the latest save was
+    made, None without one, and `differs` in how many values and programme days it is not
+    what the controller holds now -- which is what tells a wanted save from one made by
+    mistake after a reset.
+    """
+    reading = await async_read_controller(coordinator)
+    latest = await async_read_settings(hass, coordinator.stable_id)
+    values, days = _differences(coordinator, latest, reading) if latest else ([], [])
     return {
-        "saved": saved[KEY_SAVED],
-        "controller": saved[KEY_CONTROLLER],
-        "same_controller": (saved[KEY_CONTROLLER], saved[KEY_SOFTWARE])
-        == (coordinator.profile.model, coordinator.profile.sw_version),
-        "compared": len(set(saved[KEY_VALUES]) & set(values)),
-        "differences": differences,
-        "programme_days": days,
-        "not_compared": sorted(
-            (set(saved[KEY_VALUES]) - set(values))
-            | (set(saved[KEY_PROGRAMMES]) - set(programmes))
-        ),
+        "reading": reading,
+        "replaces": latest[KEY_SAVED] if latest else None,
+        "differs": len(values) + len(days),
+    }
+
+
+async def async_save_settings(
+    hass: HomeAssistant, coordinator: Any, reading: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Put what the controller holds in its file, as the latest save.
+
+    The save it replaces is kept as the previous one when the two differ. Saving the same
+    values again only renews the latest, so the previous stays the last one that was different.
+    """
+    reading = reading or await async_read_controller(coordinator)
+    not_read = reading.pop("not_read", [])
+    latest = await async_read_settings(hass, coordinator.stable_id)
+    previous = await async_read_settings(hass, coordinator.stable_id, SECTION_PREVIOUS)
+    if latest and any(_differences(coordinator, latest, reading)):
+        previous = latest
+    path = custom_file_path(hass, coordinator.stable_id)
+    text = await hass.async_add_executor_job(read_text, path)
+    if text is None:
+        text = render_file(_title(coordinator), [])
+    await hass.async_add_executor_job(
+        write_text,
+        path,
+        replace_settings(text, _saved_lines(coordinator, reading, previous)),
+    )
+    return {
+        "file": os.path.basename(path),
+        "saved": reading[KEY_SAVED],
+        "values": len(reading[KEY_VALUES]),
+        "programmes": len(reading[KEY_PROGRAMMES]),
+        "previous": previous[KEY_SAVED] if previous else None,
         "not_read": not_read,
     }
 
 
-async def async_restore_settings(
-    hass: HomeAssistant, coordinator: Any, keys: Iterable[str]
+async def async_compare_settings(
+    hass: HomeAssistant, coordinator: Any, previous: bool = False
 ) -> dict[str, Any] | None:
-    """Set the named values and programme days back to what was saved; None if none are saved.
+    """What differs between a save and the controller now; None if there is no such save.
+
+    Nothing is written. A saved value this controller has no datapoint for, or did not answer
+    for, is listed apart and not compared: that is what a file from another controller of the
+    family looks like here.
+    """
+    saved = await async_read_settings(
+        hass, coordinator.stable_id, SECTION_PREVIOUS if previous else SECTION_SETTINGS
+    )
+    if saved is None:
+        return None
+    now = await async_read_controller(coordinator)
+    differences, days = _differences(coordinator, saved, now)
+    return {
+        "saved": saved[KEY_SAVED],
+        "controller": saved[KEY_CONTROLLER],
+        "same_controller": (saved[KEY_CONTROLLER], saved[KEY_SOFTWARE])
+        == (now[KEY_CONTROLLER], now[KEY_SOFTWARE]),
+        "compared": len(set(saved[KEY_VALUES]) & set(now[KEY_VALUES])),
+        "differences": differences,
+        "programme_days": days,
+        "not_compared": sorted(
+            (set(saved[KEY_VALUES]) - set(now[KEY_VALUES]))
+            | (set(saved[KEY_PROGRAMMES]) - set(now[KEY_PROGRAMMES]))
+        ),
+        "not_read": now["not_read"],
+    }
+
+
+async def async_restore_settings(
+    hass: HomeAssistant, coordinator: Any, keys: Iterable[str], previous: bool = False
+) -> dict[str, Any] | None:
+    """Set the named values and programme days back to a save; None if there is no such save.
 
     Each one is its own write, checked the way its entity checks it, and one the controller
     or the catalog refuses is reported and the rest carry on. A key is a datapoint's, or a
     programme and a day as compare names them.
     """
-    saved = await async_read_settings(hass, coordinator.stable_id)
+    saved = await async_read_settings(
+        hass, coordinator.stable_id, SECTION_PREVIOUS if previous else SECTION_SETTINGS
+    )
     if saved is None:
         return None
     written: list[str] = []

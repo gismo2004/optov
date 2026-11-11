@@ -44,6 +44,7 @@ from homeassistant.helpers.selector import (
     TextSelector,
 )
 from homeassistant.helpers.translation import async_get_translations
+from homeassistant.util import dt as dt_util
 
 from . import catalog_db, custom_file, optolink
 from .catalog_db import get_available_languages
@@ -86,6 +87,7 @@ from .custom_entities import (
     KEY_WRITE,
     MODES,
     PRESETS_OFFERED,
+    SAVED_SECTIONS,
     SECTION_CLIMATE,
     SECTION_ONOFF,
     SECTION_WATER_HEATER,
@@ -108,6 +110,12 @@ CONF_CATALOG_FILE = "catalog_file"
 # Seconds between two poll cycles, as the setup and the settings take it.
 _SCAN_INTERVAL = vol.All(int, vol.Range(min=5, max=600))
 CONF_DELETE = "delete"
+
+
+def _when(saved: str | None) -> str:
+    """When a save was made, to the minute, as it is shown in the dialog."""
+    moment = dt_util.parse_datetime(saved or "")
+    return moment.strftime("%Y-%m-%d %H:%M") if moment else saved or ""
 
 
 def _pick(options: list, multiple: bool = False) -> SelectSelector:
@@ -723,6 +731,8 @@ class OptoVOptionsFlow(OptionsFlow):
         self._editing: str | None = None
         # The differences offered for restoring, by key, as the form labelled them.
         self._labels: dict[str, str] = {}
+        # What was read from the controller for a save, between its form and its submit.
+        self._reading: dict[str, Any] | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -1291,10 +1301,30 @@ class OptoVOptionsFlow(OptionsFlow):
         if coordinator is None:
             return self.async_abort(reason="custom_not_loaded")
         if user_input is None:
+            # Read first, so the form can say what a save would replace: a save made by
+            # mistake after a reset differs from the one before it in dozens of values.
+            preview = await custom_file.async_save_preview(self.hass, coordinator)
+            self._reading = preview["reading"]
+            if preview["replaces"] is None:
+                note = await async_ui_text(self.hass, "save_first")
+            else:
+                note = await async_ui_text(
+                    self.hass,
+                    "save_replaces" if preview["differs"] else "save_same",
+                    saved=_when(preview["replaces"]),
+                    count=preview["differs"],
+                )
             return self.async_show_form(
-                step_id="controller_save", data_schema=vol.Schema({})
+                step_id="controller_save",
+                data_schema=vol.Schema({}),
+                description_placeholders={
+                    "values": str(len(self._reading["values"])),
+                    "note": note,
+                },
             )
-        saved = await custom_file.async_save_settings(self.hass, coordinator)
+        saved = await custom_file.async_save_settings(
+            self.hass, coordinator, self._reading
+        )
         return self.async_abort(
             reason="controller_saved",
             description_placeholders={
@@ -1329,13 +1359,47 @@ class OptoVOptionsFlow(OptionsFlow):
     async def async_step_controller_restore(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show what differs from the saved values and write back the ones ticked."""
+        """Which save to compare with, where the file holds a previous one as well."""
+        coordinator = self._coordinator()
+        if coordinator is None:
+            return self.async_abort(reason="custom_not_loaded")
+        saves = [
+            await custom_file.async_read_settings(
+                self.hass, coordinator.stable_id, section
+            )
+            for section in SAVED_SECTIONS
+        ]
+        if not all(saves):
+            return await self.async_step_controller_restore_latest()
+        return self.async_show_menu(
+            step_id="controller_restore",
+            menu_options=["controller_restore_latest", "controller_restore_previous"],
+            description_placeholders={
+                "latest": _when(saves[0]["saved"]),
+                "previous": _when(saves[1]["saved"]),
+            },
+        )
+
+    async def async_step_controller_restore_latest(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return await self._async_restore(False, user_input)
+
+    async def async_step_controller_restore_previous(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return await self._async_restore(True, user_input)
+
+    async def _async_restore(
+        self, previous: bool, user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
+        """Show what differs from a save and write back the ones ticked."""
         coordinator = self._coordinator()
         if coordinator is None:
             return self.async_abort(reason="custom_not_loaded")
         if user_input is not None:
             done = await custom_file.async_restore_settings(
-                self.hass, coordinator, user_input.get("restore", [])
+                self.hass, coordinator, user_input.get("restore", []), previous
             )
             refused = (done or {}).get("refused", {})
             labels = self._labels
@@ -1351,7 +1415,9 @@ class OptoVOptionsFlow(OptionsFlow):
                     ),
                 },
             )
-        found = await custom_file.async_compare_settings(self.hass, coordinator)
+        found = await custom_file.async_compare_settings(
+            self.hass, coordinator, previous
+        )
         if found is None:
             return self.async_abort(reason="controller_none_saved")
         self._labels = await self._async_difference_labels(found)
@@ -1360,7 +1426,7 @@ class OptoVOptionsFlow(OptionsFlow):
                 reason="controller_same",
                 description_placeholders={
                     "compared": str(found["compared"]),
-                    "saved": found["saved"] or "",
+                    "saved": _when(found["saved"]),
                 },
             )
         ticked = [d["key"] for d in found["differences"] if d["setting"]]
@@ -1373,7 +1439,7 @@ class OptoVOptionsFlow(OptionsFlow):
             )
         )
         return self.async_show_form(
-            step_id="controller_restore",
+            step_id=f"controller_restore_{'previous' if previous else 'latest'}",
             data_schema=vol.Schema(
                 {
                     vol.Optional("restore", default=ticked): _pick(
@@ -1386,7 +1452,7 @@ class OptoVOptionsFlow(OptionsFlow):
                 }
             ),
             description_placeholders={
-                "saved": found["saved"] or "",
+                "saved": _when(found["saved"]),
                 "count": str(len(self._labels)),
                 "compared": str(found["compared"]),
                 "not_compared": str(len(found["not_compared"])),

@@ -61,10 +61,23 @@ def test_only_settings_are_ticked_for_setting_back():
     assert not ticked("numbers", NAMELESS)
 
 
+OLDER = {**SETTINGS, "saved": "2026-10-01T08:00:00+02:00", "values": {"room": 20.0}}
+
+
+def _saved_lines():
+    """The latest save and the one before it, as the file holds them."""
+    return [
+        *rules.render_settings(SETTINGS, NOTES),
+        "",
+        *rules.render_settings(OLDER, NOTES, rules.SECTION_PREVIOUS),
+    ]
+
+
 def test_the_section_reads_back_as_it_was_written():
-    text = rules.render_file("Test (node_port)", [], settings=SETTINGS, notes=NOTES)
+    text = rules.render_file("Test", [], saved=_saved_lines())
 
     assert rules.parse_settings(yaml.safe_load(text)) == SETTINGS
+    assert rules.parse_settings(yaml.safe_load(text), rules.SECTION_PREVIOUS) == OLDER
     # A switching time stays text: unquoted, YAML would read 06:00 as a number.
     assert '["06:00", "22:00", 2]' in text
     assert "    mode: 2  # Mode: Automatic" in text
@@ -73,7 +86,7 @@ def test_the_section_reads_back_as_it_was_written():
 
 
 def test_the_settings_do_not_disturb_the_custom_entities():
-    text = rules.render_file("Test (node_port)", [], settings=SETTINGS, notes=NOTES)
+    text = rules.render_file("Test", [], saved=_saved_lines())
 
     sections, problems, readable = rules.parse_file(yaml.safe_load(text))
 
@@ -120,3 +133,24 @@ def test_only_values_that_really_differ_are_listed():
     now = {"a": 20.0, "b": 1, "c": 7.0, "new": 3}
 
     assert rules.changed_settings(saved, now) == [("b", 2, 1), ("c", 7.5, 7.0)]
+
+
+def test_a_new_save_replaces_both_saves_the_file_held():
+    text = rules.render_file("Test", [], saved=_saved_lines())
+    newest = {**SETTINGS, "saved": "2026-12-01T09:00:00+01:00"}
+
+    # The latest becomes the previous one; what was the previous one is gone.
+    text = rules.replace_settings(
+        text,
+        [
+            *rules.render_settings(newest, NOTES),
+            "",
+            *rules.render_settings(SETTINGS, NOTES, rules.SECTION_PREVIOUS),
+        ],
+    )
+
+    read = yaml.safe_load(text)
+    assert rules.parse_settings(read) == newest
+    assert rules.parse_settings(read, rules.SECTION_PREVIOUS) == SETTINGS
+    assert OLDER["saved"] not in text
+    assert (text.count("\nsettings:"), text.count("\nsettings_previous:")) == (1, 1)
