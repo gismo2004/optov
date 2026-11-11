@@ -1555,20 +1555,37 @@ class OptoVOptionsFlow(OptionsFlow):
                     self.hass, coordinator, self.config_entry.entry_id, sections
                 )
                 count = sum(len(entities) for entities in custom.values())
-                self.hass.config_entries.async_schedule_reload(
-                    self.config_entry.entry_id
-                )
                 notes = problems + skipped
-                if not notes:
-                    return self.async_abort(
-                        reason="custom_applied",
-                        description_placeholders={"count": str(count)},
+                # The file holds the controller's saved values as well, and those need no
+                # reload: only custom entities that differ from the ones set up do.
+                unchanged = custom == coordinator.custom and not notes
+                if not unchanged:
+                    self.hass.config_entries.async_schedule_reload(
+                        self.config_entry.entry_id
                     )
+                save = await custom_file.async_read_settings(
+                    self.hass, coordinator.stable_id
+                )
+                saved = (
+                    await async_ui_text(
+                        self.hass,
+                        "upload_saved",
+                        saved=_when(save["saved"]),
+                        count=len(save["values"]),
+                    )
+                    if save
+                    else ""
+                )
+                if unchanged:
+                    reason = "custom_unchanged"
+                else:
+                    reason = "custom_applied_notes" if notes else "custom_applied"
                 return self.async_abort(
-                    reason="custom_applied_notes",
+                    reason=reason,
                     description_placeholders={
                         "count": str(count),
                         "skipped": "\n".join(f"- {line}" for line in notes),
+                        "saved": saved,
                     },
                 )
         exists = await self.hass.async_add_executor_job(os.path.exists, path)

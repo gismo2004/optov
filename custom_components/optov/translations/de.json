@@ -245,8 +245,9 @@
     },
     "abort": {
       "custom_saved": "Gespeichert. Die Integration lädt neu, um es zu übernehmen.",
-      "custom_applied": "Übernommen: {count} eigene Entitäten. Die Integration lädt neu.",
-      "custom_applied_notes": "Übernommen: {count} eigene Entitäten. Die Integration lädt neu.\n\nNicht verwendet:\n\n{skipped}",
+      "custom_applied": "Übernommen: {count} eigene Entitäten. Die Integration lädt neu.\n\n{saved}",
+      "custom_applied_notes": "Übernommen: {count} eigene Entitäten. Die Integration lädt neu.\n\nNicht verwendet:\n\n{skipped}\n\n{saved}",
+      "custom_unchanged": "Die Datei ist übernommen. Ihre {count} eigenen Entitäten sind die bereits eingerichteten, daher lädt nichts neu.\n\n{saved}",
       "custom_onoff_none": "Es gibt keinen aktivierten Wert mit zwei benannten Zuständen mehr, der noch keine An/Aus-Entität hat.",
       "custom_not_loaded": "Die Steuerung ist gerade nicht eingerichtet. Versuche es erneut, sobald sie läuft.",
       "custom_empty": "Es gibt noch keine eigenen Entitäten.",
@@ -493,7 +494,8 @@
     "saved_from_other": "Die Datei wurde von einer anderen Regelung gespeichert ({controller}).",
     "save_first": "Für diese Regelung wurde noch nichts gespeichert.",
     "save_replaces": "**Das ersetzt den Stand vom {saved}, der sich in {count} Werten von der Regelung unterscheidet.** Dieser Stand bleibt als vorheriger erhalten. Wurde die Regelung zurückgesetzt oder verändert und sollen die alten Werte zurück, nicht speichern, sondern Vergleichen und zurückschreiben verwenden.",
-    "save_same": "Die Regelung enthält noch, was am {saved} gespeichert wurde; es ändert sich nur das Datum."
+    "save_same": "Die Regelung enthält noch, was am {saved} gespeichert wurde; es ändert sich nur das Datum.",
+    "upload_saved": "Die Datei enthält die Werte der Regelung, gespeichert am {saved} ({count} Werte). An der Regelung wurde nichts geändert: zum Zurückschreiben Einstellungen der Regelung, Vergleichen und zurückschreiben verwenden."
   },
   "issues": {
     "catalog_behind": {
