@@ -505,7 +505,7 @@
     "save_replaces": "**This replaces the save from {saved}, which differs from the controller in {count} values.** That save is kept as the previous one. If the controller was reset or changed and you want the old values back, do not save: use Compare and restore.",
     "save_same": "The controller still holds what was saved on {saved}, so only the date changes.",
     "upload_saved": "It holds the controller's values as saved on {saved} ({count} values).",
-    "upload_differs": "**They differ in {count} places from the file that was here before.**",
+    "upload_differs": "**Differences from the file that was here before: {count}.**",
     "upload_same": "They are the same as in the file that was here before."
   },
   "issues": {

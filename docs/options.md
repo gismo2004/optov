@@ -118,6 +118,10 @@ uploaded on another controller of the same family (*Download or upload the file*
 have is compared, the rest is counted as having no counterpart. The section records the model
 and software it was saved from, and the comparison says when that is another controller.
 
+Uploading a file reads nothing from the controller and writes nothing to it. The dialog says
+whether the saved values in it differ from the file that was there before, and asks whether to
+compare with the controller now.
+
 The actions `optov.save_settings`, `optov.compare_settings` and `optov.restore_settings` do the
 same from a script. The file is deleted with the integration entry; download it to keep it.
 

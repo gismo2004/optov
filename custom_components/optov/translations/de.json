@@ -505,7 +505,7 @@
     "save_replaces": "**Das ersetzt den Stand vom {saved}, der sich in {count} Werten von der Regelung unterscheidet.** Dieser Stand bleibt als vorheriger erhalten. Wurde die Regelung zurückgesetzt oder verändert und sollen die alten Werte zurück, nicht speichern, sondern Vergleichen und zurückschreiben verwenden.",
     "save_same": "Die Regelung enthält noch, was am {saved} gespeichert wurde; es ändert sich nur das Datum.",
     "upload_saved": "Sie enthält die Werte der Regelung, gespeichert am {saved} ({count} Werte).",
-    "upload_differs": "**Sie weichen an {count} Stellen von der Datei ab, die vorher hier lag.**",
+    "upload_differs": "**Abweichungen von der Datei, die vorher hier lag: {count}.**",
     "upload_same": "Sie sind dieselben wie in der Datei, die vorher hier lag."
   },
   "issues": {
