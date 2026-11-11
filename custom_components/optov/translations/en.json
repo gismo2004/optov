@@ -238,6 +238,14 @@
         "data": {
           "restore": "Set back to the saved value"
         }
+      },
+      "controller_uploaded": {
+        "title": "The file is in place",
+        "description": "{saved} {changed}\n\nCompare it with the controller now? That reads all values, takes about a minute and writes nothing; you then tick what to set back.",
+        "menu_options": {
+          "controller_restore": "Yes, compare with the controller",
+          "controller_later": "No, not now"
+        }
       }
     },
     "progress": {
@@ -257,7 +265,8 @@
       "controller_same": "Nothing differs: all {compared} values and the weekly programmes are as saved ({saved}).",
       "controller_restored": "{written} values were set back.",
       "controller_restored_notes": "{written} values were set back.\n\nNot written:\n\n{refused}",
-      "controller_unreadable": "The controller could not be read: {error}"
+      "controller_unreadable": "The controller could not be read: {error}",
+      "controller_later": "The file is in place. Nothing was written to the controller."
     },
     "error": {
       "custom_invalid": "This is not a custom entities file: it must be YAML with sections such as onoff:.",
@@ -495,7 +504,9 @@
     "save_first": "Nothing has been saved for this controller yet.",
     "save_replaces": "**This replaces the save from {saved}, which differs from the controller in {count} values.** That save is kept as the previous one. If the controller was reset or changed and you want the old values back, do not save: use Compare and restore.",
     "save_same": "The controller still holds what was saved on {saved}, so only the date changes.",
-    "upload_saved": "The file also holds the controller's values as saved on {saved} ({count} values). Uploading writes nothing to the controller: Controller settings, Compare and restore shows what differs and sets back what you tick."
+    "upload_saved": "It holds the controller's values as saved on {saved} ({count} values).",
+    "upload_differs": "**They differ in {count} places from the file that was here before.**",
+    "upload_same": "They are the same as in the file that was here before."
   },
   "issues": {
     "catalog_behind": {

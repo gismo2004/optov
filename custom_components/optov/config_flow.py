@@ -98,6 +98,7 @@ from .custom_entities import (
     device_classes,
     find_item,
     onoff_entity,
+    saves_differ,
     shared_modes,
     two_state_items,
     write_values,
@@ -738,8 +739,6 @@ class OptoVOptionsFlow(OptionsFlow):
         self._task: asyncio.Task[Any] | None = None
         self._failure = ""
         self._previous = False
-        # Whether the file step was reached from the controller's values or the custom entities.
-        self._for_controller = False
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -1295,7 +1294,6 @@ class OptoVOptionsFlow(OptionsFlow):
         """Save what the controller holds, or set it back to what was saved."""
         if self._coordinator() is None:
             return self.async_abort(reason="custom_not_loaded")
-        self._for_controller = True
         return self.async_show_menu(
             step_id="controller",
             menu_options=["controller_save", "controller_restore", "custom_backup"],
@@ -1530,6 +1528,11 @@ class OptoVOptionsFlow(OptionsFlow):
             },
         )
 
+    async def async_step_controller_later(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return self.async_abort(reason="controller_later")
+
     async def async_step_custom_backup(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -1540,6 +1543,10 @@ class OptoVOptionsFlow(OptionsFlow):
         path = self._path()
         errors: dict[str, str] = {}
         if user_input is not None:
+            before = await custom_file.async_read_settings(
+                self.hass, coordinator.stable_id
+            )
+            uploaded = bool(user_input.get("upload"))
             if file_id := user_input.get("upload"):
                 try:
                     await self.hass.async_add_executor_job(
@@ -1579,10 +1586,23 @@ class OptoVOptionsFlow(OptionsFlow):
                     if save
                     else ""
                 )
-                if unchanged and save and self._for_controller:
-                    # Uploaded for the controller's values: what the file would change is
-                    # the answer, not what it does to the custom entities.
-                    return await self.async_step_controller_restore()
+                if unchanged and save:
+                    # The file's saved values are compared with the file that was here, which
+                    # costs nothing; reading the controller for them is the user's to ask for.
+                    differs = saves_differ(before, save)
+                    if not uploaded:
+                        changed = ""
+                    else:
+                        changed = await async_ui_text(
+                            self.hass,
+                            "upload_differs" if differs else "upload_same",
+                            count=differs,
+                        )
+                    return self.async_show_menu(
+                        step_id="controller_uploaded",
+                        menu_options=["controller_restore", "controller_later"],
+                        description_placeholders={"saved": saved, "changed": changed},
+                    )
                 if unchanged:
                     reason = "custom_unchanged"
                 else:

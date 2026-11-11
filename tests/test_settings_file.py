@@ -188,3 +188,22 @@ def test_only_the_value_is_read_back_and_a_bare_one_is_taken_too():
     }
 
     assert rules.parse_settings(by_hand)["values"] == {"room": 21.5, "mode": 2}
+
+
+def test_two_saves_are_counted_apart_by_value_and_programme_day():
+    other = {
+        **SETTINGS,
+        "values": {"room": 21.0, "mode": 2, "lock": 0, "extra": 1},
+        "programmes": {
+            "heating": {
+                **SETTINGS["programmes"]["heating"],
+                "wed": [["06:00", "07:00", 1]],
+            }
+        },
+    }
+
+    # room changed, holiday gone, extra new, and Wednesday's windows.
+    assert rules.saves_differ(SETTINGS, other) == 4
+    assert rules.saves_differ(SETTINGS, SETTINGS) == 0
+    # No save before: everything in the new one counts.
+    assert rules.saves_differ(None, SETTINGS) == len(SETTINGS["values"]) + 3

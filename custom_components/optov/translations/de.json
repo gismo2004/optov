@@ -238,6 +238,14 @@
         "data": {
           "restore": "Auf den gespeicherten Wert zurücksetzen"
         }
+      },
+      "controller_uploaded": {
+        "title": "Die Datei ist übernommen",
+        "description": "{saved} {changed}\n\nJetzt mit der Regelung vergleichen? Das liest alle Werte, dauert etwa eine Minute und ändert nichts; danach wird angehakt, was zurückgeschrieben werden soll.",
+        "menu_options": {
+          "controller_restore": "Ja, mit der Regelung vergleichen",
+          "controller_later": "Nein, jetzt nicht"
+        }
       }
     },
     "progress": {
@@ -257,7 +265,8 @@
       "controller_same": "Keine Abweichung: alle {compared} Werte und die Wochenprogramme sind wie gespeichert ({saved}).",
       "controller_restored": "{written} Werte wurden zurückgeschrieben.",
       "controller_restored_notes": "{written} Werte wurden zurückgeschrieben.\n\nNicht geschrieben:\n\n{refused}",
-      "controller_unreadable": "Die Regelung konnte nicht gelesen werden: {error}"
+      "controller_unreadable": "Die Regelung konnte nicht gelesen werden: {error}",
+      "controller_later": "Die Datei ist übernommen. An der Regelung wurde nichts geändert."
     },
     "error": {
       "custom_invalid": "Das ist keine Datei für eigene Entitäten: Sie muss YAML mit Abschnitten wie onoff: sein.",
@@ -495,7 +504,9 @@
     "save_first": "Für diese Regelung wurde noch nichts gespeichert.",
     "save_replaces": "**Das ersetzt den Stand vom {saved}, der sich in {count} Werten von der Regelung unterscheidet.** Dieser Stand bleibt als vorheriger erhalten. Wurde die Regelung zurückgesetzt oder verändert und sollen die alten Werte zurück, nicht speichern, sondern Vergleichen und zurückschreiben verwenden.",
     "save_same": "Die Regelung enthält noch, was am {saved} gespeichert wurde; es ändert sich nur das Datum.",
-    "upload_saved": "Die Datei enthält außerdem die Werte der Regelung, gespeichert am {saved} ({count} Werte). Das Hochladen ändert nichts an der Regelung: Einstellungen der Regelung, Vergleichen und zurückschreiben zeigt die Abweichungen und schreibt zurück, was angehakt wird."
+    "upload_saved": "Sie enthält die Werte der Regelung, gespeichert am {saved} ({count} Werte).",
+    "upload_differs": "**Sie weichen an {count} Stellen von der Datei ab, die vorher hier lag.**",
+    "upload_same": "Sie sind dieselben wie in der Datei, die vorher hier lag."
   },
   "issues": {
     "catalog_behind": {

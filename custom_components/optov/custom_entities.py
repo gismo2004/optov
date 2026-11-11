@@ -587,6 +587,26 @@ def replace_settings(text: str, saved: list[str]) -> str:
     return "\n".join([*kept, "", *saved]) + "\n"
 
 
+def saves_differ(before: dict[str, Any] | None, after: dict[str, Any] | None) -> int:
+    """In how many values and programme days two saves differ; one only one of them has counts."""
+    old, new = before or {}, after or {}
+    old_values, new_values = old.get(KEY_VALUES, {}), new.get(KEY_VALUES, {})
+    count = len(changed_settings(old_values, new_values)) + len(
+        set(old_values) ^ set(new_values)
+    )
+    old_days, new_days = (
+        {
+            (name, day): [list(window) for window in windows]
+            for name, days in save.get(KEY_PROGRAMMES, {}).items()
+            for day, windows in days.items()
+        }
+        for save in (old, new)
+    )
+    return count + sum(
+        old_days.get(key) != new_days.get(key) for key in set(old_days) | set(new_days)
+    )
+
+
 def changed_settings(
     saved: dict[str, Any], current: dict[str, Any]
 ) -> list[tuple[str, Any, Any]]:
