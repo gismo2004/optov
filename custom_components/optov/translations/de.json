@@ -81,7 +81,8 @@
         "title": "OptoV",
         "menu_options": {
           "settings": "Einstellungen",
-          "custom": "Eigene Entitäten"
+          "custom": "Eigene Entitäten",
+          "controller": "Einstellungen der Regelung"
         }
       },
       "custom": {
@@ -200,6 +201,26 @@
           "away": "Zum Beispiel Ferienbetrieb",
           "boost": "Zum Beispiel Partybetrieb"
         }
+      },
+      "controller": {
+        "title": "Einstellungen der Regelung",
+        "description": "Alles, was an der Regelung einstellbar ist, gespeichert in `{path}` zusammen mit den eigenen Entitäten: zum späteren Vergleichen und zum Zurückschreiben nach einem Reset oder Platinentausch.",
+        "menu_options": {
+          "controller_save": "Werte der Regelung speichern",
+          "controller_restore": "Vergleichen und zurückschreiben",
+          "custom_backup": "Datei herunterladen oder hochladen"
+        }
+      },
+      "controller_save": {
+        "title": "Werte der Regelung speichern",
+        "description": "Liest alles Einstellbare und die Wochenprogramme aus der Regelung und speichert sie in der Datei; der bisherige Stand wird ersetzt. Das dauert etwa eine Minute, an der Regelung wird nichts geändert."
+      },
+      "controller_restore": {
+        "title": "Vergleichen und zurückschreiben",
+        "description": "Gespeichert {saved}. {count} von {compared} Werten weichen jetzt von der Regelung ab; angezeigt als *jetzt → gespeichert*. {not_compared} gespeicherte Werte gibt es an dieser Regelung nicht. {other}\n\nAnhaken, was zurückgeschrieben werden soll. Einstellungen sind angehakt; momentane Zustände wie Partybetrieb, Datumswerte und Werte, die kein Menü führt, nicht.",
+        "data": {
+          "restore": "Auf den gespeicherten Wert zurücksetzen"
+        }
       }
     },
     "abort": {
@@ -209,7 +230,12 @@
       "custom_onoff_none": "Es gibt keinen aktivierten Wert mit zwei benannten Zuständen mehr, der noch keine An/Aus-Entität hat.",
       "custom_not_loaded": "Die Steuerung ist gerade nicht eingerichtet. Versuche es erneut, sobald sie läuft.",
       "custom_empty": "Es gibt noch keine eigenen Entitäten.",
-      "custom_rejected": "Nicht gespeichert: {reason}"
+      "custom_rejected": "Nicht gespeichert: {reason}",
+      "controller_saved": "{values} Werte und {programmes} Wochenprogramme in `{path}` gespeichert.",
+      "controller_none_saved": "Für diese Regelung wurde noch nichts gespeichert.",
+      "controller_same": "Keine Abweichung: alle {compared} Werte und die Wochenprogramme sind wie gespeichert ({saved}).",
+      "controller_restored": "{written} Werte wurden zurückgeschrieben.",
+      "controller_restored_notes": "{written} Werte wurden zurückgeschrieben.\n\nNicht geschrieben:\n\n{refused}"
     },
     "error": {
       "custom_invalid": "Das ist keine Datei für eigene Entitäten: Sie muss YAML mit Abschnitten wie onoff: sein.",
@@ -374,7 +400,7 @@
       "message": "{date} kann in dieser Einstellung nicht gespeichert werden: sie fasst Daten von {first} bis {last}."
     },
     "no_saved_settings": {
-      "message": "Für diese Regelung wurden noch keine Einstellungen gespeichert. Zuerst die Aktion optov.save_settings ausführen."
+      "message": "Für diese Regelung wurde noch nichts gespeichert. Zuerst die Werte speichern (Aktion optov.save_settings oder in den Optionen unter Einstellungen der Regelung)."
     }
   },
   "card": {
@@ -442,7 +468,8 @@
     "identify_foreign": "### System-ID {system_id}\nDiese Regelung spricht ein Protokoll, das OptoV nicht bedient; ein Katalog dafür hilft nicht. Siehe docs/protocols.md.",
     "custom_kind_onoff": "An/Aus",
     "custom_kind_climate": "Thermostat",
-    "custom_kind_water_heater": "Warmwasserbereiter"
+    "custom_kind_water_heater": "Warmwasserbereiter",
+    "saved_from_other": "Die Datei wurde von einer anderen Regelung gespeichert ({controller})."
   },
   "issues": {
     "catalog_behind": {

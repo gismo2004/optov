@@ -21,9 +21,11 @@ language, which can change.
 All custom entities of a controller live in one YAML file next to the catalog, one section per
 kind, so they can be backed up, edited and restored. The options flow edits the same file.
 
-The same file can hold a `settings:` section: the value every setting of the controller had when
-it was saved, and its weekly programmes. It is what a controller is compared with, and later set
-back to, after a reset or a replaced board.
+The same file can hold a `settings:` section: the value everything writable on the controller
+had when it was saved, and its weekly programmes. It is what a controller is compared with, and
+set back to value by value, after a reset or a replaced board. Values are kept under the
+datapoint's own id rather than an entity id, which follows the catalog language and the model:
+that is what lets a file from one controller be compared with another of the same family.
 
 Kept free of Home Assistant imports so the rules can be tested on their own.
 """
@@ -431,9 +433,9 @@ def render_file(
         "#   presets: preset -> the switch or two-state select that turns it on (climate,",
         "#            optional; a select's on value is ON/1): " + ", ".join(PRESETS),
         "#",
-        "# settings: the controller's settings as they were saved (action optov.save_settings)",
-        "#   values:     entity id -> value; a number as it is shown, a select or switch as",
-        "#               its raw value",
+        "# settings: everything writable as it was saved (OptoV options -> Controller settings)",
+        "#   values:     datapoint -> value; a number as it is shown, a select or switch as",
+        "#               its raw value, a date as YYYY-MM-DD",
         "#   programmes: weekly programme -> day -> [start, end, level] per switching window",
         "",
         f"{SECTION_ONOFF}:" + ("" if onoff else " []"),
@@ -465,22 +467,30 @@ def render_file(
     return "\n".join(lines) + "\n"
 
 
-def settings_items(profile: Any) -> list[tuple[str, dict[str, Any]]]:
-    """The datapoints that are settings of the controller, as (platform, item).
+SETTING_PLATFORMS = ("numbers", "selects", "switches", "dates")
 
-    Every number and select a menu of the controller lists, and the one-bit switches the
-    catalog files as configuration. A switch outside the configuration pages -- party mode, a
-    one-off hot water run -- is a state of the moment, and setting it back would start or stop
-    something; a date is a holiday. A datapoint no menu lists is left out as well: nothing says
-    what it is for.
-    """
-    return [
-        (platform, item)
-        for platform in ("numbers", "selects", "switches")
+
+def settings_items(profile: Any) -> dict[str, tuple[str, dict[str, Any]]]:
+    """Everything writable on the controller, by datapoint id, as (platform, item)."""
+    return {
+        item["id"]: (platform, item)
+        for platform in SETTING_PLATFORMS
         for item in getattr(profile, platform)
-        if not item.get("unlisted")
-        and (platform != "switches" or item.get("entity_category"))
-    ]
+    }
+
+
+def restored_by_default(platform: str, item: dict[str, Any]) -> bool:
+    """Whether a difference is offered ticked when values are chosen to set back.
+
+    A number or select a menu of the controller lists, and a one-bit switch the catalog files
+    as configuration, are settings. A switch outside the configuration pages -- party mode, a
+    one-off hot water run -- is a state of the moment and setting it back starts or stops
+    something; a date is a holiday; and for a datapoint no menu lists nothing says what it is
+    for. Those are saved and shown like the rest, and left for the user to tick.
+    """
+    if item.get("unlisted") or platform == "dates":
+        return False
+    return platform != "switches" or bool(item.get("entity_category"))
 
 
 def parse_settings(raw: Any) -> dict[str, Any] | None:
@@ -499,15 +509,16 @@ def parse_settings(raw: Any) -> dict[str, Any] | None:
 
 
 def render_settings(settings: dict[str, Any], notes: dict[str, str]) -> list[str]:
-    """The settings section's lines; `notes` is a comment per entity id, a value's name."""
+    """The settings section's lines; `notes` is a comment per datapoint, its name."""
     lines = [f"{SECTION_SETTINGS}:"]
     for key in (KEY_CONTROLLER, KEY_SOFTWARE, KEY_SAVED):
         if settings.get(key) is not None:
             lines.append(f"  {key}: {_quote(str(settings[key]))}")
     lines.append(f"  {KEY_VALUES}:" + ("" if settings[KEY_VALUES] else " {}"))
-    for entity_id, value in sorted(settings[KEY_VALUES].items()):
-        note = f"  # {notes[entity_id]}" if notes.get(entity_id) else ""
-        lines.append(f"    {entity_id}: {value}{note}")
+    for key, value in sorted(settings[KEY_VALUES].items()):
+        note = f"  # {notes[key]}" if notes.get(key) else ""
+        shown = _quote(value) if isinstance(value, str) else value
+        lines.append(f"    {key}: {shown}{note}")
     programmes = settings.get(KEY_PROGRAMMES) or {}
     lines.append(f"  {KEY_PROGRAMMES}:" + ("" if programmes else " {}"))
     for name, days in sorted(programmes.items()):

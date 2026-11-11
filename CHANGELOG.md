@@ -11,9 +11,11 @@ commits.
 ## [Unreleased]
 
 ### Added
-- Two actions for the controller's settings: `optov.save_settings` stores every setting and the
-  weekly programmes in the controller's file next to the catalog, and `optov.compare_settings`
-  lists what differs from them now. Neither writes to the controller (options, saved settings).
+- Controller settings in the options: save everything writable on the controller and its weekly
+  programmes to the file next to the catalog, compare the controller with it later, and set back
+  the values you tick -- after a reset or a replaced board. Also as the actions
+  `optov.save_settings`, `optov.compare_settings` and `optov.restore_settings` (options,
+  controller settings).
 
 ## [0.9.6] - 2026-11-10
 

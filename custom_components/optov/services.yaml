@@ -211,20 +211,36 @@ clear_orphaned_statistics:
         boolean:
 
 save_settings:
-  name: Save the controller's settings
+  name: Save the controller's values
   description: >-
-    Read every setting of the controller and its weekly programmes and store them in the
-    controller's file next to the catalog, in its `settings` section. Nothing is written to the
-    controller. Momentary states such as party mode or a one-off hot water run are not
-    settings and are left out. Download the file from the options (Custom entities, Backup and
-    restore) to keep it somewhere else.
+    Read everything writable on the controller and its weekly programmes and store them in
+    the controller's file next to the catalog, in its `settings` section. Nothing is written to
+    the controller. The same is offered in the options under Controller settings.
   fields:
     config_entry_id: *controller
 
 compare_settings:
-  name: Compare the controller with its saved settings
+  name: Compare the controller with its saved values
   description: >-
-    Read the controller's settings and weekly programmes again and list what differs from the
-    saved ones. Nothing is written to the controller.
+    Read the controller's values and weekly programmes again and list what differs from the
+    saved ones, each with the key to restore it by. Nothing is written to the controller.
   fields:
     config_entry_id: *controller
+
+restore_settings:
+  name: Restore saved values
+  description: >-
+    Write the saved value of each key named to the controller, and report what was written
+    and what was refused. Only the keys named are touched; the options offer the same with a
+    list of the differences to choose from.
+  fields:
+    config_entry_id: *controller
+    keys:
+      name: Keys
+      description: >-
+        What to set back, as compare_settings names it: a value's key, or a programme and a
+        day as "programme/day".
+      required: true
+      example: '["nku_tagesprogramm_ww/mon"]'
+      selector:
+        object:

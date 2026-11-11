@@ -47,6 +47,7 @@ from .custom_entities import (
     render_file,
     render_settings,
     replace_settings,
+    restored_by_default,
     settings_items,
     two_state_items,
 )
@@ -366,7 +367,7 @@ async def async_save(
         assembled[SECTION_WATER_HEATER],
         # The saved settings are not this dialog's, so they are written back as they were.
         saved := await async_read_settings(hass, coordinator.stable_id),
-        _notes(hass, coordinator, saved[KEY_VALUES]) if saved else None,
+        _notes(coordinator, saved[KEY_VALUES]) if saved else None,
     )
     await hass.async_add_executor_job(
         write_text, custom_file_path(hass, coordinator.stable_id), text
@@ -389,28 +390,6 @@ async def async_read_settings(
         return None
 
 
-def _setting_entities(
-    hass: HomeAssistant, coordinator: Any
-) -> dict[str, tuple[str, dict[str, Any]]]:
-    """Every setting of the controller by its entity id, as (platform, datapoint).
-
-    The registry knows the id an entity has, renamed or not; one that is not registered yet
-    is named as it will be, as for the custom entities.
-    """
-    registry = er.async_get(hass)
-    found: dict[str, tuple[str, dict[str, Any]]] = {}
-    for platform, item in settings_items(coordinator.profile):
-        domain = ENTITY_DOMAINS[platform]
-        entity_id = (
-            registry.async_get_entity_id(
-                domain, DOMAIN, f"{coordinator.stable_id}_{item['id']}"
-            )
-            or f"{domain}.{coordinator.object_id(item.get('circuit'), item['name'])}"
-        )
-        found[entity_id] = (platform, item)
-    return found
-
-
 def _label(item: dict[str, Any], value: Any) -> str | None:
     """The catalog's name for a raw value of an enumerated setting."""
     try:
@@ -419,49 +398,40 @@ def _label(item: dict[str, Any], value: Any) -> str | None:
         return None
 
 
-def _notes(
-    hass: HomeAssistant, coordinator: Any, values: dict[str, Any]
-) -> dict[str, str]:
+def _notes(coordinator: Any, values: dict[str, Any]) -> dict[str, str]:
     """What to write next to each saved value: the setting's name, and a raw value's own."""
     notes: dict[str, str] = {}
-    for entity_id, (_platform, item) in _setting_entities(hass, coordinator).items():
-        if entity_id in values:
-            label = _label(item, values[entity_id])
-            notes[entity_id] = item["name"] + (f": {label}" if label else "")
+    for key, (_platform, item) in settings_items(coordinator.profile).items():
+        if key in values:
+            label = _label(item, values[key])
+            notes[key] = item["name"] + (f": {label}" if label else "")
     return notes
 
 
-async def _async_current(
-    hass: HomeAssistant, coordinator: Any
-) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
-    """The controller's settings now, by entity id; its programmes; what it refused."""
-    by_item, refused = await coordinator.async_read_settings()
-    entities = _setting_entities(hass, coordinator)
-    values = {
-        entity_id: by_item[item["id"]]
-        for entity_id, (_platform, item) in entities.items()
-        if item["id"] in by_item
-    }
-    await coordinator.async_refresh_schedules()
-    programmes = {
+def _programme_days(schedules: dict[str, Any]) -> dict[str, dict[str, list[list[Any]]]]:
+    """The weekly programmes as the file holds them: [start, end, level] per window."""
+    return {
         name: {
             day: [[w["start"], w["end"], w["mode"]] for w in windows]
             for day, windows in days.items()
         }
-        for name, days in coordinator.schedules.items()
+        for name, days in schedules.items()
         if days
     }
-    not_read = sorted(
-        entity_id
-        for entity_id, (_platform, item) in entities.items()
-        if item["id"] in refused
-    )
-    return values, programmes, not_read
+
+
+async def _async_current(
+    coordinator: Any,
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """What the controller holds now: values by datapoint, programmes, what it refused."""
+    values, refused = await coordinator.async_read_settings()
+    await coordinator.async_refresh_schedules()
+    return values, _programme_days(coordinator.schedules), sorted(refused)
 
 
 async def async_save_settings(hass: HomeAssistant, coordinator: Any) -> dict[str, Any]:
-    """Read the controller's settings and programmes and put them in its file."""
-    values, programmes, not_read = await _async_current(hass, coordinator)
+    """Read everything writable and the programmes and put them in the controller's file."""
+    values, programmes, not_read = await _async_current(coordinator)
     settings = {
         KEY_CONTROLLER: coordinator.profile.model,
         KEY_SOFTWARE: coordinator.profile.sw_version,
@@ -469,7 +439,7 @@ async def async_save_settings(hass: HomeAssistant, coordinator: Any) -> dict[str
         KEY_VALUES: values,
         KEY_PROGRAMMES: programmes,
     }
-    section = render_settings(settings, _notes(hass, coordinator, values))
+    section = render_settings(settings, _notes(coordinator, values))
     path = custom_file_path(hass, coordinator.stable_id)
     text = await hass.async_add_executor_job(read_text, path)
     if text is None:
@@ -478,33 +448,40 @@ async def async_save_settings(hass: HomeAssistant, coordinator: Any) -> dict[str
     return {
         "file": os.path.basename(path),
         "saved": settings[KEY_SAVED],
-        "settings": len(values),
+        "values": len(values),
         "programmes": len(programmes),
         "not_read": not_read,
     }
 
 
+def programme_key(name: str, day: str) -> str:
+    """How one day of a weekly programme is named among the differences."""
+    return f"{name}/{day}"
+
+
 async def async_compare_settings(
     hass: HomeAssistant, coordinator: Any
 ) -> dict[str, Any] | None:
-    """What differs between the saved settings and the controller now; None if none are saved.
+    """What differs between the saved values and the controller now; None if none are saved.
 
-    Nothing is written. A saved value whose entity is not a setting of this controller, or
-    that the controller did not answer for, is listed apart and not compared.
+    Nothing is written. A saved value this controller has no datapoint for, or did not answer
+    for, is listed apart and not compared: that is what a file from another controller of the
+    family looks like here.
     """
     saved = await async_read_settings(hass, coordinator.stable_id)
     if saved is None:
         return None
-    values, programmes, not_read = await _async_current(hass, coordinator)
-    entities = _setting_entities(hass, coordinator)
+    values, programmes, not_read = await _async_current(coordinator)
+    items = settings_items(coordinator.profile)
     differences = []
-    for entity_id, was, now in changed_settings(saved[KEY_VALUES], values):
-        item = entities[entity_id][1]
+    for key, was, now in changed_settings(saved[KEY_VALUES], values):
+        platform, item = items[key]
         difference = {
-            "entity_id": entity_id,
+            "key": key,
             "name": item["name"],
             "saved": was,
             "now": now,
+            "setting": restored_by_default(platform, item),
         }
         if (label := _label(item, was)) is not None:
             difference["saved_as"] = label
@@ -513,6 +490,7 @@ async def async_compare_settings(
         differences.append(difference)
     days = [
         {
+            "key": programme_key(name, day),
             "programme": name,
             "day": day,
             "saved": windows,
@@ -537,6 +515,41 @@ async def async_compare_settings(
         ),
         "not_read": not_read,
     }
+
+
+async def async_restore_settings(
+    hass: HomeAssistant, coordinator: Any, keys: Iterable[str]
+) -> dict[str, Any] | None:
+    """Set the named values and programme days back to what was saved; None if none are saved.
+
+    Each one is its own write, checked the way its entity checks it, and one the controller
+    or the catalog refuses is reported and the rest carry on. A key is a datapoint's, or a
+    programme and a day as compare names them.
+    """
+    saved = await async_read_settings(hass, coordinator.stable_id)
+    if saved is None:
+        return None
+    written: list[str] = []
+    refused: dict[str, str] = {}
+    for key in dict.fromkeys(keys):
+        name, _, day = key.partition("/")
+        try:
+            if key in saved[KEY_VALUES]:
+                await coordinator.async_write_setting(key, saved[KEY_VALUES][key])
+            elif day in saved[KEY_PROGRAMMES].get(name, {}):
+                windows = [
+                    {"start": start, "end": end, "mode": level}
+                    for start, end, level in saved[KEY_PROGRAMMES][name][day]
+                ]
+                await coordinator.async_set_day_schedule(name, day, windows, force=True)
+            else:
+                raise ValueError("not among the saved values")
+        except Exception as err:  # noqa: BLE001 - one refusal must not stop the rest
+            refused[key] = str(err) or type(err).__name__
+        else:
+            written.append(key)
+    await coordinator.async_request_refresh()
+    return {"written": written, "refused": refused}
 
 
 class CustomFileView(HomeAssistantView):

@@ -7,7 +7,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -60,10 +60,12 @@ from .decode import (
     decode_date,
     decode_int,
     decode_value,
+    encode_date,
     extract_bitfield,
     insert_bitfield,
     is_signed,
     scale,
+    unscale,
 )
 from .errors import decode_boiler_error_history, decode_wp_error_history
 from .optolink import OptolinkClient
@@ -1831,18 +1833,18 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return await self.client.read_raw(address, length)
 
     async def async_read_settings(self) -> tuple[dict[str, Any], list[str]]:
-        """Read every setting of the controller now: value by datapoint id, and what it refused.
+        """Read everything writable now: value by datapoint id, and what the controller refused.
 
-        A number comes as it is set and shown, a select or a switch as its raw value -- what
-        async_write_item() takes for each. Enabled or not makes no difference; a setting whose
-        entity is switched off is still a setting. One the controller does not have is left out
-        without a telegram, as in a poll.
+        A number comes as it is shown, a select or a switch as its raw value, a date as an ISO
+        date; a date the controller holds none for is left out. Enabled or not makes no
+        difference: a setting whose entity is switched off is still a setting. One the
+        controller does not have costs no telegram, as in a poll.
         """
         values: dict[str, Any] = {}
         refused: list[str] = []
         # Settings that share a block (the bits of one byte) are one telegram between them.
         blocks: dict[tuple[Any, ...], bytes | None] = {}
-        for platform, item in settings_items(self.profile):
+        for platform, item in settings_items(self.profile).values():
             key = (item["address"], block_length(item), item.get("fc_read"))
             if key not in blocks:
                 try:
@@ -1857,9 +1859,36 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             if platform == "numbers":
                 values[item["id"]] = self._decode_number(item, raw)
-            else:
+            elif platform != "dates":
                 values[item["id"]] = self._raw_int(item, raw, False)
+            elif (day := self._decode_date(item, raw)) is not None:
+                values[item["id"]] = day
         return values, refused
+
+    async def async_write_setting(self, key: str, value: Any) -> None:
+        """Set one writable datapoint to a value in the form async_read_settings() gives it."""
+        platform, item = settings_items(self.profile)[key]
+        if platform == "numbers":
+            limits = (item.get("min"), item.get("max"))
+            if any(limit is None for limit in limits) or not (
+                limits[0] <= float(value) <= limits[1]
+            ):
+                raise ValueError(f"{value} is outside {limits[0]} to {limits[1]}")
+            raw: int | bytes = unscale(
+                float(value),
+                item.get("conversion"),
+                item.get("conversion_factor"),
+                item.get("conversion_offset"),
+            )
+        elif platform == "dates":
+            raw = encode_date(
+                date.fromisoformat(str(value)), item.get("conversion"), item["bytes"]
+            )
+        else:
+            raw = int(value)
+            if platform == "selects" and raw not in item.get("options", {}):
+                raise ValueError(f"{raw} is not one of this setting's values")
+        await self.async_write_item(item, raw)
 
     def datapoint_at(self, address: int) -> dict[str, Any] | None:
         """This controller's datapoint at an address, whichever platform it became."""

@@ -43,6 +43,7 @@ from homeassistant.helpers.selector import (
     SerialPortSelector,
     TextSelector,
 )
+from homeassistant.helpers.translation import async_get_translations
 
 from . import catalog_db, custom_file, optolink
 from .catalog_db import get_available_languages
@@ -720,11 +721,15 @@ class OptoVOptionsFlow(OptionsFlow):
         self._section: str | None = None
         self._draft: dict[str, Any] = {}
         self._editing: str | None = None
+        # The differences offered for restoring, by key, as the form labelled them.
+        self._labels: dict[str, str] = {}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        return self.async_show_menu(step_id="init", menu_options=["settings", "custom"])
+        return self.async_show_menu(
+            step_id="init", menu_options=["settings", "custom", "controller"]
+        )
 
     async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
@@ -1264,6 +1269,130 @@ class OptoVOptionsFlow(OptionsFlow):
             if e["unique_id"] not in (self._editing, resolved[0]["unique_id"])
         ]
         return await self._async_save(section, [*rest, resolved[0]])
+
+    # --- The controller's own values: saved in the same file, compared and set back from it.
+
+    async def async_step_controller(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Save what the controller holds, or set it back to what was saved."""
+        if self._coordinator() is None:
+            return self.async_abort(reason="custom_not_loaded")
+        return self.async_show_menu(
+            step_id="controller",
+            menu_options=["controller_save", "controller_restore", "custom_backup"],
+            description_placeholders={"path": self._path()},
+        )
+
+    async def async_step_controller_save(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        coordinator = self._coordinator()
+        if coordinator is None:
+            return self.async_abort(reason="custom_not_loaded")
+        if user_input is None:
+            return self.async_show_form(
+                step_id="controller_save", data_schema=vol.Schema({})
+            )
+        saved = await custom_file.async_save_settings(self.hass, coordinator)
+        return self.async_abort(
+            reason="controller_saved",
+            description_placeholders={
+                "values": str(saved["values"]),
+                "programmes": str(saved["programmes"]),
+                "path": self._path(),
+            },
+        )
+
+    async def _async_difference_labels(self, found: dict[str, Any]) -> dict[str, str]:
+        """Each difference as one line to tick: what it is, what it is now, what was saved."""
+
+        def shown(difference: dict[str, Any], which: str) -> str:
+            return str(difference.get(f"{which}_as", difference[which]))
+
+        labels = {
+            d["key"]: f"{d['name']}: {shown(d, 'now')} → {shown(d, 'saved')}"
+            for d in found["differences"]
+        }
+        days = await async_get_translations(
+            self.hass, self.hass.config.language, "selector", {DOMAIN}
+        )
+        schedules = self._coordinator().profile.schedules
+        for d in found["programme_days"]:
+            name = schedules.get(d["programme"], {}).get("name") or d["programme"]
+            day = days.get(
+                f"component.{DOMAIN}.selector.day.options.{d['day']}", d["day"]
+            )
+            labels[d["key"]] = f"{name}, {day}"
+        return labels
+
+    async def async_step_controller_restore(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show what differs from the saved values and write back the ones ticked."""
+        coordinator = self._coordinator()
+        if coordinator is None:
+            return self.async_abort(reason="custom_not_loaded")
+        if user_input is not None:
+            done = await custom_file.async_restore_settings(
+                self.hass, coordinator, user_input.get("restore", [])
+            )
+            refused = (done or {}).get("refused", {})
+            labels = self._labels
+            return self.async_abort(
+                reason="controller_restored_notes"
+                if refused
+                else "controller_restored",
+                description_placeholders={
+                    "written": str(len((done or {}).get("written", []))),
+                    "refused": "\n".join(
+                        f"- {labels.get(key, key)}: {why}"
+                        for key, why in refused.items()
+                    ),
+                },
+            )
+        found = await custom_file.async_compare_settings(self.hass, coordinator)
+        if found is None:
+            return self.async_abort(reason="controller_none_saved")
+        self._labels = await self._async_difference_labels(found)
+        if not self._labels:
+            return self.async_abort(
+                reason="controller_same",
+                description_placeholders={
+                    "compared": str(found["compared"]),
+                    "saved": found["saved"] or "",
+                },
+            )
+        ticked = [d["key"] for d in found["differences"] if d["setting"]]
+        ticked += [d["key"] for d in found["programme_days"]]
+        other = (
+            ""
+            if found["same_controller"]
+            else await async_ui_text(
+                self.hass, "saved_from_other", controller=found["controller"] or "?"
+            )
+        )
+        return self.async_show_form(
+            step_id="controller_restore",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional("restore", default=ticked): _pick(
+                        [
+                            SelectOptionDict(value=key, label=label)
+                            for key, label in self._labels.items()
+                        ],
+                        True,
+                    )
+                }
+            ),
+            description_placeholders={
+                "saved": found["saved"] or "",
+                "count": str(len(self._labels)),
+                "compared": str(found["compared"]),
+                "not_compared": str(len(found["not_compared"])),
+                "other": other,
+            },
+        )
 
     async def async_step_custom_backup(
         self, user_input: dict[str, Any] | None = None

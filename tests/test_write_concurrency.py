@@ -455,3 +455,87 @@ def test_writes_are_counted_per_address_and_noticed(coordinator_module):
     c._writes_day = "2000-01-01"
     assert c.writes_today_total == 0
     assert calls[-1] == ("delete", "frequent_writes_e1")
+
+
+# --- Saving the controller's values and setting one back -------------------------------------
+
+ROOM = {
+    "id": "room",
+    "name": "room",
+    "address": 0x2000,
+    "bytes": 2,
+    "conversion": "Div10",
+    "parameter_type": "Int",
+    "min": 10,
+    "max": 30,
+}
+HOLIDAY = {
+    "id": "holiday",
+    "name": "holiday",
+    "address": 0x2600,
+    "bytes": 2,
+    "conversion": "DayToDate",
+}
+
+
+def _with_settings(module):
+    controller = FakeController()
+    controller.memory[ROOM["address"]] = (215).to_bytes(2, "little")
+    controller.memory[HOLIDAY["address"]] = bytes(2)
+    controller.memory[REGISTER] = bytes([0b0010_0001])  # mode 2, flag set
+    c = _coordinator(module, controller)
+    c.profile.numbers = [ROOM]
+    c.profile.dates = [HOLIDAY]
+    c.async_request_refresh = lambda: asyncio.sleep(0)
+    return controller, c
+
+
+def test_everything_writable_is_read_in_the_form_it_is_set_in(coordinator_module):
+    async def scenario():
+        _, c = _with_settings(coordinator_module)
+        return await c.async_read_settings()
+
+    values, refused = asyncio.run(scenario())
+
+    # A number as shown, a select and the switches raw; no date is held, so none is saved.
+    assert values == {"room": 21.5, "mode": 2, "flag": 1, "other": 5}
+    assert refused == []
+
+
+def test_a_saved_value_is_written_back_the_way_its_entity_writes_it(coordinator_module):
+    async def scenario():
+        controller, c = _with_settings(coordinator_module)
+        await c.async_write_setting("room", 22.5)
+        await c.async_write_setting("mode", 0)
+        await c.async_write_setting("holiday", "2026-12-24")
+        return controller.memory, await c.async_read_settings()
+
+    memory, (values, _) = asyncio.run(scenario())
+
+    assert memory[ROOM["address"]] == (225).to_bytes(2, "little")
+    # The mode's four bits changed, the flag beside them did not.
+    assert memory[REGISTER] == bytes([0b0000_0001])
+    assert values == {
+        "room": 22.5,
+        "mode": 0,
+        "flag": 1,
+        "other": 5,
+        "holiday": "2026-12-24",
+    }
+
+
+def test_a_value_the_setting_cannot_take_is_refused_before_any_write(
+    coordinator_module,
+):
+    async def scenario():
+        controller, c = _with_settings(coordinator_module)
+        before = dict(controller.memory)
+        errors = []
+        for key, value in (("room", 99), ("mode", 7), ("unknown", 1)):
+            try:
+                await c.async_write_setting(key, value)
+            except (ValueError, KeyError) as err:
+                errors.append(type(err).__name__)
+        return errors, controller.memory == before
+
+    assert asyncio.run(scenario()) == (["ValueError", "ValueError", "KeyError"], True)

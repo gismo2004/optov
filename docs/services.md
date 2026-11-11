@@ -8,8 +8,9 @@
 | `optov.set_schedule_day` | Replace the switching windows of one or several days |
 | `optov.set_schedule_window` | Change a single switching window |
 | `optov.read_datapoint` / `write_datapoint` | Raw access to any address, for testing; the answer shows the value, and after a write what the controller holds |
-| `optov.save_settings` | Read every setting of the controller and its weekly programmes and store them in the controller's file (see [options](options.md), saved settings). Nothing is written to the controller. |
-| `optov.compare_settings` | Read them again and return what differs from the saved ones. Nothing is written to the controller. |
+| `optov.save_settings` | Read everything writable on the controller and its weekly programmes and store them in the controller's file (see [options](options.md), controller settings). Nothing is written to the controller. |
+| `optov.compare_settings` | Read them again and return what differs from the saved ones, each with its key. Nothing is written to the controller. |
+| `optov.restore_settings` | Write the saved value of each key in `keys` to the controller; returns what was written and what was refused. |
 | `optov.clear_orphaned_statistics` | Delete the long-term statistics of entities the integration switched off; `include_user_disabled: true` also takes the ones you disabled yourself. Returns the ids deleted. |
 
 Programmes are addressed by the `schedule` attribute of their sensor. With more than one

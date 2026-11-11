@@ -1021,15 +1021,27 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def save_settings(call: ServiceCall) -> ServiceResponse:
         return await custom_file.async_save_settings(hass, _one_coordinator(hass, call))
 
-    async def compare_settings(call: ServiceCall) -> ServiceResponse:
-        found = await custom_file.async_compare_settings(
-            hass, _one_coordinator(hass, call)
-        )
-        if found is None:
+    def saved(answer: dict[str, Any] | None) -> dict[str, Any]:
+        if answer is None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="no_saved_settings"
             )
-        return found
+        return answer
+
+    async def compare_settings(call: ServiceCall) -> ServiceResponse:
+        return saved(
+            await custom_file.async_compare_settings(hass, _one_coordinator(hass, call))
+        )
+
+    async def restore_settings(call: ServiceCall) -> ServiceResponse:
+        keys = call.data.get("keys") or []
+        return saved(
+            await custom_file.async_restore_settings(
+                hass,
+                _one_coordinator(hass, call),
+                [keys] if isinstance(keys, str) else keys,
+            )
+        )
 
     # The raw services answer their caller, so a script can use the value without going
     # through an entity; the Actions page in developer tools shows the same answer.
@@ -1045,5 +1057,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         ("clear_orphaned_statistics", clear_orphaned_statistics, answers),
         ("save_settings", save_settings, answers),
         ("compare_settings", compare_settings, answers),
+        ("restore_settings", restore_settings, answers),
     ):
         hass.services.async_register(DOMAIN, name, handler, supports_response=response)

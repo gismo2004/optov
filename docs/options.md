@@ -93,22 +93,29 @@ thermostat's `presets:` maps a preset (`eco`, `comfort`, `away`, `boost`, `home`
 format, and each entry's comment says what its two raw values mean. A file that cannot be read
 keeps the custom entities you have until it is fixed.
 
-### Saved settings
+## Controller settings
 
-The action `optov.save_settings` reads every setting of the controller and its weekly programmes
-and stores them in the same file, in a `settings:` section: each value under its entity id, a
-number as it is shown, a select or switch as its raw value with its name as a comment. It takes
-under a minute and writes nothing to the controller. `optov.compare_settings` reads them again
-and lists what differs from the saved ones -- after a reset, a replaced board, or a visit by
-someone who changed things.
+*Controller settings* in the options saves what the controller holds and sets it back later:
+after a reset, a replaced board, or a visit by someone who changed things.
 
-What counts as a setting: every number and select one of the controller's menus lists, and the
-on/off settings of its configuration pages. Party mode, eco mode, a one-off hot water run and
-holiday dates are states of the moment and are left out. The section records the controller's
-model and software, so a comparison says when the file was saved from a different one.
+**Save the controller's values** reads everything writable and the weekly programmes and stores
+them in the same file as the custom entities, in a `settings:` section. It takes about a minute
+and writes nothing to the controller. Saving again replaces the section; the rest of the file
+stays as it is.
 
-Download the file from *Backup and restore* to keep it outside Home Assistant: it is deleted
-with the integration entry.
+**Compare and restore** reads the controller again and lists what differs, each line as *now →
+saved*. Tick what to set back and submit; only those are written, each checked like a change to
+its entity, and what the controller refuses is reported. Settings are ticked to begin with.
+States of the moment (party mode, a one-off hot water run), dates, and values none of the
+controller's menus lists are saved and shown as well, but left for you to tick.
+
+Values are stored under the datapoint's own id, with its name as a comment, so the file can be
+uploaded on another controller of the same family (*Download or upload the file*): what both
+have is compared, the rest is counted as having no counterpart. The section records the model
+and software it was saved from, and the comparison says when that is another controller.
+
+The actions `optov.save_settings`, `optov.compare_settings` and `optov.restore_settings` do the
+same from a script. The file is deleted with the integration entry; download it to keep it.
 
 ## Entity ids
 
