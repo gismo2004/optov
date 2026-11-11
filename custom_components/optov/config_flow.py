@@ -1528,6 +1528,12 @@ class OptoVOptionsFlow(OptionsFlow):
             },
         )
 
+    async def async_step_controller_uploaded(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """The question after an upload; its two answers are steps of their own."""
+        return self.async_abort(reason="controller_later")
+
     async def async_step_controller_later(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
