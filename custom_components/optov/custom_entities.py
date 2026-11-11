@@ -438,7 +438,7 @@ def render_file(
         "# settings: everything writable as it was saved (OptoV options -> Controller settings)",
         "#   values:     datapoint -> its name and value; a number as it is shown, a select",
         "#               or switch as its raw value (value_text is what that means), a date",
-        "#               as YYYY-MM-DD; default is the catalog's, where it states one.",
+        "#               as YYYY-MM-DD; catalog_default where the catalog states one.",
         "#               Only `value` is read back.",
         "#   programmes: weekly programme -> day -> [start, end, level] per switching window",
         "# settings_previous: the save before that one, kept when a new save replaces it",
@@ -530,7 +530,7 @@ def render_settings(
     """One save's lines.
 
     `about` describes each value for the reader: its `name`, the name of a raw value
-    (`value_text`), and the catalog's `default` with its own `default_text`. Only `value` is
+    (`value_text`), and the `catalog_default` with its own text. Only `value` is
     read back; the rest is written afresh with every save. The values are in the order of
     their names, which for most settings start with their code.
     """
@@ -545,7 +545,13 @@ def render_settings(
         lines.append(f"    {key}:")
         lines.extend(
             f"      {field}: {_scalar(entry[field])}"
-            for field in (KEY_NAME, KEY_VALUE, "value_text", "default", "default_text")
+            for field in (
+                KEY_NAME,
+                KEY_VALUE,
+                "value_text",
+                "catalog_default",
+                "catalog_default_text",
+            )
             if entry.get(field) is not None
         )
     programmes = settings.get(KEY_PROGRAMMES) or {}

@@ -19,12 +19,12 @@ SETTINGS = {
     },
 }
 NOTES = {
-    "room": {"name": "(2000) Room temperature", "default": 20},
+    "room": {"name": "(2000) Room temperature", "catalog_default": 20},
     "mode": {
         "name": "(2010) Mode",
         "value_text": "Automatic",
-        "default": 0,
-        "default_text": "Off",
+        "catalog_default": 0,
+        "catalog_default_text": "Off",
     },
 }
 
@@ -94,8 +94,8 @@ def test_the_section_reads_back_as_it_was_written():
         '      name: "(2010) Mode"\n'
         "      value: 2\n"
         '      value_text: "Automatic"\n'
-        "      default: 0\n"
-        '      default_text: "Off"\n'
+        "      catalog_default: 0\n"
+        '      catalog_default_text: "Off"\n'
     ) in text
     # In the order of their names, so by code; one nothing describes comes last.
     assert (
@@ -180,7 +180,7 @@ def test_only_the_value_is_read_back_and_a_bare_one_is_taken_too():
     by_hand = {
         "settings": {
             "values": {
-                "room": {"name": "anything", "value": 21.5, "default": 99},
+                "room": {"name": "anything", "value": 21.5, "catalog_default": 99},
                 "mode": 2,
                 "broken": {"name": "an entry without a value"},
             }

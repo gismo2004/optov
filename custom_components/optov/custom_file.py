@@ -429,8 +429,8 @@ def _notes(coordinator: Any, values: dict[str, Any]) -> dict[str, dict[str, Any]
             notes[key] = {
                 KEY_NAME: item["name"],
                 "value_text": _label(item, values[key]),
-                "default": default,
-                "default_text": _label(item, default),
+                "catalog_default": default,
+                "catalog_default_text": _label(item, default),
             }
     return notes
 

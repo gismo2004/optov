@@ -111,8 +111,8 @@ its entity, and what the controller refuses is reported. Settings are ticked to 
 States of the moment (party mode, a one-off hot water run), dates, and values none of the
 controller's menus lists are saved and shown as well, but left for you to tick.
 
-Each value is an entry under the datapoint's own id with its name, its value and, where the
-catalog states one, the catalog's default; only the value is read back. That id is the same on
+Each value is an entry under the datapoint's own id with its `name`, its `value` and, where the
+catalog states one, the `catalog_default`; only the value is read back. That id is the same on
 every controller of a family, so the file can be
 uploaded on another controller of the same family (*Download or upload the file*): what both
 have is compared, the rest is counted as having no counterpart. The section records the model
