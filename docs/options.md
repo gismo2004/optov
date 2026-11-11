@@ -111,7 +111,8 @@ its entity, and what the controller refuses is reported. Settings are ticked to 
 States of the moment (party mode, a one-off hot water run), dates, and values none of the
 controller's menus lists are saved and shown as well, but left for you to tick.
 
-Values are stored under the datapoint's own id, with its name as a comment, so the file can be
+Values are stored under the datapoint's own id, with its name and the catalog's default as a
+comment, so the file can be
 uploaded on another controller of the same family (*Download or upload the file*): what both
 have is compared, the rest is counted as having no counterpart. The section records the model
 and software it was saved from, and the comparison says when that is another controller.
