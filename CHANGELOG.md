@@ -10,11 +10,15 @@ commits.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-12
+
 ### Changed
-- Values on a menu page the integration does not know by name, such as the coding lists and
-  diagnosis pages of older controller families, are no longer left out. They are offered like
-  the values no menu lists: disabled, on the Uncategorized device, to be switched on one by one.
-  Relay tests, resets and the burner automat's function check stay out.
+- Values on a menu page the integration did not know by name are no longer left out. On older
+  controller families the coding lists now belong to the Coding 2 tier, the diagnosis and
+  information pages to Diagnostics, and the readings of the operating page are enabled out of
+  the box. A setting on a diagnosis page, and anything on a page that fits none of these, is
+  offered like the values no menu lists: disabled, on the Uncategorized device, to be switched
+  on one by one. Relay and actuator tests, function checks and resets stay out.
 
 ## [0.10.0] - 2026-11-12
 
@@ -342,7 +346,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/gismo2004/optov/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/gismo2004/optov/compare/v0.9.6...v0.10.0
 [0.9.6]: https://github.com/gismo2004/optov/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/gismo2004/optov/compare/v0.9.4...v0.9.5
