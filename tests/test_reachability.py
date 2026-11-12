@@ -247,3 +247,46 @@ def test_uncategorized_readings_are_sensors_and_settings_configuration():
     )["numbers"][0]
     assert "entity_category" not in reading
     assert setting["entity_category"] == "config"
+
+
+def _placed_in(group_address, dp):
+    """One datapoint filed under a menu node with that address."""
+    base = {
+        "id": 10,
+        "name": "X",
+        "pretty_name": "X",
+        "address": "0x0404",
+        "entity_kind": catalog_db.KIND_READONLY,
+        "fc_read": "Virtual_READ",
+        "fc_write": "undefined",
+        "byte_length": 2,
+        "block_length": 2,
+        "bit_length": 0,
+        "conversion": "NoConversion",
+        "parameter_type": "Integer",
+        **dp,
+    }
+    groups = [{"id": 1, "address": group_address, "name": "Page", "order_index": 1}]
+    inputs = _inputs(groups, links={10: [1]}, datapoints=[base])
+    inputs.reachable_fc = P300
+    inputs.by_address = {base["address"]: [base]}
+    profile = _profile()
+    catalog_db._place_datapoint(base, inputs, profile)
+    return next(v[0] for v in profile.values() if isinstance(v, list) and v)
+
+
+def test_a_menu_tree_with_names_of_its_own_is_enabled_by_its_tier():
+    # Boilers name their pages "10_Bedienung", "40_Diagnose_1": nothing in the node's address
+    # says operation or overview, the tier does.
+    setting = {"entity_kind": catalog_db.KIND_WRITABLE, "fc_write": "Virtual_WRITE"}
+    control = _placed_in("M~10_Bedienung_A1~10_Daten", {**setting, "tier": "Operation"})
+    reading = _placed_in("M~40_Diagnose_1~10_Kessel", {"tier": "Overview"})
+    coding = _placed_in("M~50_Codierungen~05_Alle", {**setting, "tier": "Coding2"})
+
+    assert control["enabled_by_default"]
+    assert reading["enabled_by_default"]
+    assert not coding["enabled_by_default"]
+    # A control on the overview page only is still not part of the base set.
+    assert not _placed_in("M~40_Diagnose_1~10_Kessel", {**setting, "tier": "Overview"})[
+        "enabled_by_default"
+    ]

@@ -18,6 +18,13 @@ commits.
   `optov.save_settings`, `optov.compare_settings` and `optov.restore_settings` (options,
   controller settings).
 
+### Fixed
+- On controllers whose menu pages carry names of their own, most boilers among them, only the
+  trend readings were enabled out of the box. The controls of the operating page (operating
+  mode, room, boiler and hot water setpoints) and the readings of the overview page are now
+  enabled as well, as the documentation says. Entities you switched on or off yourself keep
+  their state (#15).
+
 ## [0.9.6] - 2026-11-10
 
 ### Added

@@ -1638,8 +1638,16 @@ def _place_datapoint(
     # fast-moving process values it expects to be watched over time -- return and hot-gas
     # temperatures, suction and condenser pressures -- and the poll scheduler already gives
     # it the shortest interval of any tier.
-    in_overview = "overview" in branches or "plantoverview" in branches
-    in_operation = "operation" in branches
+    #
+    # Which page lists a datapoint is its tier, the root of the menu tree it is filed under.
+    # The branch names say the same on the families whose tree repeats the root in every
+    # node, and there they also catch a control filed under both pages, whose tier is the
+    # overview's. A tree with names of its own ("10_Bedienung", "40_Diagnose_1") has only
+    # the tier to go by.
+    in_overview = tier in ("Overview", "PlantOverview") or bool(
+        branches & {"overview", "plantoverview"}
+    )
+    in_operation = tier == "Operation" or "operation" in branches
     in_trend = (tier or "") == "Trending"
     is_measurement = dp.get("entity_kind") == KIND_READONLY
 
