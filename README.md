@@ -118,11 +118,18 @@ through the Marketplace (or HACS) afterwards and restart once more.
   reports, not from a model list.
 - **Readings and controls** from the catalog: temperatures, states, setpoints, operating modes,
   party and eco mode, heating curve, weekly programmes. Several hundred more behind the tiers in
-  the options, for a debugging session.
+  the options, for a debugging session. Each setting shows its description and the catalog's
+  default.
+- **Entities of your own** built from the controller's values: on/off entities, a thermostat
+  and a water heater that voice assistants and the thermostat card understand.
+- **A backup of the controller's settings**: save everything writable and the weekly
+  programmes to one file, compare the controller with it later, and set back the values you
+  pick, after a reset or a replaced board.
 - **Two dashboard cards**, in the card picker with no manual setup: a weekly-programme editor and
   the controller's fault history with the fault texts of your controller family.
 - **The controller's clock kept in sync**, its fault buffer decoded, its schedules readable and
-  writable from cards, services and automations.
+  writable from cards, services and automations. A new fault fires an event, and a blueprint
+  turns it into a message on your phone.
 - **Recovery without you**: the integration reconnects when the ESPHome node comes back and marks
   entities unavailable rather than stale when the controller stops answering.
 
@@ -130,12 +137,12 @@ through the Marketplace (or HACS) afterwards and restart once more.
 
 | | |
 |---|---|
-| [How it works](https://github.com/gismo2004/optov/blob/main/docs/how-it-works.md) | identification, the base entity set and tiers, bus budget, writing, clock, fault history, schedules |
+| [How it works](https://github.com/gismo2004/optov/blob/main/docs/how-it-works.md) | identification, the base entity set and tiers, bus budget, writing, defaults, clock, fault history and the message on a fault |
 | [ESPHome configuration](https://github.com/gismo2004/optov/blob/main/docs/esphome.md) | the node, several ports, why the names in it matter |
 | [The catalog](https://github.com/gismo2004/optov/blob/main/docs/catalog.md) | building it, keeping several, changing it later, versioning |
-| [Options](https://github.com/gismo2004/optov/blob/main/docs/options.md) | every option, what a tier switch does to your own changes, entity ids |
+| [Options](https://github.com/gismo2004/optov/blob/main/docs/options.md) | every option, what a tier switch does to your own changes, custom entities, saving and restoring the controller's settings, entity ids |
 | [Dashboard cards](https://github.com/gismo2004/optov/blob/main/docs/cards.md) | both cards with their YAML, names in your own cards |
-| [Services](https://github.com/gismo2004/optov/blob/main/docs/services.md) | the actions and how to address a programme |
+| [Services](https://github.com/gismo2004/optov/blob/main/docs/services.md) | the actions: programmes, raw access, saving, comparing and restoring settings |
 | [Protocols](https://github.com/gismo2004/optov/blob/main/docs/protocols.md) | P300, KW and its limits, GWG |
 | [Troubleshooting](https://github.com/gismo2004/optov/blob/main/docs/troubleshooting.md) | the messages you may see and what they mean |
 

@@ -10,6 +10,8 @@ commits.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-12
+
 ### Added
 - Controller settings in the options: save everything writable on the controller and its weekly
   programmes to the file next to the catalog, compare the controller with it later, and set back
@@ -17,6 +19,11 @@ commits.
   keeps the one before it. Also as the actions
   `optov.save_settings`, `optov.compare_settings` and `optov.restore_settings` (options,
   controller settings).
+
+### Changed
+- Uploading the custom entities file reloads the integration only when its custom entities
+  differ from the ones set up. With saved controller values in the file, the dialog says
+  whether they changed and asks whether to compare them with the controller.
 
 ### Fixed
 - On controllers whose menu pages carry names of their own, most boilers among them, only the
@@ -329,7 +336,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.9.6...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/gismo2004/optov/compare/v0.9.6...v0.10.0
 [0.9.6]: https://github.com/gismo2004/optov/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/gismo2004/optov/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/gismo2004/optov/compare/v0.9.3...v0.9.4
