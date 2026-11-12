@@ -292,21 +292,60 @@ def test_a_menu_tree_with_names_of_its_own_is_enabled_by_its_tier():
     ]
 
 
-def test_a_page_with_a_name_of_its_own_is_offered_like_an_unlisted_value():
-    # The coding list of an older family: not one of the known pages, but real settings.
-    coding = _placed_in(
-        "M~50_Codierungen~05_Alle",
-        {
-            "tier": "05_Alle",
-            "entity_kind": catalog_db.KIND_WRITABLE,
-            "fc_write": "Virtual_WRITE",
-        },
+SETTING = {"entity_kind": catalog_db.KIND_WRITABLE, "fc_write": "Virtual_WRITE"}
+
+
+def test_an_older_family_s_pages_are_filed_under_the_known_ones():
+    coding = _placed_in("M~50_Codierungen~05_Alle", {**SETTING, "tier": "05_Alle"})
+    diagnosis = _placed_in("M~40_Diagnose_1~10_Kessel", {"tier": "40_Diagnose_1"})
+    operating = _placed_in("M~10_Bedienung~20_Daten", {"tier": "10_Bedienung"})
+
+    # A coding like any other: a setting, off until the coding tier is switched on.
+    assert coding["entity_category"] == "config" and not coding.get("unlisted")
+    assert not coding["enabled_by_default"]
+    assert diagnosis["entity_category"] == "diagnostic" and not diagnosis.get(
+        "unlisted"
+    )
+    # The operating page is part of what is on out of the box.
+    assert operating["enabled_by_default"]
+
+
+def test_a_setting_on_a_diagnosis_page_is_not_switched_on_with_its_readings():
+    setting = _placed_in(
+        "M~41_Diagnose_2~10_Regelung", {**SETTING, "tier": "41_Diagnose_2"}
     )
 
-    assert coding["unlisted"] and not coding["enabled_by_default"]
-    assert coding["entity_category"] == "config"
+    assert setting["unlisted"] and not setting["enabled_by_default"]
+
+
+def test_a_page_nothing_is_known_about_goes_to_the_unlisted_values():
+    lon = _placed_in("M~60_LON_Objekte~10_Node", {**SETTING, "tier": "60_LON_Objekte"})
+
+    assert lon["unlisted"] and not lon["enabled_by_default"]
+    assert lon["entity_category"] == "config"
 
 
 def test_tests_resets_and_hidden_pages_are_never_offered():
     for page in catalog_db.PAGES_LEFT_OUT:
         assert _placed({"tier": page}) == {}, page
+    # Under any number, and as a page beneath a diagnosis page as well.
+    assert _placed({"tier": "50_Relaistest"}) == {}
+    groups = [
+        {
+            "id": 1,
+            "address": "M~41_Diagnose_2~40_Aktorentest",
+            "name": "P",
+            "order_index": 1,
+        }
+    ]
+    base = {
+        "id": 10, "name": "X", "pretty_name": "X", "address": "0x0404", "tier": "41_Diagnose_2",
+        "fc_read": "Virtual_READ", "byte_length": 1, "block_length": 1, "bit_length": 0,
+        "conversion": "NoConversion", "parameter_type": "Integer", **SETTING,
+    }  # fmt: skip
+    inputs = _inputs(groups, links={10: [1]}, datapoints=[base])
+    inputs.reachable_fc = P300
+    inputs.by_address = {base["address"]: [base]}
+    profile = _profile()
+    catalog_db._place_datapoint(base, inputs, profile)
+    assert not any(v for v in profile.values() if isinstance(v, list))

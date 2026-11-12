@@ -161,20 +161,41 @@ TIER_CLASSIFICATION: dict[str, str | None] = {
     "DefaultSettings": "config",
 }
 
-# Menu pages whose datapoints are not offered as entities: the tests that run a relay or a
-# function directly, the resets, the burner automat's records (read as a fault history) and its
-# function check, and what the catalog itself marks as not to be shown.
+# Menu pages of the older families, which name them in their own words where the newer ones
+# use the names in TIER_CLASSIFICATION. A page is known by its name without the number that
+# orders it in the menu ("50_Codierungen", "05_Alle"): the coding lists, the two diagnosis
+# pages, the information page and the operating page.
+PAGE_ALIASES = {
+    "Alle": "Coding2",
+    "Codierungen": "Coding2",
+    "Diagnose1": "DiagnosisDiagnosis1",
+    "Diagnose_1": "DiagnosisDiagnosis1",
+    "Diagnose2": "DiagnosisDiagnosis2",
+    "Diagnose_2": "DiagnosisDiagnosis2",
+    "Information": "DiagnosisDeviceData",
+    "Bedienung": "Operation",
+}
+
+# Pages whose datapoints are not offered as entities, by the same kind of name: the tests that
+# run a relay or an actuator directly, the function checks, the resets, the burner automat's
+# records (read as a fault history) and what the catalog itself marks as not to be shown.
 PAGES_LEFT_OUT = {
     "Relaischeck",
-    "50_Relaistest",
+    "Relaistest",
+    "Aktorentest",
     "Functionscontroll",
-    "55_Funktionskontrolle",
+    "Funktionskontrolle",
     "Reset",
-    "80_Reset",
     "ErrorHistoryGFA",
     "VSKO",
     "InvisibleDataPoints",
 }
+
+
+def _page(name: str | None) -> str:
+    """A menu page's name without the number that orders it."""
+    return re.sub(r"^\d+_", "", name or "")
+
 
 # The largest payload one telegram carries; the same figure as optolink.MAX_TELEGRAM_PAYLOAD,
 # repeated because the catalog is read without the link.
@@ -1554,16 +1575,31 @@ def _place_datapoint(
 ) -> None:
     """Decide what one datapoint becomes -- which platform, enabled or not -- or nothing."""
     tier = dp.get("tier")
-    # A datapoint that is not on one of the known pages -- no menu lists it, or the menu that
-    # does has a name of its own, as the coding and diagnosis pages of the older families have
-    # -- is still offered, disabled and filed under a device of its own, so it can be switched
-    # on without cluttering the controller. The pages in PAGES_LEFT_OUT are not values at all.
-    unlisted = tier not in TIER_CLASSIFICATION
-    if unlisted:
-        if tier in PAGES_LEFT_OUT:
+    if tier not in TIER_CLASSIFICATION:
+        # Not on one of the known pages. Where it is a test or a reset, on the page itself or
+        # on one beneath it, it is no value at all. Where the page is a known one under an
+        # older name it is filed there -- a setting only on the operating page and the coding
+        # lists: one that sits on a diagnosis page is not what that page's readings are, and
+        # must not come on with them.
+        pages = {_page(tier)} | {
+            _page(segment)
+            for gid in inputs.group_ids_by_et.get(dp["id"], [])
+            for segment in inputs.group_addrs_by_id.get(gid, "").split("~")
+        }
+        if pages & PAGES_LEFT_OUT:
             return
-        if str(dp.get("address") or "0").lower() in ("0", "0x0000"):
-            return  # a placeholder, not a place in the controller
+        alias = PAGE_ALIASES.get(_page(tier))
+        if alias and (
+            TIER_CLASSIFICATION[alias] != "diagnostic"
+            or dp.get("entity_kind") == KIND_READONLY
+        ):
+            tier = alias
+    # Anything else that is not on a known page -- no menu lists it, or one with a name of its
+    # own does -- is still offered, disabled and filed under a device of its own, so it can be
+    # switched on without cluttering the controller.
+    unlisted = tier not in TIER_CLASSIFICATION
+    if unlisted and str(dp.get("address") or "0").lower() in ("0", "0x0000"):
+        return  # a placeholder, not a place in the controller
     if dp.get("entity_kind") == KIND_ACTION:
         return
     fc_read = dp.get("fc_read") or "Virtual_READ"
