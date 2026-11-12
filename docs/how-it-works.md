@@ -9,7 +9,8 @@ behind the same id can differ by nearly a factor of two in what they expose.
 
 **The base entity set.** What the controller itself puts on its own overview, operating and
 trend menus is enabled out of the box. Everything else the catalog knows for your controller
-exists as a disabled entity, so it costs nothing until you switch it on. Enable a single entity
+exists as a disabled entity, so it costs nothing until you switch it on. Values the controller
+files under a page of its own naming, or under none, are on the *Uncategorized* device. Enable a single entity
 from its settings page and it stays enabled; Home Assistant reloads the integration about 30
 seconds later, and the entity is polled from then on.
 

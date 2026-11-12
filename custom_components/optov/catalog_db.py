@@ -161,6 +161,21 @@ TIER_CLASSIFICATION: dict[str, str | None] = {
     "DefaultSettings": "config",
 }
 
+# Menu pages whose datapoints are not offered as entities: the tests that run a relay or a
+# function directly, the resets, the burner automat's records (read as a fault history) and its
+# function check, and what the catalog itself marks as not to be shown.
+PAGES_LEFT_OUT = {
+    "Relaischeck",
+    "50_Relaistest",
+    "Functionscontroll",
+    "55_Funktionskontrolle",
+    "Reset",
+    "80_Reset",
+    "ErrorHistoryGFA",
+    "VSKO",
+    "InvisibleDataPoints",
+}
+
 # The largest payload one telegram carries; the same figure as optolink.MAX_TELEGRAM_PAYLOAD,
 # repeated because the catalog is read without the link.
 TELEGRAM_PAYLOAD = 56
@@ -1539,15 +1554,16 @@ def _place_datapoint(
 ) -> None:
     """Decide what one datapoint becomes -- which platform, enabled or not -- or nothing."""
     tier = dp.get("tier")
-    # A datapoint the controller's menus do not list at all is still offered, disabled and filed
-    # under a device of its own, so it can be switched on without cluttering the controller.
-    # A menu that is not one of the known pages says nothing about what it holds and is left out.
-    unlisted = tier is None
+    # A datapoint that is not on one of the known pages -- no menu lists it, or the menu that
+    # does has a name of its own, as the coding and diagnosis pages of the older families have
+    # -- is still offered, disabled and filed under a device of its own, so it can be switched
+    # on without cluttering the controller. The pages in PAGES_LEFT_OUT are not values at all.
+    unlisted = tier not in TIER_CLASSIFICATION
     if unlisted:
+        if tier in PAGES_LEFT_OUT:
+            return
         if str(dp.get("address") or "0").lower() in ("0", "0x0000"):
             return  # a placeholder, not a place in the controller
-    elif tier not in TIER_CLASSIFICATION:
-        return
     if dp.get("entity_kind") == KIND_ACTION:
         return
     fc_read = dp.get("fc_read") or "Virtual_READ"

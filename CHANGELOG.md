@@ -10,6 +10,12 @@ commits.
 
 ## [Unreleased]
 
+### Changed
+- Values on a menu page the integration does not know by name, such as the coding lists and
+  diagnosis pages of older controller families, are no longer left out. They are offered like
+  the values no menu lists: disabled, on the Uncategorized device, to be switched on one by one.
+  Relay tests, resets and the burner automat's function check stay out.
+
 ## [0.10.0] - 2026-11-12
 
 ### Added

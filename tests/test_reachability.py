@@ -290,3 +290,23 @@ def test_a_menu_tree_with_names_of_its_own_is_enabled_by_its_tier():
     assert not _placed_in("M~40_Diagnose_1~10_Kessel", {**setting, "tier": "Overview"})[
         "enabled_by_default"
     ]
+
+
+def test_a_page_with_a_name_of_its_own_is_offered_like_an_unlisted_value():
+    # The coding list of an older family: not one of the known pages, but real settings.
+    coding = _placed_in(
+        "M~50_Codierungen~05_Alle",
+        {
+            "tier": "05_Alle",
+            "entity_kind": catalog_db.KIND_WRITABLE,
+            "fc_write": "Virtual_WRITE",
+        },
+    )
+
+    assert coding["unlisted"] and not coding["enabled_by_default"]
+    assert coding["entity_category"] == "config"
+
+
+def test_tests_resets_and_hidden_pages_are_never_offered():
+    for page in catalog_db.PAGES_LEFT_OUT:
+        assert _placed({"tier": page}) == {}, page
