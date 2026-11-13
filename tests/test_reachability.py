@@ -349,3 +349,34 @@ def test_tests_resets_and_hidden_pages_are_never_offered():
     profile = _profile()
     catalog_db._place_datapoint(base, inputs, profile)
     assert not any(v for v in profile.values() if isinstance(v, list))
+
+
+def test_a_unit_is_known_by_its_key_whatever_the_language_calls_it():
+    german = _placed({"unit": "ecnUnit.Sekunden", "translated_unit": "Sekunden"})
+    english = _placed({"unit": "ecnUnit.Sekunden", "translated_unit": "Seconds"})
+
+    for placed in (german, english):
+        sensor = placed["sensors"][0]
+        assert (sensor["unit"], sensor["device_class"]) == ("s", "duration")
+    # The word statistics were recorded under while the unit went by it.
+    assert english["sensors"][0]["unit_text"] == "Seconds"
+
+
+def test_power_and_energy_get_their_device_class():
+    power = _placed({"unit": "ecnUnit.kW", "translated_unit": "kW"})["sensors"][0]
+    energy = _placed({"unit": "ecnUnit.Wh", "translated_unit": "Wh"})["sensors"][0]
+
+    assert (power["unit"], power["device_class"]) == ("kW", "power")
+    assert (energy["unit"], energy["device_class"]) == ("Wh", "energy")
+    assert "unit_text" not in power
+
+
+def test_a_unit_that_is_not_listed_is_shown_in_the_catalog_s_words():
+    speed = _placed({"unit": "ecnUnit.U pro min", "translated_unit": "U/min"})
+    bare = _placed({"unit": "Pkt", "translated_unit": None})
+    none = _placed({"unit": None, "translated_unit": None})
+
+    assert speed["sensors"][0]["unit"] == "U/min"
+    assert "device_class" not in speed["sensors"][0]
+    assert bare["sensors"][0]["unit"] == "Pkt"
+    assert not none["sensors"][0].get("unit")

@@ -10,6 +10,13 @@ commits.
 
 ## [Unreleased]
 
+### Fixed
+- Units were recognised by the word the catalog language has for them. With an English catalog
+  seconds, minutes and hours were plain text ("Seconds") and not durations, and in every
+  language kW, W, Wh, MJ, V, A, Hz, kg and m³ had no device class, so power and energy
+  readings could not be used as such. Units now go by the catalog's own key. Long-term
+  statistics recorded under an old unit word are relabelled by themselves.
+
 ## [0.10.1] - 2026-11-12
 
 ### Changed

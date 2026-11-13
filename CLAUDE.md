@@ -39,6 +39,7 @@ custom_components/optov/
   climate.py / water_heater.py   the thermostats and water heaters assembled that way
   config_flow.py   setup, reconfigure and options, the custom entities menu among them
   repairs.py / orphaned_statistics.py   the repair flows, and the statistics clean-up behind one
+  statistic_units.py   relabels statistics recorded under a unit's earlier wording
   services.yaml    the services' fields; repeated ones are defined once and referenced
   diagnostics.py   the download on the entry: controller, catalog, learned state, bus figures
   translate.py     the integration's own UI strings from translations/, for values

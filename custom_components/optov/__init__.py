@@ -32,7 +32,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.setup import async_when_setup
 
-from . import catalog_db, custom_file, orphaned_statistics
+from . import catalog_db, custom_file, orphaned_statistics, statistic_units
 from .const import (
     CARD_VERSION_KEY,
     CONF_CATALOG,
@@ -241,6 +241,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: OptolinkConfigEntry) -> 
             hass,
             orphaned_statistics.async_update_issue(hass, entry),
             f"{DOMAIN}_orphaned_statistics",
+        )
+        entry.async_create_background_task(
+            hass,
+            statistic_units.async_relabel(hass, entry),
+            f"{DOMAIN}_statistic_units",
         )
     except Exception:
         # Home Assistant does not unload an entry whose setup failed, so async_unload_entry

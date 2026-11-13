@@ -211,31 +211,43 @@ KIND_READONLY = 1
 KIND_ACTION = 2
 KIND_WRITABLE = 3
 
-UNIT_MAP: dict[str, dict[str, str]] = {
-    "°C": {"unit": "°C", "device_class": "temperature", "state_class": "measurement"},
-    "Grad C": {
-        "unit": "°C",
-        "device_class": "temperature",
-        "state_class": "measurement",
-    },
+_TEMPERATURE = {
+    "unit": "°C",
+    "device_class": "temperature",
+    "state_class": "measurement",
+}
+_HOURS = {"unit": "h", "device_class": "duration", "state_class": "total_increasing"}
+_PRESSURE = {"unit": "bar", "device_class": "pressure"}
+_FLOW = {"unit": "m³/h", "device_class": "volume_flow_rate"}
+
+# What Home Assistant needs to know about a unit, by the catalog's key for it (`ecnUnit.<key>`,
+# or the bare key on the few datapoints that carry one). The key is the same in every catalog;
+# the word a language has for it -- "Stunden", "Hours" -- is not, and is only shown for a unit
+# that is not listed here.
+UNITS: dict[str, dict[str, str]] = {
+    "Grad C": _TEMPERATURE,
     "K": {"unit": "K"},
-    "h": {"unit": "h", "device_class": "duration", "state_class": "total_increasing"},
-    "Stunden": {
-        "unit": "h",
-        "device_class": "duration",
-        "state_class": "total_increasing",
-    },
-    "s": {"unit": "s", "device_class": "duration"},
-    "Sekunden": {"unit": "s", "device_class": "duration"},
-    "min": {"unit": "min", "device_class": "duration"},
-    "Minuten": {"unit": "min", "device_class": "duration"},
-    "%": {"unit": "%"},
     "Prozent": {"unit": "%"},
-    "bar": {"unit": "bar", "device_class": "pressure"},
-    "Bar": {"unit": "bar", "device_class": "pressure"},
-    "Bar (absolut)": {"unit": "bar", "device_class": "pressure"},
+    "Stunden": _HOURS,
+    "h": _HOURS,
+    "Minuten": {"unit": "min", "device_class": "duration"},
+    "Sekunden": {"unit": "s", "device_class": "duration"},
+    "Bar": _PRESSURE,
+    "Bar (absolut)": _PRESSURE,
+    "mBar": {"unit": "mbar", "device_class": "pressure"},
     "kWh": {"unit": "kWh", "device_class": "energy", "state_class": "total_increasing"},
-    "cbm pro h": {"unit": "m³/h", "device_class": "volume_flow_rate"},
+    "Wh": {"unit": "Wh", "device_class": "energy", "state_class": "total_increasing"},
+    "MJ": {"unit": "MJ", "device_class": "energy", "state_class": "total_increasing"},
+    "kW": {"unit": "kW", "device_class": "power", "state_class": "measurement"},
+    "W": {"unit": "W", "device_class": "power", "state_class": "measurement"},
+    "V": {"unit": "V", "device_class": "voltage", "state_class": "measurement"},
+    "mV": {"unit": "mV", "device_class": "voltage", "state_class": "measurement"},
+    "A": {"unit": "A", "device_class": "current", "state_class": "measurement"},
+    "Hz": {"unit": "Hz", "device_class": "frequency", "state_class": "measurement"},
+    "kg": {"unit": "kg", "device_class": "weight"},
+    "m3": {"unit": "m³", "device_class": "volume"},
+    "m3 pro h": _FLOW,
+    "cbm pro h": _FLOW,
 }
 
 _DIV_RATIOS = {"div2": 2.0, "div10": 10.0, "div100": 100.0, "div1000": 1000.0}
@@ -1203,10 +1215,18 @@ def _div_ratio(conv: str | None) -> float:
     return _DIV_RATIOS.get(conv.strip().lower(), 1.0)
 
 
-def _unit_meta(raw_unit: str | None) -> dict[str, Any]:
-    if not raw_unit:
-        return {}
-    return UNIT_MAP.get(raw_unit.strip(), {"unit": raw_unit.strip()})
+def _unit_meta(key: str | None, text: str | None) -> dict[str, Any]:
+    """The unit of a datapoint for Home Assistant: `key` is the catalog's, `text` its word for
+    it in the catalog language.
+
+    `unit_text` is that word where the unit shown is another: what long-term statistics
+    recorded under it are relabelled from (statistic_units.py).
+    """
+    shown = (text or key or "").strip()
+    known = UNITS.get((key or "").strip().removeprefix("ecnUnit."))
+    if known is None:
+        return {"unit": shown} if shown else {}
+    return {**known, "unit_text": shown} if shown != known["unit"] else dict(known)
 
 
 def _clock_settings(
@@ -1662,7 +1682,7 @@ def _place_datapoint(
     if et_id in inputs.clock_settings:
         entity_category = "config"
     enum_values = inputs.enums_by_et.get(et_id, {})
-    unit_str = dp.get("translated_unit") or dp.get("unit")
+    unit = _unit_meta(dp.get("unit"), dp.get("translated_unit"))
 
     # What gets switched on out of the box: the controller's own overview page, minus the
     # parameters on it.
@@ -1802,7 +1822,7 @@ def _place_datapoint(
             # A value that cannot be turned back into its raw integer is shown, not set.
             profile["sensors"].append(_as_sensor(entry, sensor_category))
         else:
-            entry.update(_unit_meta(unit_str))
+            entry.update(unit)
             entry.update(_number_limits(dp))
             profile["numbers"].append(_with_default(entry, dp))
         return
@@ -1819,7 +1839,7 @@ def _place_datapoint(
         profile["binary_sensors"].append(_as_sensor(entry, sensor_category))
     else:
         entry["div_ratio"] = _div_ratio(dp.get("conversion"))
-        entry.update(_unit_meta(unit_str))
+        entry.update(unit)
         # A reading that decodes to a number is a measurement to Home Assistant
         # whether or not the catalog gives it a unit. Without a state class a
         # unitless one -- a switching-cycle counter, a performance factor -- is
