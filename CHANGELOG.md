@@ -10,6 +10,8 @@ commits.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-13
+
 ### Fixed
 - Units were recognised by the word the catalog language has for them. With an English catalog
   seconds, minutes and hours were plain text ("Seconds") and not durations, and in every
@@ -353,7 +355,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/gismo2004/optov/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/gismo2004/optov/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/gismo2004/optov/compare/v0.9.6...v0.10.0
 [0.9.6]: https://github.com/gismo2004/optov/compare/v0.9.5...v0.9.6
