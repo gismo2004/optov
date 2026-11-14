@@ -22,8 +22,10 @@ Two things the KW protocol cannot do, which you may notice if you have one of th
 - **It has no way to refuse a read.** Where a P300 controller answers "I do not have that
   address", a KW controller either says nothing or answers with every bit set -- both were seen
   on a controller that speaks both protocols, which returned `ff ff` for an address it refuses
-  outright over P300. Neither can be told from a reading of -0.1, so neither is published as a
-  value: the entity is unavailable instead. An address that gives nothing usable for twenty
+  outright over P300. On its own that cannot be told from a reading of -0.1, so from an address
+  that has never given a real value it is not published: the entity is unavailable instead.
+  Once an address has given a real value it is known to exist, for good, and every bit set
+  from it is the reading it looks like. An address that gives nothing usable for twenty
   cycles, while the rest of the bus answers, stops being asked **for that session only** -- the
   next restart tries it again, because a protocol that cannot say no never gives certainty
   enough to disable an entity for good. The catalog's own installation rules stay the real

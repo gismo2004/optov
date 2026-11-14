@@ -189,9 +189,9 @@ LEARNED = ("retired_items", "retired_addresses", "condition_cache", "condition_t
 # How many cycles an address may give nothing usable -- silence, or the all-bits-set filler a
 # controller sends when it cannot refuse -- while other datapoints in the same cycle do answer,
 # before it stops being asked for. Generous, and never written down: a protocol that cannot say
-# no offers no certainty, and all bits set is also a reading of -0.1 degrees. So the address is
-# only dropped for as long as this session lasts, and the next start asks again -- unlike a
-# refusal, which is definitive and is remembered.
+# no offers no certainty. So the address is only dropped for as long as this session lasts, and
+# the next start asks again -- unlike a refusal, which is definitive and is remembered. An
+# address that has given a real value is never counted here: see _known_to_answer().
 KW_CYCLES_BEFORE_SKIPPING = 20
 _SAVE_DELAY = 10
 
@@ -370,6 +370,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # telegram, so silence and filler are the only "no" it can give. Neither is persisted.
         self._nothing_usable: dict[int, int] = {}
         self._skipped_this_session: set[int] = set()
+        # Addresses that have given a real value over KW. All bits set from one of these is a
+        # reading -- -0.1 degrees, or 255 -- and not the filler of an address the controller
+        # lacks. Remembered with the controller they were learned on, see _known_to_answer().
+        self._answered: set[int] = set()
+        self._answered_on = ""
         self._retired_item_ids: set[str] = set()
         self._store: Store[dict[str, Any]] | None = None
         self._learned: dict[str, Any] = {}
@@ -488,6 +493,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The product description is the model, and the code that identifies the variant is
         # the model id, which is what those two fields are for. Neither affects entity ids;
         # those come from the profile's model code. See profiles.stable_object_id.
+        # What answered before the controller was identified counts for it as well.
+        self._answered_on = f"{self.profile.model} {self.profile.sw_version}"
+        known = self._learned.get("answered") or {}
+        if known.get("controller") == self._answered_on:
+            self._answered |= {int(a) for a in known.get("addresses") or []}
         self.device_info = DeviceInfo(
             identifiers={(DOMAIN, self.stable_id)},
             translation_key="controller",
@@ -1200,17 +1210,39 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._nothing_usable_from(address)
             raise
         self._cycle_answered += 1
-        if self.client.protocol == optolink.PROTO_KW and optolink.is_filler(raw):
-            # All bits set: the answer to an address this controller does not implement. Not
-            # published as a value, because -0.1 degrees on every sensor a unit does not have is
-            # worse than the sensor being unavailable.
-            self._nothing_usable_from(address)
-            raise optolink.OptolinkProtocolError(
-                f"0x{address:04X} answered with all bits set, which is not a reading"
-            )
+        if self.client.protocol == optolink.PROTO_KW:
+            if not optolink.is_filler(raw):
+                self._known_to_answer(address)
+            elif address not in self._answered:
+                # All bits set: the answer to an address this controller does not implement.
+                # Not published as a value, because -0.1 degrees on every sensor a unit does
+                # not have is worse than the sensor being unavailable. From an address that
+                # has given a value before it is one: the outside temperature passing -0.1.
+                self._nothing_usable_from(address)
+                raise optolink.OptolinkProtocolError(
+                    f"0x{address:04X} answered with all bits set, which is not a reading"
+                )
         self._nothing_usable.pop(address, None)
         self._cycle_blocks[key] = raw
         return raw
+
+    def _known_to_answer(self, address: int) -> None:
+        """Remember that an address gave a real value, so all bits set from it is one too.
+
+        Kept across restarts: a start while it is exactly -0.1 degrees outside would otherwise
+        take the sensor for one the controller does not have. Tied to the controller, since
+        another one behind the same adapter has other addresses.
+        """
+        if address in self._answered:
+            return
+        self._answered.add(address)
+        if self._answered_on:
+            self.save_learned(
+                answered={
+                    "controller": self._answered_on,
+                    "addresses": sorted(self._answered),
+                }
+            )
 
     def _nothing_usable_from(self, address: int) -> None:
         """One more cycle in which this address gave nothing that could be a value.

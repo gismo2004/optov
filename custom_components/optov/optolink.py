@@ -96,9 +96,9 @@ def is_filler(raw: bytes) -> bool:
 
     Measured on a controller that speaks both: over P300 it answers 0x01C1 with the outside
     temperature and refuses 0x01ED outright, while over KW both come back as `ff ff`. A protocol
-    with no error telegram has to put something on the wire, and this is what it puts. It cannot
-    be told apart from a genuine reading of -0.1 degrees, so it is treated as nothing rather than
-    as a value, and only after several cycles as a reason to stop asking.
+    with no error telegram has to put something on the wire, and this is what it puts. On its
+    own it cannot be told apart from a genuine reading of -0.1 degrees; what tells them apart
+    is whether the address has ever given anything else, which the caller keeps track of.
     """
     return bool(raw) and all(byte == 0xFF for byte in raw)
 

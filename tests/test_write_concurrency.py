@@ -140,6 +140,10 @@ def _coordinator(module, controller):
         _cycle_blocks={},
         _unsupported_addresses=set(),
         _skipped_this_session=set(),
+        _answered=set(),
+        _answered_on="TEST v01",
+        _learned={},
+        _store=None,
         _nothing_usable={},
         _polling=False,
         _cycle_unreachable=None,
@@ -539,3 +543,56 @@ def test_a_value_the_setting_cannot_take_is_refused_before_any_write(
         return errors, controller.memory == before
 
     assert asyncio.run(scenario()) == (["ValueError", "ValueError", "KeyError"], True)
+
+
+# --- KW: all bits set is the filler of a missing address, or a reading of -0.1 degrees -------
+
+
+def _kw(module, outside):
+    """A KW controller with an outside sensor at 0x0800 and nothing at 0x0810."""
+    controller = FakeController()
+    controller.protocol = "KW"
+    controller.memory[0x0800] = outside
+    controller.memory[0x0810] = bytes([0xFF, 0xFF])
+    c = _coordinator(module, controller)
+    c._cycle_answered = 1  # something else answered in this cycle
+    saved = []
+    c.save_learned = lambda **values: saved.append(values)
+    return controller, c, saved
+
+
+def test_minus_a_tenth_from_a_sensor_that_has_answered_is_a_reading(coordinator_module):
+    async def scenario():
+        controller, c, saved = _kw(coordinator_module, (2).to_bytes(2, "little"))
+        first = await c._read_reg(0x0800, 2)
+        # The temperature falls through -0.1 degrees and stays there for a long while.
+        controller.memory[0x0800] = bytes([0xFF, 0xFF])
+        readings = [await c._read_reg(0x0800, 2, fresh=True) for _ in range(40)]
+        return first, readings, c._skipped_this_session, saved
+
+    first, readings, skipped, saved = asyncio.run(scenario())
+
+    assert first == (2).to_bytes(2, "little")
+    assert readings == [bytes([0xFF, 0xFF])] * 40
+    assert not skipped
+    # Remembered with the controller, so a restart at -0.1 degrees knows the sensor as well.
+    assert saved == [{"answered": {"controller": "TEST v01", "addresses": [0x0800]}}]
+
+
+def test_all_bits_set_from_an_address_that_never_answered_is_not_a_reading(
+    coordinator_module,
+):
+    async def scenario():
+        _, c, _ = _kw(coordinator_module, (2).to_bytes(2, "little"))
+        refused = 0
+        for _ in range(coordinator_module.KW_CYCLES_BEFORE_SKIPPING):
+            try:
+                await c._read_reg(0x0810, 2, fresh=True)
+            except coordinator_module.optolink.OptolinkProtocolError:
+                refused += 1
+        return refused, c._skipped_this_session
+
+    refused, skipped = asyncio.run(scenario())
+
+    assert refused == coordinator_module.KW_CYCLES_BEFORE_SKIPPING
+    assert skipped == {0x0810}

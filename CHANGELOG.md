@@ -10,6 +10,14 @@ commits.
 
 ## [Unreleased]
 
+### Fixed
+- On a KW controller a reading froze when its value passed -0.1 degrees, the outside
+  temperature in frost above all: -0.1 is sent as all bits set, which is also what such a
+  controller answers for an address it does not have, so the reading was taken for missing and
+  after five minutes no longer asked for until the next reload. An address that has given a
+  real value is now known to exist, across restarts, and all bits set from it is a reading
+  (#16).
+
 ## [0.10.2] - 2026-11-13
 
 ### Fixed
