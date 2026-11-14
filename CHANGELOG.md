@@ -15,8 +15,9 @@ commits.
   temperature in frost above all: -0.1 is sent as all bits set, which is also what such a
   controller answers for an address it does not have, so the reading was taken for missing and
   after five minutes no longer asked for until the next reload. An address that has given a
-  real value is now known to exist, across restarts, and all bits set from it is a reading
-  (#16).
+  real value is now known to exist, across restarts, and all bits set from it is a reading.
+  One that has never given anything else is asked more rarely but never given up on, so a
+  sensor that happens to start at -0.1 comes back by itself (#16).
 - A sensor the controller reported as not fitted was switched off for good after a single
   reading. It now takes twenty readings in a row, so a plug pulled for a moment or a sensor
   being replaced no longer costs the entity.

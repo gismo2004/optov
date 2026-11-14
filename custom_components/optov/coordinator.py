@@ -390,6 +390,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # lacks. Remembered with the controller they were learned on, see _known_to_answer().
         self._answered: set[int] = set()
         self._answered_on = ""
+        # Addresses that only ever answered with all bits set, and the poll cycle from which
+        # each is asked again; see _nothing_usable_from().
+        self._ask_again_at: dict[int, int] = {}
+        self._cycle_no = 0
         self._retired_item_ids: set[str] = set()
         self._store: Store[dict[str, Any]] | None = None
         self._learned: dict[str, Any] = {}
@@ -1202,6 +1206,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (
             address in self._unsupported_addresses
             or address in self._skipped_this_session
+            or self._ask_again_at.get(address, 0) > self._cycle_no
         ):
             raise optolink.OptolinkDeviceError(
                 f"0x{address:04X} is not implemented on this controller",
@@ -1272,7 +1277,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except TimeoutError:
             # Silence is one of the two ways a link that cannot refuse says no; the other is
             # below. Which of them a controller uses is its own business -- both are handled.
-            self._nothing_usable_from(address)
+            self._nothing_usable_from(address, silent=True)
             raise
         self._cycle_answered += 1
         if self.client.protocol == optolink.PROTO_KW:
@@ -1283,7 +1288,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Not published as a value, because -0.1 degrees on every sensor a unit does
                 # not have is worse than the sensor being unavailable. From an address that
                 # has given a value before it is one: the outside temperature passing -0.1.
-                self._nothing_usable_from(address)
+                self._nothing_usable_from(address, silent=False)
                 raise optolink.OptolinkProtocolError(
                     f"0x{address:04X} answered with all bits set, which is not a reading"
                 )
@@ -1301,6 +1306,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if address in self._answered:
             return
         self._answered.add(address)
+        self._ask_again_at.pop(address, None)
         if self._answered_on:
             self.save_learned(
                 answered={
@@ -1309,17 +1315,22 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
             )
 
-    def _nothing_usable_from(self, address: int) -> None:
+    def _nothing_usable_from(self, address: int, silent: bool) -> None:
         """One more cycle in which this address gave nothing that could be a value.
 
         Only counted when something else answered in the same cycle, so a controller nobody can
-        reach costs no entity at all.
+        reach costs no entity at all. After enough of them a silent address is no longer asked
+        this session, since each try costs a timeout. One that answers with all bits set costs
+        a telegram like any other and is only asked more rarely: it may be a sensor that has
+        read -0.1 degrees since the very first reading, and it has to come back by itself.
         """
         if self.client.protocol != optolink.PROTO_KW or not self._cycle_answered:
             return
         seen = self._nothing_usable.get(address, 0) + 1
         self._nothing_usable[address] = seen
-        if seen >= KW_CYCLES_BEFORE_SKIPPING:
+        if seen >= KW_CYCLES_BEFORE_SKIPPING and not silent:
+            self._ask_again_at[address] = self._cycle_no + KW_CYCLES_BEFORE_SKIPPING
+        elif seen >= KW_CYCLES_BEFORE_SKIPPING:
             self._skipped_this_session.add(address)
             _LOGGER.debug(
                 "0x%04X gave nothing usable in %d cycles while the bus answered; "
@@ -1333,6 +1344,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Fetch data dynamically for all points defined in the active profile."""
         # A new day starts the write count over even when nothing is written.
         self._roll_write_day()
+        self._cycle_no += 1
 
         start_time = time.monotonic()
         self._polling = True

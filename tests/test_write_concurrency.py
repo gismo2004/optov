@@ -10,6 +10,7 @@ takes from there are stubbed and the integration is loaded as a package without 
 """
 
 import asyncio
+import contextlib
 import importlib
 import sys
 import types
@@ -141,6 +142,8 @@ def _coordinator(module, controller):
         _unsupported_addresses=set(),
         _skipped_this_session=set(),
         _answered=set(),
+        _ask_again_at={},
+        _cycle_no=0,
         _absent_seen={},
         _probe_targets=[],
         _probed_values={},
@@ -586,20 +589,59 @@ def test_minus_a_tenth_from_a_sensor_that_has_answered_is_a_reading(coordinator_
 def test_all_bits_set_from_an_address_that_never_answered_is_not_a_reading(
     coordinator_module,
 ):
+    often = coordinator_module.KW_CYCLES_BEFORE_SKIPPING
+
     async def scenario():
-        _, c, _ = _kw(coordinator_module, (2).to_bytes(2, "little"))
-        refused = 0
+        controller, c, _ = _kw(coordinator_module, (2).to_bytes(2, "little"))
+        reads = []
+        controller_read = controller.read_raw
+
+        async def counted(address, length, fc=None):
+            reads.append(address)
+            return await controller_read(address, length, fc)
+
+        controller.read_raw = counted
+        published = []
+        for cycle in range(1, 3 * often + 1):
+            c._cycle_no = cycle
+            # Refused either way, with or without a telegram: not a value.
+            with contextlib.suppress(Exception):
+                published.append(await c._read_reg(0x0810, 2, fresh=True))
+        # A sensor that read -0.1 degrees since the first reading there ever was: once it
+        # reads anything else it is back by itself, within one of the rarer asks.
+        controller.memory[0x0810] = (0xFFFE).to_bytes(2, "little")
+        for cycle in range(3 * often + 1, 4 * often + 2):
+            c._cycle_no = cycle
+            # Refused either way, with or without a telegram: not a value.
+            with contextlib.suppress(Exception):
+                published.append(await c._read_reg(0x0810, 2, fresh=True))
+        return len(reads), published, c._skipped_this_session, c._ask_again_at
+
+    asked, published, skipped, waiting = asyncio.run(scenario())
+
+    # Never published while it only says all bits set, never given up on, and asked far less
+    # often than every cycle once that has gone on for a while.
+    assert skipped == set() and waiting == {}
+    assert asked < 2 * often
+    assert published and set(published) == {(0xFFFE).to_bytes(2, "little")}
+
+
+def test_an_address_that_stays_silent_is_not_asked_again_this_session(
+    coordinator_module,
+):
+    async def scenario():
+        controller, c, _ = _kw(coordinator_module, (2).to_bytes(2, "little"))
+
+        async def silent(address, length, fc=None):
+            raise TimeoutError
+
+        controller.read_raw = silent
         for _ in range(coordinator_module.KW_CYCLES_BEFORE_SKIPPING):
-            try:
+            with contextlib.suppress(TimeoutError):
                 await c._read_reg(0x0810, 2, fresh=True)
-            except coordinator_module.optolink.OptolinkProtocolError:
-                refused += 1
-        return refused, c._skipped_this_session
+        return c._skipped_this_session
 
-    refused, skipped = asyncio.run(scenario())
-
-    assert refused == coordinator_module.KW_CYCLES_BEFORE_SKIPPING
-    assert skipped == {0x0810}
+    assert asyncio.run(scenario()) == {0x0810}
 
 
 # --- Conclusions that stick are drawn from more than one reading ------------------------------

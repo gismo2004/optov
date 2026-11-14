@@ -25,11 +25,12 @@ Two things the KW protocol cannot do, which you may notice if you have one of th
   outright over P300. On its own that cannot be told from a reading of -0.1, so from an address
   that has never given a real value it is not published: the entity is unavailable instead.
   Once an address has given a real value it is known to exist, for good, and every bit set
-  from it is the reading it looks like. An address that gives nothing usable for twenty
-  cycles, while the rest of the bus answers, stops being asked **for that session only** -- the
-  next restart tries it again, because a protocol that cannot say no never gives certainty
-  enough to disable an entity for good. The catalog's own installation rules stay the real
-  filter, and the first minutes after a start are slower than the rest.
+  from it is the reading it looks like. An address that stays silent for twenty cycles, while
+  the rest of the bus answers, stops being asked **for that session only** -- the next restart
+  tries it again, because a protocol that cannot say no never gives certainty enough to
+  disable an entity for good. One that keeps answering with every bit set is asked more rarely
+  and never given up on. The catalog's own installation rules stay the real filter, and the
+  first minutes after a start are slower than the rest.
 - **It has no remote procedure call.** Datapoints only reachable that way get no entity, since
   it could never show a reading: on a Vitotronic 050 HK1W that is 16 of them, on a Vitotronic
   200 KW1/KW2 none at all -- the ones affected there are commands that get no entity anyway. The
