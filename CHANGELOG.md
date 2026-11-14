@@ -17,6 +17,12 @@ commits.
   after five minutes no longer asked for until the next reload. An address that has given a
   real value is now known to exist, across restarts, and all bits set from it is a reading
   (#16).
+- A sensor the controller reported as not fitted was switched off for good after a single
+  reading. It now takes twenty readings in a row, so a plug pulled for a moment or a sensor
+  being replaced no longer costs the entity.
+- What equipment a controller has was asked once, at the first setup, and kept. Hardware fitted
+  later stayed hidden. It is now asked again once a day and shortly after every start, and the
+  entities appear by themselves when it changed.
 
 ## [0.10.2] - 2026-11-13
 

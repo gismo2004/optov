@@ -206,6 +206,15 @@ WRITES_PER_ADDRESS_NOTICE = 24
 # across all 69 sensor-status enumerations in the catalog. The distinction matters: an absent
 # sensor should disappear, a broken one should stay visible and unavailable so the fault shows.
 _SENSOR_NOT_PRESENT = 6
+# How many readings in a row have to say "not fitted" before the sensor's entity is switched
+# off. Switching it off is for good, and one reading is what a plug pulled for a moment, or a
+# sensor being replaced, looks like as well.
+ABSENT_READINGS_BEFORE_RETIRING = 20
+# How often the equipment registers are asked again while running, and how soon after a start.
+# What they said at the first setup is kept, and hardware fitted later -- a second heating
+# circuit, a solar module -- would otherwise stay hidden for as long as the installation lives.
+_EQUIPMENT_RECHECK = 24 * 3600.0
+_EQUIPMENT_FIRST_RECHECK = 600.0
 
 
 def tiers_enabled_by(options: dict[str, Any]) -> set[str]:
@@ -280,6 +289,12 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # kept so the entity set for other options can be derived without probing again.
         self._dev: dict[str, Any] | None = None
         self._probed_values: dict[int, int] = {}
+        self._probe_targets: list[dict[str, Any]] = []
+        self._equipment_checked = (
+            time.monotonic() - _EQUIPMENT_RECHECK + _EQUIPMENT_FIRST_RECHECK
+        )
+        # Sensors whose health code said "not fitted", and for how many readings running.
+        self._absent_seen: dict[str, int] = {}
         self.device_info: DeviceInfo | None = None
         self.schedules: dict[str, dict[str, list[dict[str, Any]]]] = {}
         # When each programme was last read from the controller (ISO time), shown on its
@@ -827,16 +842,20 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._retired_item_ids
 
     async def _probe_equipment(
-        self, targets: list[dict[str, Any]], probed_values: dict[int, int]
+        self,
+        targets: list[dict[str, Any]],
+        probed_values: dict[int, int],
+        fresh: bool = False,
     ) -> None:
         """Read the equipment registers, which say what hardware is actually fitted.
 
         One telegram per register. Reading several of them in one wider telegram was tried and
         withdrawn: the controller accepts such a read and answers with bytes that are not what
         those addresses return individually, so cutting the answer up by address silently
-        produces wrong values. The whole result is kept with the learned state, so this runs
-        once per installation and never again. A register this link has no telegram for is
-        left unread, as a refused one would be, without asking.
+        produces wrong values. The whole result is kept with the learned state, so a start
+        does not wait for it again; _async_recheck_equipment() asks again while running. A
+        register this link has no telegram for is left unread, as a refused one would be,
+        without asking.
         """
         reachable = optolink.reachable_function_codes(self.client.protocol)
         for dp in targets:
@@ -849,7 +868,11 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 address = parse_address(dp["address"])
                 block = dp.get("block_length") or dp.get("byte_length") or 1
                 raw = await self._read_reg(
-                    address, block, dp.get("fc_read"), prefix=dp.get("prefix_read")
+                    address,
+                    block,
+                    dp.get("fc_read"),
+                    fresh=fresh,
+                    prefix=dp.get("prefix_read"),
                 )
             except Exception as err:
                 _LOGGER.debug(
@@ -875,6 +898,47 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             except Exception as err:
                 _LOGGER.debug("Could not decode %s: %s", dp.get("name"), err)
+
+    async def _async_recheck_equipment(self) -> None:
+        """Ask the equipment registers again, and rebuild the entity set if they changed.
+
+        Once a day, and shortly after a start, since a start uses what was kept. Only registers
+        that have answered before are asked on a link that cannot refuse, where every other one
+        costs a timeout. A changed value has to be read twice before it counts: rebuilding the
+        entity set reloads the entry, and one odd reading is not worth that.
+        """
+        now = time.monotonic()
+        if now - self._equipment_checked < _EQUIPMENT_RECHECK:
+            return
+        self._equipment_checked = now
+        known = self._probed_values
+        targets = [
+            t
+            for t in self._probe_targets
+            if self.client.protocol != optolink.PROTO_KW or int(t["id"]) in known
+        ]
+        first: dict[int, int] = {}
+        await self._probe_equipment(targets, first, fresh=True)
+        differing = [
+            t
+            for t in targets
+            if first.get(t["id"], known.get(t["id"])) != known.get(t["id"])
+        ]
+        if not differing:
+            return
+        second: dict[int, int] = {}
+        await self._probe_equipment(differing, second, fresh=True)
+        changed = {k: v for k, v in second.items() if first.get(k) == v}
+        if not changed:
+            return
+        _LOGGER.info(
+            "The controller's equipment changed (%d registers); rebuilding the entity set",
+            len(changed),
+        )
+        await self.async_save_learned_now(
+            condition_cache={str(k): v for k, v in {**known, **changed}.items()}
+        )
+        self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
 
     async def _async_generate_self_configuring_profile(
         self, dev: dict[str, Any], sys_id: int, sw_version: str
@@ -930,6 +994,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._dev = dev
         self._probed_values = probed_values
+        self._probe_targets = targets
         profile = await self._async_build_profile(
             sys_id, sw_version, self.config_entry.options
         )
@@ -1469,6 +1534,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Retire entities the controller says it does not have.
         self._disable_unsupported_entities(sensor_status_raw)
+        await self._async_recheck_equipment()
 
         return data
 
@@ -1795,11 +1861,17 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _read_reg() records. Those entities can never produce a value, so leaving them enabled
         only yields a permanently unavailable entity.
         """
-        # Entities whose health nibble says the sensor is absent.
+        # Entities whose health nibble has said the sensor is absent for long enough.
+        for item_id, code in sensor_status_raw.items():
+            if code == _SENSOR_NOT_PRESENT:
+                self._absent_seen[item_id] = self._absent_seen.get(item_id, 0) + 1
+            else:
+                self._absent_seen.pop(item_id, None)
         absent_ids = {
             item_id
-            for item_id, code in sensor_status_raw.items()
-            if code == _SENSOR_NOT_PRESENT and item_id not in self._retired_item_ids
+            for item_id, seen in self._absent_seen.items()
+            if seen >= ABSENT_READINGS_BEFORE_RETIRING
+            and item_id not in self._retired_item_ids
         }
         pending = self._unsupported_addresses - self._retired_addresses
         if not pending and not absent_ids:

@@ -141,6 +141,10 @@ def _coordinator(module, controller):
         _unsupported_addresses=set(),
         _skipped_this_session=set(),
         _answered=set(),
+        _absent_seen={},
+        _probe_targets=[],
+        _probed_values={},
+        _equipment_checked=float("inf"),
         _answered_on="TEST v01",
         _learned={},
         _store=None,
@@ -596,3 +600,85 @@ def test_all_bits_set_from_an_address_that_never_answered_is_not_a_reading(
 
     assert refused == coordinator_module.KW_CYCLES_BEFORE_SKIPPING
     assert skipped == {0x0810}
+
+
+# --- Conclusions that stick are drawn from more than one reading ------------------------------
+
+
+def _retiring(module):
+    """A coordinator whose registry knows no entity, with what it retired kept for the test."""
+    c = _coordinator(module, FakeController())
+    c._retired_item_ids = set()
+    c._retired_addresses = set()
+    c._persist_retired = lambda: None
+    c.hass = None
+    module.er = types.SimpleNamespace(
+        async_get=lambda hass: types.SimpleNamespace(
+            async_get_entity_id=lambda *a: None
+        )
+    )
+
+    def reading(code):
+        module.OptolinkCoordinator._disable_unsupported_entities(c, {"flow": code})
+
+    return c, reading
+
+
+def test_a_sensor_is_switched_off_only_after_many_readings_say_not_fitted(
+    coordinator_module,
+):
+    c, reading = _retiring(coordinator_module)
+    enough = coordinator_module.ABSENT_READINGS_BEFORE_RETIRING
+
+    for _ in range(enough - 1):
+        reading(6)
+    assert not c._retired_item_ids
+    # One healthy reading in between: the plug was out for a moment, the count starts over.
+    reading(0)
+    for _ in range(enough - 1):
+        reading(6)
+    assert not c._retired_item_ids
+    reading(6)
+    assert c._retired_item_ids == {"flow"}
+
+
+def _rechecking(module, answers):
+    """A coordinator that knows register 1 as 0 and reads `answers` for it, in turn."""
+    c = _coordinator(module, FakeController())
+    c._probe_targets = [{"id": 1}]
+    c._probed_values = {1: 0}
+    c._equipment_checked = float("-inf")
+    replies = iter(answers)
+    done = {"saved": None, "reloads": 0}
+
+    async def probe(targets, values, fresh=False):
+        values.update({t["id"]: next(replies) for t in targets})
+
+    async def save(**values):
+        done["saved"] = values
+
+    c._probe_equipment = probe
+    c.async_save_learned_now = save
+    c.config_entry = types.SimpleNamespace(entry_id="e1")
+    c.hass = types.SimpleNamespace(
+        config_entries=types.SimpleNamespace(
+            async_schedule_reload=lambda entry_id: done.__setitem__(
+                "reloads", done["reloads"] + 1
+            )
+        )
+    )
+    asyncio.run(c._async_recheck_equipment())
+    return done
+
+
+def test_equipment_fitted_later_is_noticed_and_rebuilds_the_entity_set(
+    coordinator_module,
+):
+    done = _rechecking(coordinator_module, [1, 1])
+
+    assert done == {"saved": {"condition_cache": {"1": 1}}, "reloads": 1}
+
+
+def test_one_odd_reading_of_an_equipment_register_changes_nothing(coordinator_module):
+    assert _rechecking(coordinator_module, [1, 0]) == {"saved": None, "reloads": 0}
+    assert _rechecking(coordinator_module, [0]) == {"saved": None, "reloads": 0}

@@ -33,7 +33,8 @@ that takes, and values appear as they are read. Live gateway sensors (`bus_load`
 **Asking the controller.** The catalog describes a whole family, so it lists datapoints your
 unit does not have. The integration reads each one once and takes the controller's own answer:
 an address it reports as not implemented is dropped, and a sensor whose health code says it is
-not fitted is retired.
+not fitted, twenty readings in a row, is retired. Which equipment is fitted is asked again once
+a day, so a heating circuit or solar module added later brings its entities by itself.
 
 **Writing.** Setpoints, operating modes, party and eco mode, curve slope and level and the
 weekly programmes are writable. Several settings can share one byte; the integration reads the
