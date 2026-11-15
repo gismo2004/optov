@@ -186,12 +186,11 @@ _MIN_GAP = 1.0
 STORAGE_VERSION = 1
 LEARNED = ("retired_items", "retired_addresses", "condition_cache", "condition_targets")
 
-# How many cycles an address may give nothing usable -- silence, or the all-bits-set filler a
-# controller sends when it cannot refuse -- while other datapoints in the same cycle do answer,
-# before it stops being asked for. Generous, and never written down: a protocol that cannot say
-# no offers no certainty. So the address is only dropped for as long as this session lasts, and
-# the next start asks again -- unlike a refusal, which is definitive and is remembered. An
-# address that has given a real value is never counted here: see _known_to_answer().
+# How many cycles an address may stay silent, while other datapoints in the same cycle do
+# answer, before it stops being asked for. Generous, and never written down: a protocol that
+# cannot say no offers no certainty. So the address is only dropped for as long as this session
+# lasts, and the next start asks again -- unlike a refusal, which is definitive and is
+# remembered. An answer of all bits set is not counted: see _read_reg().
 KW_CYCLES_BEFORE_SKIPPING = 20
 _SAVE_DELAY = 10
 
@@ -210,11 +209,6 @@ _SENSOR_NOT_PRESENT = 6
 # off. Switching it off is for good, and one reading is what a plug pulled for a moment, or a
 # sensor being replaced, looks like as well.
 ABSENT_READINGS_BEFORE_RETIRING = 20
-# How often the equipment registers are asked again while running, and how soon after a start.
-# What they said at the first setup is kept, and hardware fitted later -- a second heating
-# circuit, a solar module -- would otherwise stay hidden for as long as the installation lives.
-_EQUIPMENT_RECHECK = 24 * 3600.0
-_EQUIPMENT_FIRST_RECHECK = 600.0
 
 
 def tiers_enabled_by(options: dict[str, Any]) -> set[str]:
@@ -290,9 +284,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._dev: dict[str, Any] | None = None
         self._probed_values: dict[int, int] = {}
         self._probe_targets: list[dict[str, Any]] = []
-        self._equipment_checked = (
-            time.monotonic() - _EQUIPMENT_RECHECK + _EQUIPMENT_FIRST_RECHECK
-        )
+        self._equipment_checked = False
         # Sensors whose health code said "not fitted", and for how many readings running.
         self._absent_seen: dict[str, int] = {}
         self.device_info: DeviceInfo | None = None
@@ -380,9 +372,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Addresses already acted on by _disable_unsupported_entities(), so the registry is
         # touched once per address rather than on every cycle.
         self._retired_addresses: set[int] = set()
-        # Addresses that gave nothing usable, and for how many cycles running, plus the ones
-        # that have given up their turn for this session. Only KW fills these: it has no error
-        # telegram, so silence and filler are the only "no" it can give. Neither is persisted.
+        # Addresses that stayed silent, and for how many cycles, plus the ones that have given
+        # up their turn for this session. Only KW fills these: it has no error telegram, so
+        # silence is one of the two ways it says no. Neither is persisted.
         self._nothing_usable: dict[int, int] = {}
         self._skipped_this_session: set[int] = set()
         # Addresses that have given a real value over KW. All bits set from one of these is a
@@ -390,10 +382,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # lacks. Remembered with the controller they were learned on, see _known_to_answer().
         self._answered: set[int] = set()
         self._answered_on = ""
-        # Addresses that only ever answered with all bits set, and the poll cycle from which
-        # each is asked again; see _nothing_usable_from().
-        self._ask_again_at: dict[int, int] = {}
-        self._cycle_no = 0
         self._retired_item_ids: set[str] = set()
         self._store: Store[dict[str, Any]] | None = None
         self._learned: dict[str, Any] = {}
@@ -906,15 +894,17 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_recheck_equipment(self) -> None:
         """Ask the equipment registers again, and rebuild the entity set if they changed.
 
-        Once a day, and shortly after a start, since a start uses what was kept. Only registers
-        that have answered before are asked on a link that cannot refuse, where every other one
-        costs a timeout. A changed value has to be read twice before it counts: rebuilding the
-        entity set reloads the entry, and one odd reading is not worth that.
+        Once after every start, at the end of its first cycle: the start itself uses what was
+        kept from the first setup, so it does not wait for the controller, and hardware fitted
+        since -- a second heating circuit, a solar module -- would otherwise stay hidden for
+        as long as the installation lives. Only registers that have answered before are asked
+        on a link that cannot refuse, where every other one costs a timeout. A changed value
+        has to be read twice before it counts: rebuilding the entity set reloads the entry,
+        and one odd reading is not worth that.
         """
-        now = time.monotonic()
-        if now - self._equipment_checked < _EQUIPMENT_RECHECK:
+        if self._equipment_checked:
             return
-        self._equipment_checked = now
+        self._equipment_checked = True
         known = self._probed_values
         targets = [
             t
@@ -929,6 +919,10 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if first.get(t["id"], known.get(t["id"])) != known.get(t["id"])
         ]
         if not differing:
+            _LOGGER.debug(
+                "Equipment asked again after the start: %d registers, nothing changed",
+                len(first),
+            )
             return
         second: dict[int, int] = {}
         await self._probe_equipment(differing, second, fresh=True)
@@ -1206,7 +1200,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (
             address in self._unsupported_addresses
             or address in self._skipped_this_session
-            or self._ask_again_at.get(address, 0) > self._cycle_no
         ):
             raise optolink.OptolinkDeviceError(
                 f"0x{address:04X} is not implemented on this controller",
@@ -1277,7 +1270,7 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except TimeoutError:
             # Silence is one of the two ways a link that cannot refuse says no; the other is
             # below. Which of them a controller uses is its own business -- both are handled.
-            self._nothing_usable_from(address, silent=True)
+            self._nothing_usable_from(address)
             raise
         self._cycle_answered += 1
         if self.client.protocol == optolink.PROTO_KW:
@@ -1288,7 +1281,9 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Not published as a value, because -0.1 degrees on every sensor a unit does
                 # not have is worse than the sensor being unavailable. From an address that
                 # has given a value before it is one: the outside temperature passing -0.1.
-                self._nothing_usable_from(address, silent=False)
+                # It is asked again every cycle all the same, like any other: the answer costs
+                # no more than a reading, and a sensor that has read -0.1 since the very first
+                # reading stays there for hours and is back the moment it reads anything else.
                 raise optolink.OptolinkProtocolError(
                     f"0x{address:04X} answered with all bits set, which is not a reading"
                 )
@@ -1306,7 +1301,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if address in self._answered:
             return
         self._answered.add(address)
-        self._ask_again_at.pop(address, None)
         if self._answered_on:
             self.save_learned(
                 answered={
@@ -1315,25 +1309,21 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
             )
 
-    def _nothing_usable_from(self, address: int, silent: bool) -> None:
-        """One more cycle in which this address gave nothing that could be a value.
+    def _nothing_usable_from(self, address: int) -> None:
+        """One more cycle in which this address stayed silent.
 
         Only counted when something else answered in the same cycle, so a controller nobody can
-        reach costs no entity at all. After enough of them a silent address is no longer asked
-        this session, since each try costs a timeout. One that answers with all bits set costs
-        a telegram like any other and is only asked more rarely: it may be a sensor that has
-        read -0.1 degrees since the very first reading, and it has to come back by itself.
+        reach costs no entity at all. After enough of them the address is no longer asked this
+        session, since each try costs a timeout.
         """
         if self.client.protocol != optolink.PROTO_KW or not self._cycle_answered:
             return
         seen = self._nothing_usable.get(address, 0) + 1
         self._nothing_usable[address] = seen
-        if seen >= KW_CYCLES_BEFORE_SKIPPING and not silent:
-            self._ask_again_at[address] = self._cycle_no + KW_CYCLES_BEFORE_SKIPPING
-        elif seen >= KW_CYCLES_BEFORE_SKIPPING:
+        if seen >= KW_CYCLES_BEFORE_SKIPPING:
             self._skipped_this_session.add(address)
             _LOGGER.debug(
-                "0x%04X gave nothing usable in %d cycles while the bus answered; "
+                "0x%04X stayed silent for %d cycles while the bus answered; "
                 "not asking again until the next start (%d addresses so far)",
                 address,
                 seen,
@@ -1344,7 +1334,6 @@ class OptolinkCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Fetch data dynamically for all points defined in the active profile."""
         # A new day starts the write count over even when nothing is written.
         self._roll_write_day()
-        self._cycle_no += 1
 
         start_time = time.monotonic()
         self._polling = True

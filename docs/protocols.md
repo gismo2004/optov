@@ -28,8 +28,8 @@ Two things the KW protocol cannot do, which you may notice if you have one of th
   from it is the reading it looks like. An address that stays silent for twenty cycles, while
   the rest of the bus answers, stops being asked **for that session only** -- the next restart
   tries it again, because a protocol that cannot say no never gives certainty enough to
-  disable an entity for good. One that keeps answering with every bit set is asked more rarely
-  and never given up on. The catalog's own installation rules stay the real filter, and the
+  disable an entity for good. One that keeps answering with every bit set is asked like any
+  other and never given up on. The catalog's own installation rules stay the real filter, and the
   first minutes after a start are slower than the rest.
 - **It has no remote procedure call.** Datapoints only reachable that way get no entity, since
   it could never show a reading: on a Vitotronic 050 HK1W that is 16 of them, on a Vitotronic

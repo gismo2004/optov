@@ -10,6 +10,13 @@ commits.
 
 ## [Unreleased]
 
+### Changed
+- Which equipment a controller has is asked again once after every start, no longer every day
+  as well.
+- On a KW controller an address that has only ever answered with all bits set is asked every
+  cycle like any other, so a sensor that starts at -0.1 degrees is back the moment it reads
+  anything else.
+
 ## [0.10.3] - 2026-11-15
 
 ### Fixed
