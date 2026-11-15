@@ -10,6 +10,8 @@ commits.
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-11-15
+
 ### Fixed
 - On a KW controller a reading froze when its value passed -0.1 degrees, the outside
   temperature in frost above all: -0.1 is sent as all bits set, which is also what such a
@@ -370,7 +372,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.10.3...HEAD
+[0.10.3]: https://github.com/gismo2004/optov/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/gismo2004/optov/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/gismo2004/optov/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/gismo2004/optov/compare/v0.9.6...v0.10.0
