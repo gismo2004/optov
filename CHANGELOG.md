@@ -10,6 +10,8 @@ commits.
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-11-15
+
 ### Changed
 - On a KW controller an answer of all bits set is always published as the value it is. It was
   withheld while an address had never given anything else, to keep datapoints a unit does not
@@ -381,7 +383,8 @@ Vitotronic 200 WO1A, over P300.
 - A controller whose hardware index the catalog never saw is still placed by its software
   index when every variant of its System ID shares one hardware index.
 
-[Unreleased]: https://github.com/gismo2004/optov/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/gismo2004/optov/compare/v0.10.4...HEAD
+[0.10.4]: https://github.com/gismo2004/optov/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/gismo2004/optov/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/gismo2004/optov/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/gismo2004/optov/compare/v0.10.0...v0.10.1
