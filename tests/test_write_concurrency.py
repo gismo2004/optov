@@ -141,12 +141,10 @@ def _coordinator(module, controller):
         _cycle_blocks={},
         _unsupported_addresses=set(),
         _skipped_this_session=set(),
-        _answered=set(),
         _absent_seen={},
         _probe_targets=[],
         _probed_values={},
         _equipment_checked=True,
-        _answered_on="TEST v01",
         _learned={},
         _store=None,
         _nothing_usable={},
@@ -550,72 +548,37 @@ def test_a_value_the_setting_cannot_take_is_refused_before_any_write(
     assert asyncio.run(scenario()) == (["ValueError", "ValueError", "KeyError"], True)
 
 
-# --- KW: all bits set is the filler of a missing address, or a reading of -0.1 degrees -------
+# --- KW: an answer is an answer, silence is the only "no" ------------------------------------
 
 
 def _kw(module, outside):
-    """A KW controller with an outside sensor at 0x0800 and nothing at 0x0810."""
+    """A KW controller with an outside sensor at 0x0800."""
     controller = FakeController()
     controller.protocol = "KW"
     controller.memory[0x0800] = outside
-    controller.memory[0x0810] = bytes([0xFF, 0xFF])
     c = _coordinator(module, controller)
     c._cycle_answered = 1  # something else answered in this cycle
-    saved = []
-    c.save_learned = lambda **values: saved.append(values)
-    return controller, c, saved
+    return controller, c
 
 
-def test_minus_a_tenth_from_a_sensor_that_has_answered_is_a_reading(coordinator_module):
+def test_minus_a_tenth_is_a_reading_however_long_it_lasts(coordinator_module):
     async def scenario():
-        controller, c, saved = _kw(coordinator_module, (2).to_bytes(2, "little"))
-        first = await c._read_reg(0x0800, 2)
-        # The temperature falls through -0.1 degrees and stays there for a long while.
-        controller.memory[0x0800] = bytes([0xFF, 0xFF])
-        readings = [await c._read_reg(0x0800, 2, fresh=True) for _ in range(40)]
-        return first, readings, c._skipped_this_session, saved
+        _, c = _kw(coordinator_module, bytes([0xFF, 0xFF]))
+        readings = [await c._read_reg(0x0800, 2, fresh=True) for _ in range(60)]
+        return readings, c._skipped_this_session
 
-    first, readings, skipped, saved = asyncio.run(scenario())
+    readings, skipped = asyncio.run(scenario())
 
-    assert first == (2).to_bytes(2, "little")
-    assert readings == [bytes([0xFF, 0xFF])] * 40
+    # All bits set is -0.1 degrees, from the first reading on and for as long as it is.
+    assert readings == [bytes([0xFF, 0xFF])] * 60
     assert not skipped
-    # Remembered with the controller, so a restart at -0.1 degrees knows the sensor as well.
-    assert saved == [{"answered": {"controller": "TEST v01", "addresses": [0x0800]}}]
-
-
-def test_all_bits_set_from_an_address_that_never_answered_is_not_a_reading(
-    coordinator_module,
-):
-    cycles = 3 * coordinator_module.KW_CYCLES_BEFORE_SKIPPING
-
-    async def scenario():
-        controller, c, _ = _kw(coordinator_module, (2).to_bytes(2, "little"))
-        refused = 0
-        for _ in range(cycles):
-            try:
-                await c._read_reg(0x0810, 2, fresh=True)
-            except coordinator_module.optolink.OptolinkProtocolError:
-                refused += 1
-        # A sensor that has read -0.1 degrees since the first reading there ever was, for
-        # however long: the moment it reads anything else it is a reading.
-        controller.memory[0x0810] = (0xFFFE).to_bytes(2, "little")
-        back = await c._read_reg(0x0810, 2, fresh=True)
-        return refused, back, c._skipped_this_session
-
-    refused, back, skipped = asyncio.run(scenario())
-
-    # Never published while it only says all bits set, and never given up on.
-    assert refused == cycles
-    assert back == (0xFFFE).to_bytes(2, "little")
-    assert skipped == set()
 
 
 def test_an_address_that_stays_silent_is_not_asked_again_this_session(
     coordinator_module,
 ):
     async def scenario():
-        controller, c, _ = _kw(coordinator_module, (2).to_bytes(2, "little"))
+        controller, c = _kw(coordinator_module, (2).to_bytes(2, "little"))
 
         async def silent(address, length, fc=None):
             raise TimeoutError

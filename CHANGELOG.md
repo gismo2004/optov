@@ -11,11 +11,13 @@ commits.
 ## [Unreleased]
 
 ### Changed
+- On a KW controller an answer of all bits set is always published as the value it is. It was
+  withheld while an address had never given anything else, to keep datapoints a unit does not
+  have from reading -0.1; that made a real sensor starting at -0.1 unavailable, and no other
+  implementation does it. An entity enabled for something the unit does not have can now show
+  -0.1 or 6553.5.
 - Which equipment a controller has is asked again once after every start, no longer every day
   as well.
-- On a KW controller an address that has only ever answered with all bits set is asked every
-  cycle like any other, so a sensor that starts at -0.1 degrees is back the moment it reads
-  anything else.
 
 ## [0.10.3] - 2026-11-15
 

@@ -148,15 +148,6 @@ def test_a_function_code_it_does_not_implement_is_refused_not_guessed():
     assert optolink.function_code(None) == optolink.FC_VIRTUAL_READ
 
 
-def test_all_bits_set_is_not_a_reading():
-    # What a controller answers for an address it does not implement when it cannot refuse.
-    assert optolink.is_filler(bytes([0xFF, 0xFF]))
-    assert optolink.is_filler(bytes([0xFF]))
-    # A real value that happens to contain 0xFF is left alone, and so is an empty answer.
-    assert not optolink.is_filler(bytes([0xFF, 0x16]))
-    assert not optolink.is_filler(b"")
-
-
 def test_a_third_protocol_is_named_rather_than_guessed_at():
     # GWG controllers address memory with a single byte; sending two would not be refused.
     assert 0x2053 in optolink.FOREIGN_PROTOCOL_IDS

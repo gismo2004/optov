@@ -210,11 +210,12 @@ re-tried. If you find one of those notes, take it seriously; if you disprove one
   switches to KW (`optolink._sync_p300` -> `_sync_kw`). The openv wiki documents which
   controllers are KW-only and the protocol itself. KW is a second transport, not a second
   catalog: its telegram is a bare `<FC> <addr_hi> <addr_lo> <len>` with no framing and no way to
-  refuse a read, so the display conditions are the only filter on what a unit has, and a silent
-  timeout or an all-`ff` answer means "unavailable" rather than a zero. Confirmed on real
-  hardware by a user on a Vitotronic 200 KW2 (0x2098, issue #1) on 2026-09-17; the development
-  WO1A answers KW too, but with `ff ff` filler for unknown addresses, which is where the filler
-  rule came from.
+  refuse a read, so the display conditions are the only filter on what a unit has. A silent
+  timeout means "unavailable" rather than a zero. An all-`ff` answer is a value and is
+  published as one: a controller sends it for a datapoint it does not use, and it is equally a
+  reading of -0.1 degrees, which is what froze the outside temperature in frost while it was
+  taken for "not there" (issue #16). Do not bring that rule back. Confirmed on real hardware
+  by users on a Vitotronic 200 KW2 (0x2098, issues #1 and #16).
 - **Bit-field numbering is MSB-first within each byte**, across the whole block, not a
   little-endian shift-and-mask.
 - **Signedness follows the declared parameter type width**, not the datapoint's byte count, and

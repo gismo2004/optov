@@ -91,18 +91,6 @@ KW_FUNCTION_CODES = {
 }
 
 
-def is_filler(raw: bytes) -> bool:
-    """Whether an answer is all bits set, which KW returns instead of refusing.
-
-    Measured on a controller that speaks both: over P300 it answers 0x01C1 with the outside
-    temperature and refuses 0x01ED outright, while over KW both come back as `ff ff`. A protocol
-    with no error telegram has to put something on the wire, and this is what it puts. On its
-    own it cannot be told apart from a genuine reading of -0.1 degrees; what tells them apart
-    is whether the address has ever given anything else, which the caller keeps track of.
-    """
-    return bool(raw) and all(byte == 0xFF for byte in raw)
-
-
 def reachable_function_codes(protocol: str) -> set[str]:
     """Catalog FCRead/FCWrite values this link has a telegram for.
 
